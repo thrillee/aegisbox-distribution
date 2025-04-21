@@ -1,4 +1,3 @@
-// internal/sms/processor.go
 package sms
 
 import (
