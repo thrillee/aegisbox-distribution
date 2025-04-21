@@ -22,5 +22,7 @@ sql:
         json_tags_case_style: "camel"
         # Override specific type mappings if needed
         overrides:
-          - db_type: "numeric"
-            go_type: "github.com/shopspring/decimal.Decimal" # If you prefer decimal type
+          - db_type: "numeric" # For PostgreSQL NUMERIC/DECIMAL types
+            go_type: "github.com/shopspring/decimal.Decimal"
+          - db_type: "pg_catalog.numeric" # Handle potential namespaced type
+            go_type: "github.com/shopspring/decimal.Decimal"
