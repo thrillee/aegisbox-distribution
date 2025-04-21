@@ -1,0 +1,26 @@
+version: "2"
+sql:
+  - engine: "postgresql"
+    # Path to DB schema (can be one file or a directory)
+    schema: "db/migration"
+    # Path to SQL queries
+    queries: "db/query"
+    gen:
+      go:
+        # Output directory for generated Go code
+        out: "internal/database"
+        # Package name for generated code
+        package: "database"
+        # Emit interfaces for easier mocking/testing
+        emit_interface: true
+        # Use pointers for nullable columns
+        emit_pointers_for_null_types: true
+        # Use pgx/v5 driver
+        sql_package: "pgx/v5"
+        # Add json tags for easy API marshaling
+        emit_json_tags: true
+        json_tags_case_style: "camel"
+        # Override specific type mappings if needed
+        overrides:
+          - db_type: "numeric"
+            go_type: "github.com/shopspring/decimal.Decimal" # If you prefer decimal type

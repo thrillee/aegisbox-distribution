@@ -1,0 +1,8 @@
+development:
+    driver: postgres
+    # Use environment variables for sensitive info
+    open: "user=${DB_USER} password=${DB_PASSWORD} dbname=${DB_NAME} host=${DB_HOST} port=${DB_PORT} sslmode=disable"
+
+production:
+    driver: postgres
+    open: "user=${DB_USER} password=${DB_PASSWORD} dbname=${DB_NAME} host=${DB_HOST} port=${DB_PORT} sslmode=require" # Adjust sslmode as needed
