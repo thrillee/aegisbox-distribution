@@ -45,4 +45,5 @@ const (
 const (
 	ErrorCodeMnoWindowFull = "MNO_WINDOW_FULL"
 	ErrorCodeMnoTimeout    = "MNO_TIMEOUT"
+	ErrorCodeSystemError   = "SYS_ERR"
 )

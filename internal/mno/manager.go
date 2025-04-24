@@ -5,7 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"math/rand" // For simple load balancing
+	"math/rand"
 	"strings"
 	"sync"
 	"time"
@@ -13,6 +13,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/thrillee/aegisbox/internal/database"
 	"github.com/thrillee/aegisbox/internal/logging"
+	"github.com/thrillee/aegisbox/pkg/codes"
 	"github.com/thrillee/aegisbox/pkg/segmenter"
 )
 
@@ -254,7 +255,6 @@ func (m *Manager) GetConnector(ctx context.Context, mnoID int32) (Connector, err
 		} // Should not happen if maps are synced
 		conn := connVal.(Connector)
 		status := conn.Status()
-		// Define "active" statuses
 		if status == codes.StatusBound || status == codes.StatusHttpOk {
 			activeConnectors = append(activeConnectors, conn)
 		}
@@ -312,8 +312,7 @@ func (m *Manager) Shutdown(ctx context.Context) error {
 }
 
 // --- Placeholder for HTTP Connector ---
-type HTTPMNOConnector struct { /* ... fields ... */
-}
+type HTTPMNOConnector struct{}
 
 func (c *HTTPMNOConnector) SubmitMessage(ctx context.Context, msg PreparedMessage) (SubmitResult, error) {
 	panic("not implemented")

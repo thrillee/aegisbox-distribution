@@ -25,24 +25,69 @@ var _ Connector = (*SMPPMNOConnector)(nil)
 
 // SMPPConnectorConfig holds specific configuration for an SMPP connection derived from mno_connections.
 type SMPPConnectorConfig struct {
-	ConnectionID      int32 // From mno_connections.id
-	MNOID             int32 // From mno_connections.mno_id
-	SystemID          string
-	Password          string
-	Host              string
-	Port              int
-	UseTLS            bool   // TODO: Implement TLS Dialer if needed
-	BindType          string // "trx", "tx", "rx"
-	EnquireLink       time.Duration
-	RequestTimeout    time.Duration // Timeout for waiting for responses (e.g., submit_sm_resp)
-	ConnectRetryDelay time.Duration
-	MaxWindowSize     uint8 // Max outstanding requests
-	DefaultDataCoding data.Encoding
-	SystemType        string // Optional SystemType for bind
-	SourceAddrTON     byte   // Default TON for source address if not specified
-	SourceAddrNPI     byte   // Default NPI for source address if not specified
-	DestAddrTON       byte   // Default TON for destination address
-	DestAddrNPI       byte   // Default NPI for destination address
+	ConnectionID      int32         `json:"connection_id"` // From mno_connections.id
+	MNOID             int32         `json:"mno_id"`        // From mno_connections.mno_id
+	SystemID          string        `json:"system_id"`
+	Password          string        `json:"-"` // Avoid logging password
+	Host              string        `json:"host"`
+	Port              int           `json:"port"`
+	UseTLS            bool          `json:"use_tls"`
+	BindType          string        `json:"bind_type"` // "trx", "tx", "rx"
+	SystemType        string        `json:"system_type"`
+	EnquireLink       time.Duration `json:"enquire_link"`        // Calculated from DB secs
+	RequestTimeout    time.Duration `json:"request_timeout"`     // Calculated from DB secs
+	ConnectRetryDelay time.Duration `json:"connect_retry_delay"` // Calculated from DB secs
+	MaxWindowSize     uint          `json:"max_window_size"`     // Max outstanding requests
+	DefaultDataCoding data.Encoding `json:"default_data_coding"` // Use gosmpp type
+	SourceAddrTON     byte          `json:"source_addr_ton"`     // Default TON/NPI values
+	SourceAddrNPI     byte          `json:"source_addr_npi"`
+	DestAddrTON       byte          `json:"dest_addr_ton"`
+	DestAddrNPI       byte          `json:"dest_addr_npi"`
+}
+
+// Helper function to create config from DB model
+// Assumes sqlc model `database.MnoConnection` has fields matching the ALTER TABLE additions
+func NewSMPPConfigFromDB(dbConn database.MnoConnection) (SMPPConnectorConfig, error) {
+	cfg := SMPPConnectorConfig{
+		ConnectionID:      dbConn.ID,
+		MNOID:             dbConn.MnoID,
+		SystemID:          *dbConn.SystemID,
+		Password:          *dbConn.Password,
+		Host:              *dbConn.Host,
+		Port:              int(*dbConn.Port),
+		UseTLS:            *dbConn.UseTls,
+		BindType:          *dbConn.BindType,
+		SystemType:        *dbConn.SystemType,
+		EnquireLink:       time.Duration(*dbConn.EnquireLinkIntervalSecs) * time.Second,
+		RequestTimeout:    time.Duration(*dbConn.RequestTimeoutSecs) * time.Second,
+		ConnectRetryDelay: time.Duration(*dbConn.ConnectRetryDelaySecs) * time.Second,
+		MaxWindowSize:     uint(*dbConn.MaxWindowSize),              // Handle NullInt32 - Provide default?
+		DefaultDataCoding: data.Encoding(*dbConn.DefaultDataCoding), // Handle NullInt32/byte mapping
+		SourceAddrTON:     byte(*dbConn.SourceAddrTon),              // Handle NullInt32/byte mapping
+		SourceAddrNPI:     byte(*dbConn.SourceAddrNpi),              // Handle NullInt32/byte mapping
+		DestAddrTON:       byte(*dbConn.DestAddrTon),                // Handle NullInt32/byte mapping
+		DestAddrNPI:       byte(*dbConn.DestAddrNpi),                // Handle NullInt32/byte mapping
+	}
+
+	// Add validation and default values if DB values are missing/invalid
+	if cfg.EnquireLink <= 0 {
+		cfg.EnquireLink = 30 * time.Second
+	}
+	if cfg.RequestTimeout <= 0 {
+		cfg.RequestTimeout = 10 * time.Second
+	}
+	if cfg.ConnectRetryDelay <= 0 {
+		cfg.ConnectRetryDelay = 5 * time.Second
+	}
+	if cfg.MaxWindowSize <= 0 {
+		cfg.MaxWindowSize = 10
+	}
+	if cfg.Host == "" || cfg.Port == 0 || cfg.SystemID == "" {
+		return cfg, errors.New("missing required SMPP config fields (Host, Port, SystemID)")
+	}
+	// Validate BindType? TON/NPI values?
+
+	return cfg, nil
 }
 
 // submitJob holds info needed to correlate SubmitSM with its response.
@@ -152,7 +197,7 @@ func (c *SMPPMNOConnector) ConnectAndBind(ctx context.Context) error {
 
 		// Use Windowed Tracking for async submit correlation
 		WindowedRequestTracking: &gosmpp.WindowedRequestTracking{
-			MaxWindowSize:         c.config.MaxWindowSize,
+			MaxWindowSize:         uint8(c.config.MaxWindowSize),
 			PduExpireTimeOut:      c.config.RequestTimeout,       // Timeout for expecting a response PDU
 			ExpireCheckTimer:      5 * time.Second,               // How often to check for expired PDUs
 			EnableAutoRespond:     false,                         // We handle responses manually where needed
@@ -332,7 +377,8 @@ func (c *SMPPMNOConnector) SubmitMessage(ctx context.Context, msg PreparedMessag
 		p, err := c.buildSubmitSM(segLogCtx, msg, content, totalSegments, segmentSeqn, requiresUCS2)
 		if err != nil {
 			slog.ErrorContext(segLogCtx, "Failed to build SubmitSM PDU", slog.Any("error", err), slog.Int("seqn", int(segmentSeqn)))
-			result.Segments[i] = SegmentSubmitInfo{Seqn: segmentSeqn, IsSuccess: false, Error: err, ErrorCode: codes.ErrorCodeSystemError}
+			errCode := codes.ErrorCodeSystemError
+			result.Segments[i] = SegmentSubmitInfo{Seqn: segmentSeqn, IsSuccess: false, Error: err, ErrorCode: &errCode}
 			submitErrorsExist = true
 			continue // Try next segment? Or stop? Let's stop if PDU build fails.
 			// result.Error = fmt.Errorf("failed to build PDU for segment %d: %w", segmentSeqn, err)
@@ -538,12 +584,12 @@ func (c *SMPPMNOConnector) handleExpectedPduResponse() func(response gosmpp.Resp
 
 		logCtx := context.Background()
 		logCtx = logging.ContextWithMNOConnID(logCtx, c.ConnectionID())
-		logCtx = logging.ContextWithPDUInfo(logCtx, reqPDU.CommandID().String(), reqPDU.GetSequenceNumber()) // Original Seq No
+		logCtx = logging.ContextWithPDUInfo(logCtx, reqPDU.GetHeader().CommandID.String(), reqPDU.GetSequenceNumber()) // Original Seq No
 
 		switch resp := respPDU.(type) {
 		case *pdu.SubmitSMResp:
 			slog.DebugContext(logCtx, "Received SubmitSMResp")
-			c.processSubmitSMResp(logCtx, reqPDU.GetSequenceNumber(), resp)
+			c.processSubmitSMResp(logCtx, uint32(reqPDU.GetSequenceNumber()), resp)
 
 		case *pdu.BindTransceiverResp, *pdu.BindTransmitterResp, *pdu.BindReceiverResp:
 			status := respPDU.CommandStatus()
@@ -566,7 +612,7 @@ func (c *SMPPMNOConnector) handleExpectedPduResponse() func(response gosmpp.Resp
 			// Session should be closing
 
 		default:
-			slog.WarnContext(logCtx, "Received unexpected response PDU type", slog.String("resp_type", respPDU.CommandID().String()))
+			slog.WarnContext(logCtx, "Received unexpected response PDU type", slog.String("resp_type", respPDU.GetHeader().CommandID.String()))
 		}
 	}
 }
@@ -576,7 +622,7 @@ func (c *SMPPMNOConnector) handleExpirePduRequest() func(pdu.PDU) bool {
 		// Handles requests we sent for which no response was received within timeout
 		logCtx := context.Background()
 		logCtx = logging.ContextWithMNOConnID(logCtx, c.ConnectionID())
-		logCtx = logging.ContextWithPDUInfo(logCtx, p.CommandID().String(), p.GetSequenceNumber())
+		logCtx = logging.ContextWithPDUInfo(logCtx, p.GetHeader().CommandID.String(), p.GetSequenceNumber())
 
 		slog.WarnContext(logCtx, "PDU request expired (no response)", slog.String("status", c.Status()))
 
@@ -584,7 +630,7 @@ func (c *SMPPMNOConnector) handleExpirePduRequest() func(pdu.PDU) bool {
 		case *pdu.SubmitSM:
 			// A submit timed out - MNO might have processed it or not. Ambiguous.
 			// Mark segment as failed? Or unknown? Treat as failure for now.
-			c.processSubmitSMTimeout(logCtx, p.GetSequenceNumber())
+			c.processSubmitSMTimeout(logCtx, uint32(p.GetSequenceNumber()))
 			return false // Don't close connection for submit timeout
 
 		case *pdu.EnquireLink:
@@ -605,13 +651,13 @@ func (c *SMPPMNOConnector) handleOnClosePduRequest() func(pdu.PDU) {
 		// Handles requests that were pending when the session closed.
 		logCtx := context.Background()
 		logCtx = logging.ContextWithMNOConnID(logCtx, c.ConnectionID())
-		logCtx = logging.ContextWithPDUInfo(logCtx, p.CommandID().String(), p.GetSequenceNumber())
+		logCtx = logging.ContextWithPDUInfo(logCtx, p.GetHeader().CommandID.String(), p.GetSequenceNumber())
 		slog.WarnContext(logCtx, "PDU request closed before response/expiry", slog.String("status", c.Status()))
 
 		switch p.(type) {
 		case *pdu.SubmitSM:
 			// SubmitSM closed - Treat as failure.
-			c.processSubmitSMTimeout(logCtx, p.GetSequenceNumber()) // Use same logic as timeout
+			c.processSubmitSMTimeout(logCtx, uint32(p.GetSequenceNumber())) // Use same logic as timeout
 
 		default:
 			// Log others but usually no action needed
@@ -642,10 +688,11 @@ func (c *SMPPMNOConnector) processSubmitSMResp(ctx context.Context, sequence uin
 		mnoMsgID := resp.MessageID
 		slog.InfoContext(logCtx, "SubmitSM successful according to Resp", slog.String("mno_msg_id", mnoMsgID))
 		// Update segment as successfully submitted (MNO accepted)
+		connID := c.ConnectionID()
 		err := c.dbQueries.UpdateSegmentSent(logCtx, database.UpdateSegmentSentParams{
 			ID:              job.dbSegmentID,
-			MnoMessageID:    sql.NullString{String: mnoMsgID, Valid: true},
-			MnoConnectionID: sql.NullInt32{Int32: c.ConnectionID(), Valid: true},
+			MnoMessageID:    &mnoMsgID,
+			MnoConnectionID: &connID,
 		})
 		if err != nil {
 			slog.ErrorContext(logCtx, "Failed to update DB after successful SubmitSMResp", slog.Any("error", err))
@@ -653,12 +700,13 @@ func (c *SMPPMNOConnector) processSubmitSMResp(ctx context.Context, sequence uin
 		}
 	} else {
 		// Submission rejected by MNO
-		errMsg := fmt.Sprintf("SubmitSM rejected by MNO: %s (0x%X)", status.Error(), status)
-		slog.WarnContext(logCtx, "SubmitSM rejected by MNO", slog.String("status", status.String()), slog.Uint32("status_code", uint32(status)))
+		errMsg := fmt.Sprintf("SubmitSM rejected by MNO: %s (0x%X)", status.Desc(), status)
+		slog.WarnContext(logCtx, "SubmitSM rejected by MNO", slog.String("status", status.String()), slog.Uint64("status_code", uint64(status)))
+		errCode := fmt.Sprintf("%03X", uint32(status))
 		err := c.dbQueries.UpdateSegmentSendFailed(logCtx, database.UpdateSegmentSendFailedParams{
 			ID:               job.dbSegmentID,
-			ErrorDescription: sql.NullString{String: errMsg, Valid: true},
-			ErrorCode:        sql.NullString{String: fmt.Sprintf("%03X", uint32(status)), Valid: true}, // Store SMPP status code as hex string
+			ErrorDescription: &errMsg,
+			ErrorCode:        &errCode,
 		})
 		if err != nil {
 			slog.ErrorContext(logCtx, "Failed to update DB after failed SubmitSMResp", slog.Any("error", err))
@@ -682,10 +730,11 @@ func (c *SMPPMNOConnector) processSubmitSMTimeout(ctx context.Context, sequence 
 	slog.WarnContext(logCtx, errMsg)
 
 	// Treat timeout as failure, but status is ambiguous. Mark with specific error.
+	errCode := codes.ErrorCodeMnoTimeout
 	err := c.dbQueries.UpdateSegmentSendFailed(logCtx, database.UpdateSegmentSendFailedParams{
 		ID:               job.dbSegmentID,
 		ErrorDescription: &errMsg,
-		ErrorCode:        codes.ErrorCodeMnoTimeout, // Define this code
+		ErrorCode:        &errCode, // Define this code
 	})
 	if err != nil {
 		slog.ErrorContext(logCtx, "Failed to update DB after SubmitSM timeout", slog.Any("error", err))
@@ -720,8 +769,8 @@ func (c *SMPPMNOConnector) processIncomingDeliverSM(ctx context.Context, p *pdu.
 		dlrInfo := DLRInfo{
 			MnoMessageID: receipt.MessageID,
 			Status:       receipt.Stat,
-			ErrorCode:    sql.NullString{String: receipt.Err, Valid: receipt.Err != ""}, // Map error code if present
-			Timestamp:    receipt.DoneDate,                                              // Use DoneDate from DLR
+			ErrorCode:    receipt.Err,      // Map error code if present
+			Timestamp:    receipt.DoneDate, // Use DoneDate from DLR
 			// SegmentSeqn: // Can we get this reliably from standard DLR? Usually no. Assume DLR is for specific MNO ID -> segment.
 			// NetworkCode: // Extract if needed and possible
 			RawDLRData: nil, // Add raw fields if needed
