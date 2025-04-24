@@ -361,10 +361,12 @@ func (c *SMPPMNOConnector) SubmitMessage(ctx context.Context, msg PreparedMessag
 			result.Segments[i] = SegmentSubmitInfo{Seqn: segmentSeqn, IsSuccess: false, Error: err}
 			// Map specific gosmpp errors to codes if possible
 			if errors.Is(err, gosmpp.ErrWindowsFull) {
-				result.Segments[i].ErrorCode = codes.ErrorCodeMnoWindowFull // Define this code
+				tmpErr := string(codes.ErrorCodeMnoWindowFull)
+				result.Segments[i].ErrorCode = &tmpErr // Define this code
 				// TODO: Implement retry/wait logic for window full?
 			} else {
-				result.Segments[i].ErrorCode = codes.ErrorCodeMnoSubmitFail
+				tmpErr := string(codes.MsgStatusSendFailed)
+				result.Segments[i].ErrorCode = &tmpErr
 			}
 			submitErrorsExist = true
 			// Update DB immediately for submit failure? Let OnSubmitError handle maybe?

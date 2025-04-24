@@ -82,19 +82,29 @@ type Mno struct {
 }
 
 type MnoConnection struct {
-	ID         int32              `json:"id"`
-	MnoID      int32              `json:"mnoId"`
-	Protocol   string             `json:"protocol"`
-	Status     string             `json:"status"`
-	SystemID   *string            `json:"systemId"`
-	Password   *string            `json:"password"`
-	Host       *string            `json:"host"`
-	Port       *int32             `json:"port"`
-	UseTls     *bool              `json:"useTls"`
-	BindType   *string            `json:"bindType"`
-	HttpConfig []byte             `json:"httpConfig"`
-	CreatedAt  pgtype.Timestamptz `json:"createdAt"`
-	UpdatedAt  pgtype.Timestamptz `json:"updatedAt"`
+	ID                      int32              `json:"id"`
+	MnoID                   int32              `json:"mnoId"`
+	Protocol                string             `json:"protocol"`
+	Status                  string             `json:"status"`
+	SystemID                *string            `json:"systemId"`
+	Password                *string            `json:"password"`
+	Host                    *string            `json:"host"`
+	Port                    *int32             `json:"port"`
+	UseTls                  *bool              `json:"useTls"`
+	BindType                *string            `json:"bindType"`
+	SystemType              *string            `json:"systemType"`
+	EnquireLinkIntervalSecs *int32             `json:"enquireLinkIntervalSecs"`
+	RequestTimeoutSecs      *int32             `json:"requestTimeoutSecs"`
+	ConnectRetryDelaySecs   *int32             `json:"connectRetryDelaySecs"`
+	MaxWindowSize           *int32             `json:"maxWindowSize"`
+	DefaultDataCoding       *int32             `json:"defaultDataCoding"`
+	SourceAddrTon           *int32             `json:"sourceAddrTon"`
+	SourceAddrNpi           *int32             `json:"sourceAddrNpi"`
+	DestAddrTon             *int32             `json:"destAddrTon"`
+	DestAddrNpi             *int32             `json:"destAddrNpi"`
+	HttpConfig              []byte             `json:"httpConfig"`
+	CreatedAt               pgtype.Timestamptz `json:"createdAt"`
+	UpdatedAt               pgtype.Timestamptz `json:"updatedAt"`
 }
 
 type PricingRule struct {

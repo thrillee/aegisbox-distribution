@@ -51,9 +51,12 @@ CREATE TABLE mnos (
 -- Your Connections to MNOs (SMPP or HTTP)
 CREATE TABLE mno_connections (
     id SERIAL PRIMARY KEY,
+
     mno_id INT NOT NULL REFERENCES mnos(id) ON DELETE RESTRICT,
+
     protocol VARCHAR(10) NOT NULL DEFAULT 'smpp', -- 'smpp' or 'http'
     status VARCHAR(50) NOT NULL DEFAULT 'active', -- active, inactive, disabled, connecting, bound
+
     -- SMPP Specific Fields
     system_id VARCHAR(16),
     password VARCHAR(255), -- Store plain password as needed by SMPP lib usually
@@ -61,14 +64,31 @@ CREATE TABLE mno_connections (
     port INT,
     use_tls BOOLEAN DEFAULT false,
     bind_type VARCHAR(10) DEFAULT 'trx',
+
+    -- Additional SMPP Config
+    system_type VARCHAR(13),
+    enquire_link_interval_secs INT DEFAULT 30,
+    request_timeout_secs INT DEFAULT 10,
+    connect_retry_delay_secs INT DEFAULT 5,
+    max_window_size INT DEFAULT 10,
+    default_data_coding INT DEFAULT 0, -- Default SMSC alphabet
+    source_addr_ton INT DEFAULT 1,     -- Default TON/NPI values
+    source_addr_npi INT DEFAULT 1,
+    dest_addr_ton INT DEFAULT 1,
+    dest_addr_npi INT DEFAULT 1,
+
     -- HTTP Specific Fields
     http_config JSONB, -- Store MNO API URL, auth method, credentials, rate limits etc.
+
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+
+-- Indexes for optimization
 CREATE INDEX idx_mno_connections_mno_id ON mno_connections(mno_id);
 CREATE INDEX idx_mno_connections_protocol ON mno_connections(protocol);
 CREATE INDEX idx_mno_connections_status ON mno_connections(status);
+
 
 -- Routing rules based on MSISDN prefix
 CREATE TABLE routing_rules (

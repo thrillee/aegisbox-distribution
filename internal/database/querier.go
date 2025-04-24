@@ -21,6 +21,8 @@ type Querier interface {
 	FindMessageByMnoMessageID(ctx context.Context, mnoMessageID *string) (FindMessageByMnoMessageIDRow, error)
 	// Finds segment details based on MNO Message ID for DLR processing
 	FindSegmentByMnoMessageID(ctx context.Context, mnoMessageID *string) (FindSegmentByMnoMessageIDRow, error)
+	// Selects all connections marked as 'active' in status
+	GetActiveMNOConnections(ctx context.Context) ([]MnoConnection, error)
 	GetApplicablePrice(ctx context.Context, arg GetApplicablePriceParams) (GetApplicablePriceRow, error)
 	GetApplicableRoutingRule(ctx context.Context, prefix string) (int32, error)
 	// Select fields needed by the Pricer
