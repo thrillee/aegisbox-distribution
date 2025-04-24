@@ -7,9 +7,9 @@ import (
 	"log/slog"
 	"strings"
 
+	"github.com/linxGnu/gosmpp/pdu"
 	"github.com/thrillee/aegisbox/internal/logging"
 	"github.com/thrillee/aegisbox/pkg/errormapper"
-	// smpp "your-module-name/pkg/smpp/pdu" // Placeholder for constants like MES_TYPE_DEL_RCPT
 )
 
 // ServerSessionManager defines the dependency needed to get a writer for an SP connection.

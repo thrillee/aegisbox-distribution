@@ -20,6 +20,8 @@ const (
 	CallBackKey  contextKey = "callback_url"
 	WorkerID     contextKey = "worker_id"
 	JobIDKey     contextKey = "job_id"
+	CommandIDKey contextKey = "cmd_id"
+	SeqNumberKey contextKey = "seq_num"
 	// Add other keys as needed
 )
 
@@ -99,4 +101,9 @@ func ContextWithWorkerID(ctx context.Context, workerID string) context.Context {
 
 func ContextWithJobID(ctx context.Context, jobID int64) context.Context {
 	return context.WithValue(ctx, JobIDKey, jobID)
+}
+
+func ContextWithPDUInfo(ctx context.Context, commandID string, seqNumber int32) context.Context {
+	context.WithValue(ctx, CommandIDKey, commandID)
+	return context.WithValue(ctx, SeqNumberKey, seqNumber)
 }
