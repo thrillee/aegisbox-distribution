@@ -234,6 +234,24 @@ CREATE INDEX idx_pricing_rules_mno_id ON pricing_rules(mno_id);
 CREATE UNIQUE INDEX idx_unique_default_price_per_currency ON pricing_rules (service_provider_id, currency_code) WHERE mno_id IS NULL;
 CREATE UNIQUE INDEX idx_unique_price_per_mno_currency ON pricing_rules (service_provider_id, mno_id, currency_code) WHERE mno_id IS NOT NULL;
 
+-- DLR Forwarding Queue Table
+CREATE TABLE dlr_forwarding_queue (
+    id BIGSERIAL PRIMARY KEY,
+    message_id BIGINT NOT NULL, -- No FK here to avoid locking messages table, rely on app logic
+    status VARCHAR(20) NOT NULL DEFAULT 'pending', -- pending, processing, failed, success
+    payload JSONB NOT NULL, -- Store sp.ForwardedDLRInfo + sp.SPDetails + SP ID etc.
+    attempts INT NOT NULL DEFAULT 0,
+    max_attempts INT NOT NULL DEFAULT 5, -- Example max attempts
+    last_attempt_at TIMESTAMPTZ,
+    error_message TEXT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    -- Fields for SKIP LOCKED pattern
+    locked_at TIMESTAMPTZ,
+    locked_by VARCHAR(100) -- Identifier of the worker instance that locked it
+);
+CREATE INDEX idx_dlr_forwarding_queue_status_created ON dlr_forwarding_queue(status, created_at);
+CREATE INDEX idx_dlr_forwarding_queue_locked ON dlr_forwarding_queue(locked_at); -- Index for finding stale locks
+
 -- +goose StatementEnd
 
 -- +goose Down
@@ -252,5 +270,6 @@ DROP TABLE IF EXISTS mno_connections;
 DROP TABLE IF EXISTS mnos;
 DROP TABLE IF EXISTS sp_credentials; -- Use the new name
 DROP TABLE IF EXISTS service_providers;
+DROP TABLE IF EXISTS dlr_forwarding_queue;
 
 -- +goose StatementEnd

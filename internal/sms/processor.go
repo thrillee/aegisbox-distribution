@@ -1,12 +1,11 @@
-// internal/sms/processor.go
 package sms
 
 import (
 	"context"
-	"database/sql" // Import sql package for Null types
+	"encoding/json"
 	"errors"
 	"fmt"
-	"log/slog" // Use slog
+	"log/slog"
 	"strings"
 	"time"
 
@@ -16,6 +15,7 @@ import (
 	"github.com/thrillee/aegisbox/internal/logging"
 	"github.com/thrillee/aegisbox/internal/mno"
 	"github.com/thrillee/aegisbox/internal/sp"
+	"github.com/thrillee/aegisbox/pkg/errormapper"
 )
 
 // ========================================================================================
@@ -104,6 +104,14 @@ func NewProcessor(deps ProcessorDependencies) *Processor {
 		// Or return an error
 		panic("Missing required dependencies for SMS Processor")
 	}
+
+	if deps.WalletService == nil {
+		panic("Missing WalletService dependency")
+	}
+	if deps.DLRForwarder == nil {
+		panic("Missing DLRForwarder dependency")
+	}
+
 	return &Processor{
 		dbPool:        deps.DBPool,
 		dbQueries:     deps.DBQueries,
@@ -219,18 +227,18 @@ func (p *Processor) validateAndRouteMessage(ctx context.Context, msg database.Ge
 		}
 	} else {
 		finalStatus = "routed" // Success!
-		if routingRes.MNOID.Valid {
-			ctx = logging.ContextWithMNOID(ctx, routingRes.MNOID.Int32)
+		if routingRes.MNOID == 0 {
+			ctx = logging.ContextWithMNOID(ctx, routingRes.MNOID)
 		}
 	}
 
 	// 4. Prepare and Update DB
 	var dbErrMsg string
-	var errorCode int32
+	var errorCode string
 	if logicalError != nil {
 		dbErrMsg = logicalError.Error()
 		// TODO: Map logicalError to a specific error code (e.g., "NO_ROUTE", "INVALID_SENDER")
-		// errorCode.String = mapErrorToCode(logicalError)
+		errorCode = errormapper.MapErrorCode(dbErrMsg, "smpp")
 	} else if internalError != nil {
 		// Log internal errors differently if needed, but might still use generic failure status
 		dbErrMsg = fmt.Sprintf("Internal processing error: %v", internalError) // Provide internal error info
@@ -244,7 +252,7 @@ func (p *Processor) validateAndRouteMessage(ctx context.Context, msg database.Ge
 		ApprovedSenderID: &validationRes.ApprovedSenderID,
 		TemplateID:       &validationRes.TemplateID,
 		ErrorDescription: &dbErrMsg,
-		ErrorCode:        errorCode,
+		ErrorCode:        &errorCode,
 		ID:               msg.ID,
 	}
 
@@ -264,7 +272,7 @@ func (p *Processor) validateAndRouteMessage(ctx context.Context, msg database.Ge
 		logLevel = slog.LevelWarn
 		// Generate and forward a failure DLR back to the SP
 		// Need SP details (protocol, callback/systemID etc) -> requires fetching from DB
-		go p.generateAndForwardFailureDLR(context.Background(), msg.ID, finalStatus, logicalError, errorCode) // Run async
+		go p.generateAndEnqueueFailureDLR(context.Background(), msg.ID, finalStatus, logicalError, &errorCode)
 	}
 
 	// Log overall outcome
@@ -312,6 +320,7 @@ func (p *Processor) ProcessPricingStep(ctx context.Context, batchSize int) (proc
 			// Logical errors like insufficient funds are logged within PriceAndDebit.
 			slog.ErrorContext(logCtx, "Error processing pricing/debiting step", slog.Any("error", pricingErr))
 			// Should we trigger a failure DLR here? Pricer already updated status to failed_pricing.
+			// go p.generateAndForwardFailureDLR(context.Background(), msg.ID, finalStatus, logicalError, errorCode) // Run async
 			continue // Continue with next message
 		}
 		if pricingRes != nil && pricingRes.Debited {
@@ -400,7 +409,7 @@ func (p *Processor) ProcessSendingStep(ctx context.Context, batchSize int) (proc
 			p.attemptReversal(logCtx, msg.ID, fmt.Sprintf("MNO submission failed: %v", failureReason))
 			_ = p.markAsFailed(logCtx, msg.ID, failureReason, errorCode)
 			// Generate failure DLR? Yes, as MNO rejected/failed submission
-			go p.generateAndForwardFailureDLR(context.Background(), msg.ID, "failed", failureReason, sql.NullString{String: errorCode, Valid: true})
+			go p.generateAndEnqueueFailureDLR(context.Background(), msg.ID, "failed", failureReason, &errorCode)
 			continue // Next message
 		}
 
@@ -524,7 +533,7 @@ func (p *Processor) UpdateSegmentDLRStatus(ctx context.Context, connectorID int3
 
 	// 4. Forward DLR back to the originating SP (Run asynchronously)
 	// Pass a clean background context enriched with MessageID for tracing forwarding task
-	go p.generateAndForwardSuccessDLR(logging.ContextWithMessageID(context.Background(), segmentInfo.MessageID), segmentInfo.MessageID, dlrInfo)
+	go p.generateAndEnqueueSuccessDLR(logging.ContextWithMessageID(context.Background(), segmentInfo.MessageID), segmentInfo.MessageID, dlrInfo)
 
 	return nil // DLR processing for this segment successful from MNO perspective
 }
@@ -620,14 +629,11 @@ func (p *Processor) aggregateMessageStatus(ctx context.Context, messageID int64)
 	}
 }
 
-// generateAndForwardSuccessDLR constructs and forwards a DLR for a terminal success/failure state received from MNO.
-func (p *Processor) generateAndForwardSuccessDLR(ctx context.Context, messageID int64, dlrInfo mno.DLRInfo) {
+// generateAndEnqueueSuccessDLR: Enqueue to DB
+func (p *Processor) generateAndEnqueueSuccessDLR(ctx context.Context, messageID int64, dlrInfo mno.DLRInfo) {
 	logCtx := logging.ContextWithMessageID(ctx, messageID)
-	slog.DebugContext(logCtx, "Attempting to generate and forward success/failure DLR", slog.String("dlr_status", dlrInfo.Status))
+	slog.DebugContext(logCtx, "Attempting to enqueue success/failure DLR", slog.String("dlr_status", dlrInfo.Status))
 
-	// 1. Get SP Info needed for forwarding (including client ref, original addresses, protocol details)
-	// Need query: SELECT m.id, m.client_ref, m.original_source_addr, m.original_destination_addr, m.submitted_at, m.completed_at, m.total_segments,
-	// spc.protocol, spc.system_id, spc.http_config FROM messages m JOIN sp_credentials spc ON m.sp_credential_id = spc.id WHERE m.id = $1
 	spMsgInfo, err := p.dbQueries.GetSPMessageInfoForDLR(logCtx, messageID)
 	if err != nil {
 		slog.ErrorContext(logCtx, "Cannot forward DLR: Failed to get SP/Message info", slog.Any("error", err))
@@ -638,9 +644,9 @@ func (p *Processor) generateAndForwardSuccessDLR(ctx context.Context, messageID 
 	spDetails := sp.SPDetails{
 		ServiceProviderID: spMsgInfo.ServiceProviderID, // Need SP ID from query
 		Protocol:          spMsgInfo.Protocol,
-		SMPPSystemID:      spMsgInfo.SystemID, // This is sql.NullString from DB
-		HTTPCallbackURL:   sql.NullString{},   // TODO: Extract from spMsgInfo.HttpConfig JSONB
-		HTTPAuthConfig:    sql.NullString{},   // TODO: Extract from spMsgInfo.HttpConfig JSONB
+		SMPPSystemID:      *spMsgInfo.SystemID, // This is sql.NullString from DB
+		HTTPCallbackURL:   *sp.GetHttpCallBackURL(spMsgInfo.HttpConfig),
+		HTTPAuthConfig:    *sp.GetHttpCallBackKey(spMsgInfo.HttpConfig),
 	}
 
 	// 3. Construct Forwarded DLR Info
@@ -652,47 +658,58 @@ func (p *Processor) generateAndForwardSuccessDLR(ctx context.Context, messageID 
 		SubmitDate:        spMsgInfo.SubmittedAt.Time,        // Use submitted_at
 		DoneDate:          dlrInfo.Timestamp,                 // Use timestamp from MNO DLR
 		Status:            dlrInfo.Status,                    // Pass through MNO status
-		ErrorCode:         dlrInfo.ErrorCode,                 // Pass through MNO error code
+		ErrorCode:         &dlrInfo.ErrorCode,                // Pass through MNO error code
 		// NetworkCode:    dlrInfo.NetworkCode,          // Pass through if available
 		TotalSegments: spMsgInfo.TotalSegments,
 	}
 
-	// 4. Forward using the DLRForwarder interface
-	err = p.dlrForwarder.ForwardDLR(logCtx, spDetails, forwardedDLR)
+	// Create combined payload for DB queue
+	payloadData := map[string]interface{}{
+		"sp_details": spDetails,
+		"dlr_info":   forwardedDLR,
+	}
+	payloadBytes, err := json.Marshal(payloadData)
 	if err != nil {
-		slog.ErrorContext(logCtx, "Failed to forward DLR to SP",
-			slog.String("protocol", spDetails.Protocol),
-			slog.String("identifier", spDetails.SMPPSystemID.String), // Log identifier used
-			slog.Any("error", err),
-		)
+		slog.ErrorContext(logCtx, "CRITICAL: Failed to marshal payload for DLR forwarding queue", slog.Any("error", err))
+		return // Cannot enqueue
+	}
+
+	// Enqueue to DB
+	// Use default max attempts (e.g., 5) or make configurable
+	err = p.dbQueries.EnqueueDLRForForwarding(logCtx, database.EnqueueDLRForForwardingParams{
+		MessageID:   messageID,
+		Payload:     payloadBytes,
+		MaxAttempts: 5, // Example Max Attempts
+	})
+	if err != nil {
+		slog.ErrorContext(logCtx, "Failed to enqueue DLR forwarding job to DB", slog.Any("error", err))
+		// Handle DB enqueue failure (retry? alert?)
 	} else {
-		slog.InfoContext(logCtx, "Successfully forwarded DLR to SP",
-			slog.String("protocol", spDetails.Protocol),
-			slog.String("identifier", spDetails.SMPPSystemID.String),
-			slog.String("dlr_status", forwardedDLR.Status),
-		)
+		slog.InfoContext(logCtx, "Successfully enqueued DLR forwarding job to DB")
 	}
 }
 
-// generateAndForwardFailureDLR constructs and forwards a DLR when processing fails *before* MNO involvement.
-func (p *Processor) generateAndForwardFailureDLR(ctx context.Context, messageID int64, failureStatus string, failureReason error, errorCode sql.NullString) {
+// generateAndEnqueueFailureDLR: Enqueue to DB
+func (p *Processor) generateAndEnqueueFailureDLR(ctx context.Context, messageID int64, failureStatus string, failureReason error, errorCode *string) {
 	logCtx := logging.ContextWithMessageID(ctx, messageID)
-	slog.DebugContext(logCtx, "Attempting to generate and forward internal failure DLR", slog.String("failure_status", failureStatus))
+	slog.DebugContext(logCtx, "Attempting to enqueue internal failure DLR", slog.String("failure_status", failureStatus))
 
-	// 1. Get SP Info (same query as above)
 	spMsgInfo, err := p.dbQueries.GetSPMessageInfoForDLR(logCtx, messageID)
 	if err != nil {
-		slog.ErrorContext(logCtx, "Cannot forward failure DLR: Failed to get SP/Message info", slog.Any("error", err))
+		slog.ErrorContext(logCtx, "Cannot forward DLR: Failed to get SP/Message info", slog.Any("error", err))
+		return
+	}
+	if err != nil { /* ... handle error ... */
 		return
 	}
 
-	// 2. Prepare SP Details (same as above)
+	// 2. Prepare SP Details
 	spDetails := sp.SPDetails{
-		ServiceProviderID: spMsgInfo.ServiceProviderID, // Need SP ID
+		ServiceProviderID: spMsgInfo.ServiceProviderID, // Need SP ID from query
 		Protocol:          spMsgInfo.Protocol,
-		SMPPSystemID:      spMsgInfo.SystemID,
-		HTTPCallbackURL:   sql.NullString{}, // TODO: Extract from spMsgInfo.HttpConfig
-		HTTPAuthConfig:    sql.NullString{}, // TODO: Extract from spMsgInfo.HttpConfig
+		SMPPSystemID:      *spMsgInfo.SystemID, // This is sql.NullString from DB
+		HTTPCallbackURL:   *sp.GetHttpCallBackURL(spMsgInfo.HttpConfig),
+		HTTPAuthConfig:    *sp.GetHttpCallBackKey(spMsgInfo.HttpConfig),
 	}
 
 	// Map internal failure status to DLR status code
@@ -715,35 +732,24 @@ func (p *Processor) generateAndForwardFailureDLR(ctx context.Context, messageID 
 		// Network code likely N/A for internal failures
 	}
 
-	// 4. Forward using the DLRForwarder interface
-	err = p.dlrForwarder.ForwardDLR(logCtx, spDetails, forwardedDLR)
+	// Create combined payload
+	payloadData := map[string]interface{}{
+		"sp_details": spDetails,
+		"dlr_info":   forwardedDLR,
+	}
+	payloadBytes, err := json.Marshal(payloadData)
 	if err != nil {
-		slog.ErrorContext(logCtx, "Failed to forward internal failure DLR to SP",
-			slog.String("protocol", spDetails.Protocol),
-			slog.String("identifier", spDetails.SMPPSystemID.String),
-			slog.Any("error", err),
-		)
+		return
+	}
+
+	// Enqueue to DB
+	err = p.dbQueries.EnqueueDLRForForwarding(logCtx, database.EnqueueDLRForForwardingParams{
+		MessageID:   messageID,
+		Payload:     payloadBytes,
+		MaxAttempts: 3, // Maybe fewer retries for internal failures?
+	})
+	if err != nil {
 	} else {
-		slog.InfoContext(logCtx, "Successfully forwarded internal failure DLR to SP",
-			slog.String("protocol", spDetails.Protocol),
-			slog.String("identifier", spDetails.SMPPSystemID.String),
-			slog.String("dlr_status", forwardedDLR.Status),
-		)
+		slog.InfoContext(logCtx, "Successfully enqueued internal failure DLR job to DB")
 	}
 }
-
-// ========================================================================================
-// Placeholders / TODOs
-// ========================================================================================
-// Need to define/implement:
-// - SMPPServer interface used in UpdateSegmentDLRStatus/forwardDLR (specifically GetBoundClientWriter)
-// - pdu.Writer interface (likely from your chosen SMPP library)
-// - smppclient.Manager and smppclient.MNOClient interfaces/structs used in NewProcessor and Sender
-// - WalletService interface and implementation (used for reversals)
-// - DLRForwarder interface and implementations (SMPSPForwarder, HTTPSPForwarder)
-// - Actual implementations for Router, Validator, Pricer, Sender interfaces
-// - Segmentation logic (e.g., pkg/segmenter)
-// - UDH handling (e.g., pkg/smpp/pdu/udh)
-// - Required database queries mentioned in comments (GetSPMessageInfoForDLR, GetMessageTotalSegments, GetMessageFinalStatus, UpdateMessageSendAttempted etc.)
-// - JSONB extraction logic for HTTP config in SPDetails construction.
-// - Error code mapping logic.

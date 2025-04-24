@@ -55,6 +55,27 @@ func (q *Queries) CreateWalletTransaction(ctx context.Context, arg CreateWalletT
 	return i, err
 }
 
+const findDebitTransactionForMessage = `-- name: FindDebitTransactionForMessage :one
+SELECT id, wallet_id, amount
+FROM wallet_transactions
+WHERE message_id = $1
+  AND direction = 'debit'
+LIMIT 1
+`
+
+type FindDebitTransactionForMessageRow struct {
+	ID       int64           `json:"id"`
+	WalletID int32           `json:"walletId"`
+	Amount   decimal.Decimal `json:"amount"`
+}
+
+func (q *Queries) FindDebitTransactionForMessage(ctx context.Context, messageID *int64) (FindDebitTransactionForMessageRow, error) {
+	row := q.db.QueryRow(ctx, findDebitTransactionForMessage, messageID)
+	var i FindDebitTransactionForMessageRow
+	err := row.Scan(&i.ID, &i.WalletID, &i.Amount)
+	return i, err
+}
+
 const getWalletForUpdate = `-- name: GetWalletForUpdate :one
 SELECT id, balance
 FROM wallets
@@ -76,6 +97,29 @@ func (q *Queries) GetWalletForUpdate(ctx context.Context, arg GetWalletForUpdate
 	row := q.db.QueryRow(ctx, getWalletForUpdate, arg.ServiceProviderID, arg.CurrencyCode)
 	var i GetWalletForUpdateRow
 	err := row.Scan(&i.ID, &i.Balance)
+	return i, err
+}
+
+const getWalletForUpdateByID = `-- name: GetWalletForUpdateByID :one
+SELECT id, service_provider_id, currency_code, balance, low_balance_threshold, low_balance_notified_at, created_at, updated_at
+FROM wallets
+WHERE id = $1
+FOR UPDATE
+`
+
+func (q *Queries) GetWalletForUpdateByID(ctx context.Context, id int32) (Wallet, error) {
+	row := q.db.QueryRow(ctx, getWalletForUpdateByID, id)
+	var i Wallet
+	err := row.Scan(
+		&i.ID,
+		&i.ServiceProviderID,
+		&i.CurrencyCode,
+		&i.Balance,
+		&i.LowBalanceThreshold,
+		&i.LowBalanceNotifiedAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
 	return i, err
 }
 

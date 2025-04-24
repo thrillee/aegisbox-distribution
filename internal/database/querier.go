@@ -15,6 +15,9 @@ type Querier interface {
 	CreateServiceProvider(ctx context.Context, arg CreateServiceProviderParams) (ServiceProvider, error)
 	CreateWallet(ctx context.Context, arg CreateWalletParams) (Wallet, error)
 	CreateWalletTransaction(ctx context.Context, arg CreateWalletTransactionParams) (WalletTransaction, error)
+	// Inserts a new DLR forwarding job into the queue.
+	EnqueueDLRForForwarding(ctx context.Context, arg EnqueueDLRForForwardingParams) error
+	FindDebitTransactionForMessage(ctx context.Context, messageID *int64) (FindDebitTransactionForMessageRow, error)
 	FindMessageByMnoMessageID(ctx context.Context, mnoMessageID *string) (FindMessageByMnoMessageIDRow, error)
 	// Finds segment details based on MNO Message ID for DLR processing
 	FindSegmentByMnoMessageID(ctx context.Context, mnoMessageID *string) (FindSegmentByMnoMessageIDRow, error)
@@ -27,6 +30,8 @@ type Querier interface {
 	GetMessageTotalSegments(ctx context.Context, id int64) (int32, error)
 	GetMessagesByStatus(ctx context.Context, arg GetMessagesByStatusParams) ([]GetMessagesByStatusRow, error)
 	GetMessagesToPrice(ctx context.Context, limit int32) ([]GetMessagesToPriceRow, error)
+	// Selects pending DLR jobs and locks them for processing.
+	GetPendingDLRsToForward(ctx context.Context, arg GetPendingDLRsToForwardParams) ([]GetPendingDLRsToForwardRow, error)
 	GetSPCredentialBySystemID(ctx context.Context, systemID *string) (GetSPCredentialBySystemIDRow, error)
 	// Optional: Prevent redundant updates
 	// Select fields needed for DLR forwarding
@@ -36,12 +41,19 @@ type Querier interface {
 	GetServiceProviderByID(ctx context.Context, id int32) (ServiceProvider, error)
 	GetTemplateContent(ctx context.Context, arg GetTemplateContentParams) (string, error)
 	GetWalletForUpdate(ctx context.Context, arg GetWalletForUpdateParams) (GetWalletForUpdateRow, error)
+	GetWalletForUpdateByID(ctx context.Context, id int32) (Wallet, error)
 	GetWalletsBelowThreshold(ctx context.Context) ([]GetWalletsBelowThresholdRow, error)
 	InsertMessageIn(ctx context.Context, arg InsertMessageInParams) (int64, error)
+	// Marks a job as failed for this attempt, increments attempts, and potentially sets to permanent failure.
+	MarkDLRForwardingAttemptFailed(ctx context.Context, arg MarkDLRForwardingAttemptFailedParams) error
+	// Marks a job as successfully completed.
+	MarkDLRForwardingSuccess(ctx context.Context, id int64) error
 	// Use this if the Sender.Send fails catastrophically *before* MNO gets involved,
 	// or potentially as the final aggregated status if needed.
 	MarkMessageSendFailed(ctx context.Context, arg MarkMessageSendFailedParams) error
 	MarkMessageSent(ctx context.Context, id int64) error
+	// Optional: Periodically run to unlock jobs held by dead workers.
+	UnlockStaleDLRs(ctx context.Context) error
 	// Check threshold and notification time
 	UpdateLowBalanceNotifiedAt(ctx context.Context, id int32) error
 	UpdateMessageDLRStatus(ctx context.Context, arg UpdateMessageDLRStatusParams) error

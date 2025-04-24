@@ -19,6 +19,20 @@ type DeliveryReportsRaw struct {
 	ProcessingStatus string             `json:"processingStatus"`
 }
 
+type DlrForwardingQueue struct {
+	ID            int64              `json:"id"`
+	MessageID     int64              `json:"messageId"`
+	Status        string             `json:"status"`
+	Payload       []byte             `json:"payload"`
+	Attempts      int32              `json:"attempts"`
+	MaxAttempts   int32              `json:"maxAttempts"`
+	LastAttemptAt pgtype.Timestamptz `json:"lastAttemptAt"`
+	ErrorMessage  *string            `json:"errorMessage"`
+	CreatedAt     pgtype.Timestamptz `json:"createdAt"`
+	LockedAt      pgtype.Timestamptz `json:"lockedAt"`
+	LockedBy      *string            `json:"lockedBy"`
+}
+
 type Message struct {
 	ID                      int64              `json:"id"`
 	ServiceProviderID       int32              `json:"serviceProviderId"`

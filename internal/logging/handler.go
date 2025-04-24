@@ -14,6 +14,12 @@ const (
 	MNOIDKey     contextKey = "mno_id"
 	MNOConnIDKey contextKey = "mno_conn_id"
 	MNOMsgIDKey  contextKey = "mno_msg_id"
+	SegMsgIDKey  contextKey = "seg_msg_id"
+	MSISDNKey    contextKey = "msisdn"
+	WalletIDKey  contextKey = "wallet_id"
+	CallBackKey  contextKey = "callback_url"
+	WorkerID     contextKey = "worker_id"
+	JobIDKey     contextKey = "job_id"
 	// Add other keys as needed
 )
 
@@ -69,4 +75,28 @@ func ContextWithMNOConnID(ctx context.Context, connID int32) context.Context {
 
 func ContextWithMNOMsgID(ctx context.Context, msgID string) context.Context {
 	return context.WithValue(ctx, MNOMsgIDKey, msgID)
+}
+
+func ContextWithSegmentID(ctx context.Context, segmentID int64) context.Context {
+	return context.WithValue(ctx, SegMsgIDKey, segmentID)
+}
+
+func ContextWithMSISDN(ctx context.Context, msisdn string) context.Context {
+	return context.WithValue(ctx, MSISDNKey, msisdn)
+}
+
+func ContextWithWalletID(ctx context.Context, walletID int32) context.Context {
+	return context.WithValue(ctx, WalletIDKey, walletID)
+}
+
+func ContextWithCallbackURL(ctx context.Context, callbackURL string) context.Context {
+	return context.WithValue(ctx, CallBackKey, callbackURL)
+}
+
+func ContextWithWorkerID(ctx context.Context, workerID string) context.Context {
+	return context.WithValue(ctx, CallBackKey, workerID)
+}
+
+func ContextWithJobID(ctx context.Context, jobID int64) context.Context {
+	return context.WithValue(ctx, JobIDKey, jobID)
 }

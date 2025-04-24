@@ -50,16 +50,16 @@ type SPDetails struct {
 // ForwardedDLRInfo contains the data needed to construct a DLR to be sent *to* the SP.
 type ForwardedDLRInfo struct {
 	InternalMessageID int64     // Our messages.id
-	ClientMessageRef  string    // The SP's original reference ID (messages.client_ref)
+	ClientMessageRef  *string   // The SP's original reference ID (messages.client_ref)
 	SourceAddr        string    // Original Destination MSISDN (of the MT message)
 	DestAddr          string    // Original Sender ID (used by the SP)
 	SubmitDate        time.Time // When the message was submitted by SP (messages.submitted_at)
-	DoneDate          time.Time // When the message reached terminal state (messages.completed_at)
+	DoneDate          time.Time // When the message reached terminal state (messages.completed_at or DLR time)
 	Status            string    // Final status mapped for SP (e.g., "DELIVRD", "UNDELIV", "REJECTD")
-	ErrorCode         string    // Error code (mapped from our internal codes or MNO codes)
-	NetworkCode       string    // Optional MCC/MNC
+	ErrorCode         *string   // Error code (mapped from our internal codes or MNO codes)
+	NetworkCode       *string   // Optional MCC/MNC
 	TotalSegments     int32     // Total segments for the message
-	// Potentially add segment sequence if forwarding per-segment DLRs? Usually aggregate.
+	// Note: Formatting the "text:" part of SMPP Appendix B happens within the SMPP forwarder.
 }
 
 // DLRForwarder defines the interface for sending a DLR back to an SP.

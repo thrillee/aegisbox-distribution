@@ -29,3 +29,16 @@ WHERE w.balance < w.low_balance_threshold
 UPDATE wallets
 SET low_balance_notified_at = NOW()
 WHERE id = $1;
+
+-- name: FindDebitTransactionForMessage :one
+SELECT id, wallet_id, amount
+FROM wallet_transactions
+WHERE message_id = $1
+  AND direction = 'debit'
+LIMIT 1;
+
+-- name: GetWalletForUpdateByID :one
+SELECT *
+FROM wallets
+WHERE id = $1
+FOR UPDATE;

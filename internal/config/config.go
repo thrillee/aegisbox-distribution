@@ -10,11 +10,13 @@ import (
 
 // Config holds the overall application configuration.
 type Config struct {
-	DatabaseURL     string          `envconfig:"DATABASE_URL" required:"true"`
-	LogLevel        string          `envconfig:"LOG_LEVEL" default:"info"`
-	MNOClientConfig MNOClientConfig // Assuming MNOClientConfig defined in smppclient pkg or here
-	WorkerConfig    workers.Config  // Assuming workers.Config defined in workers pkg or here
-	ServerConfig    ServerConfig
+	DatabaseURL         string          `envconfig:"DATABASE_URL" required:"true"`
+	LogLevel            string          `envconfig:"LOG_LEVEL" default:"info"`
+	MNOClientConfig     MNOClientConfig // Assuming MNOClientConfig defined in smppclient pkg or here
+	WorkerConfig        workers.Config  // Assuming workers.Config defined in workers pkg or here
+	ServerConfig        ServerConfig
+	DLRForwardInterval  time.Duration `envconfig:"WORKER_DLR_INTERVAL" default:"2s"`
+	DLRForwardBatchSize int           `envconfig:"WORKER_DLR_BATCH_SIZE" default:"100"`
 }
 
 // ServerConfig holds SMPP Server specific configuration.

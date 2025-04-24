@@ -1,9 +1,7 @@
-// internal/sms/routing.go
 package sms
 
 import (
 	"context"
-	"database/sql" // Import sql package
 	"errors"
 	"fmt"
 	"log/slog" // Use slog
@@ -59,7 +57,7 @@ func (r *DefaultRouter) Route(ctx context.Context, msisdn string) (*mno.RoutingR
 
 	// Route found
 	result.ShouldUse = true
-	result.MNOID = sql.NullInt32{Int32: routedMnoID, Valid: true} // Wrap in sql.NullInt32
+	result.MNOID = routedMnoID
 	slog.InfoContext(logCtx, "Route found successfully", slog.Int("mno_id", int(routedMnoID)))
 	return result, nil
 }

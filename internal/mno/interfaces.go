@@ -40,10 +40,10 @@ type PreparedMessage struct {
 
 // SegmentSubmitInfo holds the result for submitting a single segment.
 type SegmentSubmitInfo struct {
-	Seqn         int32          // Segment sequence number (1-based)
-	MnoMessageID sql.NullString // MNO-assigned Message ID (nullable if submit fails before ID)
-	ErrorCode    sql.NullString // Protocol-specific error code on submission failure (nullable)
-	Error        error          // Go error if submission failed
+	Seqn         int32   // Segment sequence number (1-based)
+	MnoMessageID *string // MNO-assigned Message ID (nullable if submit fails before ID)
+	ErrorCode    *string // Protocol-specific error code on submission failure (nullable)
+	Error        error   // Go error if submission failed
 	IsSuccess    bool
 }
 

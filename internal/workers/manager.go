@@ -14,22 +14,25 @@ import (
 
 // Config holds configuration for worker intervals and batch sizes.
 type Config struct {
-	RoutingInterval    time.Duration
-	PricingInterval    time.Duration
-	SendingInterval    time.Duration
-	LowBalanceInterval time.Duration
-	RoutingBatchSize   int
-	PricingBatchSize   int
-	SendingBatchSize   int
+	RoutingInterval        time.Duration
+	PricingInterval        time.Duration
+	SendingInterval        time.Duration
+	LowBalanceInterval     time.Duration
+	DLRForwarderInterval   time.Duration
+	RoutingBatchSize       int
+	PricingBatchSize       int
+	SendingBatchSize       int
+	DLRForwardingBatchSize int
 }
 
 // Manager orchestrates the background worker loops.
 type Manager struct {
-	dbpool       *pgxpool.Pool
-	dbQueries    database.Querier
-	smsProcessor *sms.Processor        // Holds the SMS processing logic
-	notifier     notification.Notifier // For low balance notifications
-	workerConfig Config
+	dbpool             *pgxpool.Pool
+	dbQueries          database.Querier
+	smsProcessor       *sms.Processor        // Holds the SMS processing logic
+	dlrForwarderWorker *sms.DLRWorker        // For forwarding DLRs
+	notifier           notification.Notifier // For low balance notifications
+	workerConfig       Config
 }
 
 func NewManager(pool *pgxpool.Pool, queries database.Querier, processor *sms.Processor, notifier notification.Notifier, cfg Config) *Manager {
@@ -48,6 +51,7 @@ func (m *Manager) StartSMSProcessing(ctx context.Context) {
 	go runWorkerLoop(ctx, "SMS-Routing", m.workerConfig.RoutingInterval, m.workerConfig.RoutingBatchSize, m.smsProcessor.ProcessRoutingStep)
 	go runWorkerLoop(ctx, "SMS-Pricing", m.workerConfig.PricingInterval, m.workerConfig.PricingBatchSize, m.smsProcessor.ProcessPricingStep)
 	go runWorkerLoop(ctx, "SMS-Sending", m.workerConfig.SendingInterval, m.workerConfig.SendingBatchSize, m.smsProcessor.ProcessSendingStep)
+	go runWorkerLoop(ctx, "SMS-DLR-FORWARDER", m.workerConfig.DLRForwarderInterval, m.workerConfig.DLRForwardingBatchSize, m.dlrForwarderWorker.ProcessDLRForwardingBatch)
 }
 
 // StartLowBalanceNotifier launches the worker loop for checking low balances.

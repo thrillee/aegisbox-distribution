@@ -1,9 +1,7 @@
-// internal/sms/sender.go
 package sms
 
 import (
 	"context"
-	"database/sql"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -11,8 +9,7 @@ import (
 	"github.com/thrillee/aegisbox/internal/database"
 	"github.com/thrillee/aegisbox/internal/logging"
 	"github.com/thrillee/aegisbox/internal/mno"
-	// "github.com/linxGnu/gosmpp/pdu"       // If needed for constants/helpers
-	// "github.com/linxGnu/gosmpp/pdu/udh"  // If needed for UDH encoding
+	"github.com/thrillee/aegisbox/pkg/segmenter"
 )
 
 // Compile-time check
@@ -49,7 +46,7 @@ func (s *DefaultSender) Send(ctx context.Context, msg database.GetMessageDetails
 	}
 	mnoID := msg.RoutedMnoID
 
-	connector, err := s.mnoConnectorProvider.GetConnector(logCtx, mnoID)
+	connector, err := s.mnoConnectorProvider.GetConnector(logCtx, *mnoID)
 	if err != nil {
 		err = fmt.Errorf("failed to get active MNO connector for MNO ID %d: %w", mnoID, err)
 		slog.ErrorContext(logCtx, err.Error())
@@ -97,14 +94,17 @@ func (s *DefaultSender) Send(ctx context.Context, msg database.GetMessageDetails
 	// submitErr represents catastrophic errors during the submission process itself (e.g., connection drop)
 	// submitResult contains per-segment outcomes.
 
+	errDesc := fmt.Sprintf("Submission error: %v", submitErr)
+	errCode := "CONN_ERR"
+
 	if submitErr != nil {
 		slog.ErrorContext(logCtx, "Catastrophic error during MNO submission", slog.Any("error", submitErr))
 		// Mark all created segments as failed?
 		for i, segID := range segmentIDs {
 			_ = s.dbQueries.UpdateSegmentSendFailed(logCtx, database.UpdateSegmentSendFailedParams{
 				ID:               segID,
-				ErrorDescription: sql.NullString{String: fmt.Sprintf("Submission error: %v", submitErr), Valid: true},
-				ErrorCode:        sql.NullString{String: "CONN_ERR", Valid: true}, // Generic code
+				ErrorDescription: &errDesc,
+				ErrorCode:        &errCode,
 			})
 			slog.WarnContext(logCtx, "Marked segment as failed due to overall submission error", slog.Int64("segment_id", segID), slog.Int("seqn", i+1))
 		}
@@ -121,25 +121,27 @@ func (s *DefaultSender) Send(ctx context.Context, msg database.GetMessageDetails
 		// Find the corresponding DB segment ID (using Seqn assumes order is preserved)
 		// A map might be safer if order isn't guaranteed.
 		if segResult.Seqn <= 0 || int(segResult.Seqn) > len(segmentIDs) {
-			slog.ErrorContext(logCtx, "Invalid segment sequence number received from connector result", slog.Int32("seqn", segResult.Seqn))
+			slog.ErrorContext(logCtx, "Invalid segment sequence number received from connector result", slog.Int("seqn", int(segResult.Seqn)))
 			updateErrors = true
 			continue
 		}
 		dbSegmentID := segmentIDs[segResult.Seqn-1]
 		segLogCtx := logging.ContextWithSegmentID(logCtx, dbSegmentID) // Add Segment ID
 
+		mnoConnID := connector.ConnectionID()
+
 		if segResult.IsSuccess {
 			// Update segment as sent successfully
 			err = s.dbQueries.UpdateSegmentSent(segLogCtx, database.UpdateSegmentSentParams{
 				ID:              dbSegmentID,
-				MnoMessageID:    segResult.MnoMessageID, // Pass sql.NullString directly
-				MnoConnectionID: sql.NullInt32{Int32: connector.ConnectionID(), Valid: true},
+				MnoMessageID:    segResult.MnoMessageID,
+				MnoConnectionID: &mnoConnID,
 			})
 			if err != nil {
 				slog.ErrorContext(segLogCtx, "Failed to update DB for successfully sent segment", slog.Any("error", err))
 				updateErrors = true // Log DB error but continue processing results
 			} else {
-				slog.InfoContext(segLogCtx, "Segment sent successfully to MNO", slog.String("mno_msg_id", segResult.MnoMessageID.String))
+				slog.InfoContext(segLogCtx, "Segment sent successfully to MNO", slog.String("mno_msg_id", *segResult.MnoMessageID))
 			}
 		} else {
 			// Update segment as failed
@@ -149,14 +151,14 @@ func (s *DefaultSender) Send(ctx context.Context, msg database.GetMessageDetails
 			}
 			err = s.dbQueries.UpdateSegmentSendFailed(segLogCtx, database.UpdateSegmentSendFailedParams{
 				ID:               dbSegmentID,
-				ErrorDescription: sql.NullString{String: errMsg, Valid: true},
+				ErrorDescription: &errMsg,
 				ErrorCode:        segResult.ErrorCode, // Pass sql.NullString directly
 			})
 			if err != nil {
 				slog.ErrorContext(segLogCtx, "Failed to update DB for failed segment submission", slog.Any("error", err))
 				updateErrors = true
 			} else {
-				slog.WarnContext(segLogCtx, "Segment submission failed at MNO", slog.String("reason", errMsg), slog.String("mno_err_code", segResult.ErrorCode.String))
+				slog.WarnContext(segLogCtx, "Segment submission failed at MNO", slog.String("reason", errMsg), slog.String("mno_err_code", *segResult.ErrorCode))
 			}
 		}
 	}
