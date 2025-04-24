@@ -20,6 +20,7 @@ type CreateMessageSegmentParams struct {
 	SegmentSeqn int32 `json:"segmentSeqn"`
 }
 
+// Creates initial segment record before sending attempt
 func (q *Queries) CreateMessageSegment(ctx context.Context, arg CreateMessageSegmentParams) (int64, error) {
 	row := q.db.QueryRow(ctx, createMessageSegment, arg.MessageID, arg.SegmentSeqn)
 	var id int64
@@ -28,67 +29,29 @@ func (q *Queries) CreateMessageSegment(ctx context.Context, arg CreateMessageSeg
 }
 
 const findSegmentByMnoMessageID = `-- name: FindSegmentByMnoMessageID :one
-SELECT 
-    ms.message_id, 
-    ms.segment_seqn, 
-    ms.id AS segment_id,
-    m.service_provider_id,
-    m.client_message_id
-FROM message_segments ms
-JOIN messages m ON m.id = ms.message_id
-WHERE ms.mno_message_id = $1
+SELECT id as segment_id, message_id, segment_seqn
+FROM message_segments
+WHERE mno_message_id = $1 -- Expects sql.NullString
 LIMIT 1
 `
 
 type FindSegmentByMnoMessageIDRow struct {
-	MessageID         int64   `json:"messageId"`
-	SegmentSeqn       int32   `json:"segmentSeqn"`
-	SegmentID         int64   `json:"segmentId"`
-	ServiceProviderID int32   `json:"serviceProviderId"`
-	ClientMessageID   *string `json:"clientMessageId"`
+	SegmentID   int64 `json:"segmentId"`
+	MessageID   int64 `json:"messageId"`
+	SegmentSeqn int32 `json:"segmentSeqn"`
 }
 
+// Finds segment details based on MNO Message ID for DLR processing
 func (q *Queries) FindSegmentByMnoMessageID(ctx context.Context, mnoMessageID *string) (FindSegmentByMnoMessageIDRow, error) {
 	row := q.db.QueryRow(ctx, findSegmentByMnoMessageID, mnoMessageID)
 	var i FindSegmentByMnoMessageIDRow
-	err := row.Scan(
-		&i.MessageID,
-		&i.SegmentSeqn,
-		&i.SegmentID,
-		&i.ServiceProviderID,
-		&i.ClientMessageID,
-	)
+	err := row.Scan(&i.SegmentID, &i.MessageID, &i.SegmentSeqn)
 	return i, err
 }
 
-const getMessageFinalStatus = `-- name: GetMessageFinalStatus :one
-SELECT final_status
-FROM messages
-WHERE id = $1
-`
-
-func (q *Queries) GetMessageFinalStatus(ctx context.Context, id int64) (string, error) {
-	row := q.db.QueryRow(ctx, getMessageFinalStatus, id)
-	var final_status string
-	err := row.Scan(&final_status)
-	return final_status, err
-}
-
-const getMessageTotalSegments = `-- name: GetMessageTotalSegments :one
-SELECT total_segments
-FROM messages
-WHERE id = $1
-`
-
-func (q *Queries) GetMessageTotalSegments(ctx context.Context, id int64) (int32, error) {
-	row := q.db.QueryRow(ctx, getMessageTotalSegments, id)
-	var total_segments int32
-	err := row.Scan(&total_segments)
-	return total_segments, err
-}
-
 const getSegmentStatusesForMessage = `-- name: GetSegmentStatusesForMessage :many
-SELECT segment_seqn, dlr_status FROM message_segments
+SELECT segment_seqn, dlr_status -- dlr_status is sql.NullString
+FROM message_segments
 WHERE message_id = $1
 ORDER BY segment_seqn
 `
@@ -98,6 +61,7 @@ type GetSegmentStatusesForMessageRow struct {
 	DlrStatus   *string `json:"dlrStatus"`
 }
 
+// Gets all segment statuses for final status aggregation
 func (q *Queries) GetSegmentStatusesForMessage(ctx context.Context, messageID int64) ([]GetSegmentStatusesForMessageRow, error) {
 	rows, err := q.db.Query(ctx, getSegmentStatusesForMessage, messageID)
 	if err != nil {
@@ -118,37 +82,24 @@ func (q *Queries) GetSegmentStatusesForMessage(ctx context.Context, messageID in
 	return items, nil
 }
 
-const updateMessageFinalStatus = `-- name: UpdateMessageFinalStatus :exec
-UPDATE messages
-SET final_status = $1,
-    completed_at = NOW()
-WHERE id = $2
-`
-
-type UpdateMessageFinalStatusParams struct {
-	FinalStatus string `json:"finalStatus"`
-	ID          int64  `json:"id"`
-}
-
-func (q *Queries) UpdateMessageFinalStatus(ctx context.Context, arg UpdateMessageFinalStatusParams) error {
-	_, err := q.db.Exec(ctx, updateMessageFinalStatus, arg.FinalStatus, arg.ID)
-	return err
-}
-
 const updateSegmentDLR = `-- name: UpdateSegmentDLR :exec
 UPDATE message_segments
-SET dlr_status = $1,
+SET
+    dlr_status = $1,
     dlr_received_at = NOW(),
-    error_code = $2 -- DLR error code
+    error_code = $2       -- (Error code from DLR)
+    -- Keep segment-level error_description from MNO? Or clear it? Let's clear.
+    -- error_description = NULL
 WHERE id = $3
 `
 
 type UpdateSegmentDLRParams struct {
 	DlrStatus *string `json:"dlrStatus"`
-	ErrorCode *int32  `json:"errorCode"`
+	ErrorCode *string `json:"errorCode"`
 	ID        int64   `json:"id"`
 }
 
+// Updates segment status based on received DLR
 func (q *Queries) UpdateSegmentDLR(ctx context.Context, arg UpdateSegmentDLRParams) error {
 	_, err := q.db.Exec(ctx, updateSegmentDLR, arg.DlrStatus, arg.ErrorCode, arg.ID)
 	return err
@@ -156,18 +107,20 @@ func (q *Queries) UpdateSegmentDLR(ctx context.Context, arg UpdateSegmentDLRPara
 
 const updateSegmentSendFailed = `-- name: UpdateSegmentSendFailed :exec
 UPDATE message_segments
-SET error_code = $1,
+SET
+    error_code = $1,
     error_description = $2,
-    sent_to_mno_at = NOW() -- Mark attempt time even on failure
+    sent_to_mno_at = NOW()  -- Mark attempt time even on failure
 WHERE id = $3
 `
 
 type UpdateSegmentSendFailedParams struct {
-	ErrorCode        *int32  `json:"errorCode"`
+	ErrorCode        *string `json:"errorCode"`
 	ErrorDescription *string `json:"errorDescription"`
 	ID               int64   `json:"id"`
 }
 
+// Updates segment if MNO submission attempt failed
 func (q *Queries) UpdateSegmentSendFailed(ctx context.Context, arg UpdateSegmentSendFailedParams) error {
 	_, err := q.db.Exec(ctx, updateSegmentSendFailed, arg.ErrorCode, arg.ErrorDescription, arg.ID)
 	return err
@@ -175,9 +128,12 @@ func (q *Queries) UpdateSegmentSendFailed(ctx context.Context, arg UpdateSegment
 
 const updateSegmentSent = `-- name: UpdateSegmentSent :exec
 UPDATE message_segments
-SET mno_message_id = $1,
-    mno_connection_id = $2,
-    sent_to_mno_at = NOW()
+SET
+    mno_message_id = $1,    -- sql.NullString
+    mno_connection_id = $2, -- sql.NullInt32
+    sent_to_mno_at = NOW(),
+    error_code = NULL,      -- Clear previous errors if any
+    error_description = NULL
 WHERE id = $3
 `
 
@@ -187,6 +143,7 @@ type UpdateSegmentSentParams struct {
 	ID              int64   `json:"id"`
 }
 
+// Updates segment after successful MNO submission
 func (q *Queries) UpdateSegmentSent(ctx context.Context, arg UpdateSegmentSentParams) error {
 	_, err := q.db.Exec(ctx, updateSegmentSent, arg.MnoMessageID, arg.MnoConnectionID, arg.ID)
 	return err

@@ -1,76 +1,172 @@
+// internal/sms/sender.go
 package sms
 
 import (
 	"context"
+	"database/sql"
+	"errors"
 	"fmt"
-	"log"
+	"log/slog"
 
 	"github.com/thrillee/aegisbox/internal/database"
-	// "github.com/thrillee/gosmpp/pdu" // If needed for parameter mapping
+	"github.com/thrillee/aegisbox/internal/logging"
+	"github.com/thrillee/aegisbox/internal/mno"
+	// "github.com/linxGnu/gosmpp/pdu"       // If needed for constants/helpers
+	// "github.com/linxGnu/gosmpp/pdu/udh"  // If needed for UDH encoding
 )
 
 // Compile-time check
 var _ Sender = (*DefaultSender)(nil)
 
 type DefaultSender struct {
-	dbQueries    database.Querier
-	mnoClientMgr *smppclient.Manager // Your manager for MNO connections
+	dbQueries            database.Querier
+	mnoConnectorProvider mno.ConnectorProvider // Use the interface to get MNO connectors
+	segmenter            segmenter.Segmenter   // Interface for message segmentation
 }
 
-func NewDefaultSender(q database.Querier, mgr *smppclient.Manager) *DefaultSender {
-	return &DefaultSender{dbQueries: q, mnoClientMgr: mgr}
+// NewDefaultSender creates a sender instance.
+func NewDefaultSender(q database.Querier, provider mno.ConnectorProvider, seg segmenter.Segmenter) *DefaultSender {
+	return &DefaultSender{
+		dbQueries:            q,
+		mnoConnectorProvider: provider,
+		segmenter:            seg,
+	}
 }
 
-// Send attempts to send the message via the appropriate MNO client.
-func (s *DefaultSender) Send(ctx context.Context, mnoID int32, msg database.GetMessageDetailsForSendingRow) (*SendingResult, error) {
-	result := &SendingResult{Sent: false}
+// Send handles segmentation, MNO connector interaction, and recording segment results.
+func (s *DefaultSender) Send(ctx context.Context, msg database.GetMessageDetailsForSendingRow) (*mno.SubmitResult, error) {
+	// Use context enriched by the caller (Processor) which includes msgID, spID, mnoID
+	logCtx := ctx
+	slog.DebugContext(logCtx, "Starting send process")
 
-	// Get active client connection for this MNO
-	mnoClient, err := s.mnoClientMgr.GetClient(ctx, mnoID)
+	// 1. Get MNO Connector
+	if msg.RoutedMnoID != nil {
+		// This should ideally be caught earlier, but double-check
+		err := errors.New("cannot send message: Routed MNO ID is invalid or missing")
+		slog.ErrorContext(logCtx, err.Error())
+		// Return a SubmitResult indicating failure before any attempt
+		return &mno.SubmitResult{WasSubmitted: false, Error: err}, nil // Return nil error for logical failure
+	}
+	mnoID := msg.RoutedMnoID
+
+	connector, err := s.mnoConnectorProvider.GetConnector(logCtx, mnoID)
 	if err != nil {
-		// Error getting client (e.g., config issue, manager error)
-		result.Error = fmt.Errorf("failed to get MNO client for MNO ID %d: %w", mnoID, err)
-		log.Printf("Sender Error: %v", result.Error)
-		return result, err // Return internal error
+		err = fmt.Errorf("failed to get active MNO connector for MNO ID %d: %w", mnoID, err)
+		slog.ErrorContext(logCtx, err.Error())
+		// Treat as potentially retryable infrastructure issue? For now, fail the submission.
+		return &mno.SubmitResult{WasSubmitted: false, Error: err}, nil // Return nil error for logical failure
 	}
-	if mnoClient == nil {
-		// No active connection available currently
-		result.Error = fmt.Errorf("no active SMPP client connection for MNO ID %d", mnoID)
-		log.Printf("Sender Info: %v", result.Error)
-		// This might be a temporary state, could retry later.
-		// For now, treat as failure to send.
-		return result, nil // Return logical error (no client available)
+	logCtx = logging.ContextWithMNOConnID(logCtx, connector.ConnectionID()) // Add Conn ID for tracing
+
+	// 2. Prepare Message for Connector (Segmentation handled by Connector)
+	// The Connector interface expects the full message content.
+	preparedMsg := mno.PreparedMessage{
+		InternalMessageID: msg.ID,
+		TotalSegments:     msg.TotalSegments,      // Inform connector about expected segments (for UDH?)
+		SenderID:          msg.OriginalSourceAddr, // Use original sender from SP
+		DestinationMSISDN: msg.OriginalDestinationAddr,
+		MessageContent:    msg.ShortMessage,
+		RequestDLR:        true, // TODO: Make this configurable per SP/message?
+		// Populate DataCoding, ESMClass, IsFlash based on msg fields if they exist
+		// DataCoding: msg.DataCoding,
+		// ESMClass: msg.EsmClass,
+		// MNOInfo: // Fetch MNO details if needed by connector?
 	}
 
-	// --- Map Database Model to SMPP SubmitSM Parameters ---
-	// This requires knowing the specific fields in your GetMessageDetailsForSendingRow
-	// and mapping them to gosmpp PDU fields. Placeholder example:
-	submitParams := smppclient.SubmitSMParams{
-		SourceAddr:      msg.SenderIDUsed,
-		DestinationAddr: msg.DestinationMsisdn,
-		ShortMessage:    msg.ShortMessage,
-		// DataCoding: // Set based on message content or config
-		// ESMClass:   // Set if needed
-		// RegisteredDelivery: // Request DLRs
-		// Add other optional parameters (TLVs) if needed
+	// 3. Create Segment Records in DB *before* submission attempt
+	// The connector will update these with MNO Msg IDs / errors.
+	// We store the segment IDs to link back the results.
+	segmentIDs := make([]int64, msg.TotalSegments)
+	for i := 0; i < int(msg.TotalSegments); i++ {
+		segID, dbErr := s.dbQueries.CreateMessageSegment(logCtx, database.CreateMessageSegmentParams{
+			MessageID:   msg.ID,
+			SegmentSeqn: int32(i + 1),
+		})
+		if dbErr != nil {
+			err = fmt.Errorf("failed to create DB record for segment %d/%d: %w", i+1, msg.TotalSegments, dbErr)
+			slog.ErrorContext(logCtx, err.Error())
+			// This is critical, fail the whole submission
+			return &mno.SubmitResult{WasSubmitted: false, Error: err}, err // Return internal error
+		}
+		segmentIDs[i] = segID
 	}
-	// --- End Mapping ---
+	slog.DebugContext(logCtx, "Created initial segment records in DB", slog.Int("count", len(segmentIDs)))
 
-	// Submit via the MNO client's method
-	mnoRespMsgID, submitErr := mnoClient.SubmitSM(ctx, submitParams)
+	// 4. Submit Message via Connector
+	submitResult, submitErr := connector.SubmitMessage(logCtx, preparedMsg)
+	// submitErr represents catastrophic errors during the submission process itself (e.g., connection drop)
+	// submitResult contains per-segment outcomes.
 
 	if submitErr != nil {
-		// SMPP submit failed
-		result.Error = fmt.Errorf("smpp submit failed for MNO ID %d: %w", mnoID, submitErr)
-		log.Printf("Sender Error: Failed to send msg %d via MNO %d: %v", msg.ID, mnoID, submitErr)
-		return result, nil // Return logical error (submit failed)
+		slog.ErrorContext(logCtx, "Catastrophic error during MNO submission", slog.Any("error", submitErr))
+		// Mark all created segments as failed?
+		for i, segID := range segmentIDs {
+			_ = s.dbQueries.UpdateSegmentSendFailed(logCtx, database.UpdateSegmentSendFailedParams{
+				ID:               segID,
+				ErrorDescription: sql.NullString{String: fmt.Sprintf("Submission error: %v", submitErr), Valid: true},
+				ErrorCode:        sql.NullString{String: "CONN_ERR", Valid: true}, // Generic code
+			})
+			slog.WarnContext(logCtx, "Marked segment as failed due to overall submission error", slog.Int64("segment_id", segID), slog.Int("seqn", i+1))
+		}
+		// Return the overall error wrapped in SubmitResult
+		submitResult.Error = submitErr
+		submitResult.WasSubmitted = false // Indicate catastrophic failure
+		return &submitResult, nil         // Return logical failure indication
 	}
 
-	// Success!
-	result.Sent = true
-	result.MNOMessageID = mnoRespMsgID
-	result.MNOConnectionID = mnoClient.ConnectionID // Get Conn ID from client
+	// 5. Record Segment-Specific Results in DB
+	slog.DebugContext(logCtx, "Processing MNO submission results for segments", slog.Int("segment_results_count", len(submitResult.Segments)))
+	updateErrors := false
+	for _, segResult := range submitResult.Segments {
+		// Find the corresponding DB segment ID (using Seqn assumes order is preserved)
+		// A map might be safer if order isn't guaranteed.
+		if segResult.Seqn <= 0 || int(segResult.Seqn) > len(segmentIDs) {
+			slog.ErrorContext(logCtx, "Invalid segment sequence number received from connector result", slog.Int32("seqn", segResult.Seqn))
+			updateErrors = true
+			continue
+		}
+		dbSegmentID := segmentIDs[segResult.Seqn-1]
+		segLogCtx := logging.ContextWithSegmentID(logCtx, dbSegmentID) // Add Segment ID
 
-	log.Printf("Sender Success: Msg %d sent via MNO %d. MNO MsgID: %s", msg.ID, mnoID, mnoRespMsgID)
-	return result, nil
+		if segResult.IsSuccess {
+			// Update segment as sent successfully
+			err = s.dbQueries.UpdateSegmentSent(segLogCtx, database.UpdateSegmentSentParams{
+				ID:              dbSegmentID,
+				MnoMessageID:    segResult.MnoMessageID, // Pass sql.NullString directly
+				MnoConnectionID: sql.NullInt32{Int32: connector.ConnectionID(), Valid: true},
+			})
+			if err != nil {
+				slog.ErrorContext(segLogCtx, "Failed to update DB for successfully sent segment", slog.Any("error", err))
+				updateErrors = true // Log DB error but continue processing results
+			} else {
+				slog.InfoContext(segLogCtx, "Segment sent successfully to MNO", slog.String("mno_msg_id", segResult.MnoMessageID.String))
+			}
+		} else {
+			// Update segment as failed
+			errMsg := "Segment submission failed"
+			if segResult.Error != nil {
+				errMsg = segResult.Error.Error()
+			}
+			err = s.dbQueries.UpdateSegmentSendFailed(segLogCtx, database.UpdateSegmentSendFailedParams{
+				ID:               dbSegmentID,
+				ErrorDescription: sql.NullString{String: errMsg, Valid: true},
+				ErrorCode:        segResult.ErrorCode, // Pass sql.NullString directly
+			})
+			if err != nil {
+				slog.ErrorContext(segLogCtx, "Failed to update DB for failed segment submission", slog.Any("error", err))
+				updateErrors = true
+			} else {
+				slog.WarnContext(segLogCtx, "Segment submission failed at MNO", slog.String("reason", errMsg), slog.String("mno_err_code", segResult.ErrorCode.String))
+			}
+		}
+	}
+
+	if updateErrors {
+		// If DB updates failed, the overall SubmitResult might need adjustment or specific error flagging
+		slog.ErrorContext(logCtx, "Encountered one or more errors updating segment statuses in DB after submission")
+		// Set overall error? submitResult.Error = errors.New("failed to update segment statuses in DB")
+	}
+
+	// Return the result received from the connector (potentially modified if DB updates failed critically)
+	return &submitResult, nil // Return logical outcome
 }

@@ -65,15 +65,14 @@ func (m *Manager) checkLowBalances(ctx context.Context, _ int) (int, error) {
 
 	processedCount := 0
 	for _, wallet := range wallets {
-		// Convert pgtype fields safely
 		balanceStr := "N/A"
 		thresholdStr := "N/A"
 		emailStr := "N/A"
 
-		if wallet.Balance.Valid {
+		if wallet.Balance.IsPositive() {
 			balanceStr = fmt.Sprintf("%v", wallet.Balance)
-		} // Use pgtype's String()
-		if wallet.LowBalanceThreshold.Valid {
+		}
+		if wallet.LowBalanceThreshold.IsPositive() {
 			thresholdStr = fmt.Sprintf("%v", wallet.LowBalanceThreshold)
 		}
 		if wallet.Email != "" {

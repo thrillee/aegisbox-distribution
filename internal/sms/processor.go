@@ -1,11 +1,12 @@
+// internal/sms/processor.go
 package sms
 
 import (
 	"context"
-	"database/sql"
+	"database/sql" // Import sql package for Null types
 	"errors"
 	"fmt"
-	"log/slog"
+	"log/slog" // Use slog
 	"strings"
 	"time"
 
@@ -13,555 +14,736 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/thrillee/aegisbox/internal/database"
 	"github.com/thrillee/aegisbox/internal/logging"
+	"github.com/thrillee/aegisbox/internal/mno"
+	"github.com/thrillee/aegisbox/internal/sp"
 )
 
-// --- Step Results (Assuming types from previous version are correct) ---
+// ========================================================================================
+// Interfaces this Processor relies on (Implementations should be injected)
+// ========================================================================================
 
-type RoutingResult struct {
-	MNOID     int32 // Use sql.NullInt32 for nullable FK
-	ShouldUse bool
-	Error     error
-}
-
-type ValidationResult struct {
-	ApprovedSenderID int32 // Use sql.NullInt32 for nullable FK
-	TemplateID       int32 // Use sql.NullInt32 for nullable FK
-	IsValid          bool
-	Error            error
-}
-
-type PricingResult struct {
-	Debited bool
-	Error   error
-}
-
-type SendingResult struct {
-	MNOConnectionID sql.NullInt32  // Use sql.NullInt32
-	MNOMessageID    sql.NullString // Use sql.NullString for nullable Varchar
-	Sent            bool
-	Error           error
-}
-
-// --- Step Interfaces (Assuming interfaces from previous version are correct) ---
-
+// Router finds the appropriate MNO for a destination MSISDN.
 type Router interface {
-	Route(ctx context.Context, msisdn string) (*RoutingResult, error)
+	Route(ctx context.Context, msisdn string) (*mno.RoutingResult, error)
 }
 
+// Validator checks SenderID, templates, etc.
 type Validator interface {
 	Validate(ctx context.Context, spID int32, senderID string) (*ValidationResult, error)
 }
 
+// Pricer handles debiting the SP's wallet for the message cost.
 type Pricer interface {
 	PriceAndDebit(ctx context.Context, msgID int64) (*PricingResult, error)
 }
 
+// Sender handles the segmentation and submission of the message to the MNO Connector.
 type Sender interface {
-	Send(ctx context.Context, mnoID int32, params database.GetMessageDetailsForSendingRow) (*SendingResult, error)
+	Send(ctx context.Context, msgDetails database.GetMessageDetailsForSendingRow) (*mno.SubmitResult, error)
 }
 
-// SMPPServer Interface for DLR Forwarding dependency
-type SMPPServer interface {
-	GetBoundClientWriter(systemID string) (pdu.Writer, error) // Assuming pdu.Writer interface exists
+// WalletService provides wallet operations, including reversals.
+type WalletService interface {
+	ReverseDebit(ctx context.Context, messageID int64, reason string) error
 }
 
-// --- Processor ---
+// DLRForwarder handles sending DLRs back to the Service Provider.
+type DLRForwarder interface {
+	ForwardDLR(ctx context.Context, spDetails sp.SPDetails, dlr sp.ForwardedDLRInfo) error
+}
 
+// ========================================================================================
+// Result Structs (Consider moving to specific interface packages if preferred)
+// ========================================================================================
+
+// ValidationResult holds the outcome of the validation step.
+type ValidationResult struct {
+	ApprovedSenderID int32
+	TemplateID       int32
+	IsValid          bool
+	Error            error // Describes the logical validation failure, if any
+}
+
+// PricingResult holds the outcome of the pricing/debiting step.
+type PricingResult struct {
+	Debited bool
+	Error   error // Describes logical failure (e.g., insufficient funds) or internal error
+}
+
+// ========================================================================================
+// Core Processor Implementation
+// ========================================================================================
+
+// Processor orchestrates the SMS processing lifecycle steps.
 type Processor struct {
-	dbQueries database.Querier
-	dbPool    *pgxpool.Pool // Needed by Pricer
-	router    Router
-	validator Validator
-	pricer    Pricer
-	sender    Sender
+	dbQueries     database.Querier // Interface for DB operations
+	dbPool        *pgxpool.Pool    // Pool needed for direct Tx management if required
+	router        Router
+	validator     Validator
+	pricer        Pricer
+	sender        Sender
+	walletService WalletService // Added for reversals
+	dlrForwarder  DLRForwarder  // Added for DLR forwarding
 }
 
-// NewProcessor creates a new SMS Processor.
-func NewProcessor(pool *pgxpool.Pool, queries database.Querier, clientMgr *smppclient.Manager) *Processor {
-	// Initialize steps
-	router := NewDefaultRouter(queries)
-	validator := NewDefaultValidator(queries)
-	pricer := NewDefaultPricer(pool) // Corrected: Pricer only needs the pool
-	sender := NewDefaultSender(queries, clientMgr)
+// ProcessorDependencies holds all dependencies needed to create a Processor.
+type ProcessorDependencies struct {
+	DBPool        *pgxpool.Pool
+	DBQueries     database.Querier
+	Router        Router
+	Validator     Validator
+	Pricer        Pricer
+	Sender        Sender
+	WalletService WalletService
+	DLRForwarder  DLRForwarder
+}
 
+// NewProcessor creates a new SMS Processor with explicit dependencies.
+func NewProcessor(deps ProcessorDependencies) *Processor {
+	if deps.DBPool == nil || deps.DBQueries == nil || deps.Router == nil || deps.Validator == nil || deps.Pricer == nil || deps.Sender == nil || deps.WalletService == nil || deps.DLRForwarder == nil {
+		// Or return an error
+		panic("Missing required dependencies for SMS Processor")
+	}
 	return &Processor{
-		dbPool:    pool,
-		dbQueries: queries, // Keep for steps not needing direct Tx control
-		router:    router,
-		validator: validator,
-		pricer:    pricer,
-		sender:    sender,
+		dbPool:        deps.DBPool,
+		dbQueries:     deps.DBQueries,
+		router:        deps.Router,
+		validator:     deps.Validator,
+		pricer:        deps.Pricer,
+		sender:        deps.Sender,
+		walletService: deps.WalletService,
+		dlrForwarder:  deps.DLRForwarder,
 	}
 }
 
+// ========================================================================================
+// Processing Steps (Called by Worker Manager)
+// ========================================================================================
+
 // ProcessRoutingStep fetches messages needing routing/validation and processes them.
-func (p *Processor) ProcessRoutingStep(ctx context.Context, batchSize int) (int, error) {
-	// Fetch messages in 'received' state
-	messages, err := p.dbQueries.GetMessagesByStatus(ctx, database.GetMessagesByStatusParams{
+func (p *Processor) ProcessRoutingStep(ctx context.Context, batchSize int) (processedCount int, err error) {
+	defer func() { // Add recovery for panics within the loop
+		if r := recover(); r != nil {
+			slog.ErrorContext(ctx, "PANIC recovered in ProcessRoutingStep loop", slog.Any("panic_info", r))
+			err = fmt.Errorf("panic occurred during routing step: %v", r) // Report error back to worker manager
+		}
+	}()
+
+	messages, fetchErr := p.dbQueries.GetMessagesByStatus(ctx, database.GetMessagesByStatusParams{
 		ProcessingStatus: "received",
 		Limit:            int32(batchSize),
 	})
-	// Handle pgx.ErrNoRows gracefully - it's not an error, just no work
-	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
-		slog.ErrorContext(ctx, "Failed fetching messages for routing", slog.Any("error", err))
-		return 0, fmt.Errorf("fetching messages for routing: %w", err)
+	if fetchErr != nil && !errors.Is(fetchErr, pgx.ErrNoRows) {
+		slog.ErrorContext(ctx, "Failed fetching messages for routing", slog.Any("error", fetchErr))
+		return 0, fmt.Errorf("fetching messages for routing: %w", fetchErr)
 	}
-	if errors.Is(err, pgx.ErrNoRows) {
+	if errors.Is(fetchErr, pgx.ErrNoRows) || len(messages) == 0 {
 		slog.DebugContext(ctx, "No messages found in 'received' state for routing.")
 		return 0, nil // No error, just no messages
 	}
 
-	processedCount := 0
 	for _, msg := range messages {
-		// Process each message, log errors individually
 		logCtx := logging.ContextWithMessageID(ctx, msg.ID)
 		logCtx = logging.ContextWithSPID(logCtx, msg.ServiceProviderID)
-		err := p.validateAndRouteMessage(logCtx, msg) // Pass context with IDs
-		if err != nil {
-			// Log the error encountered during processing this specific message
-			slog.ErrorContext(logCtx, "Failed to process routing/validation for message", slog.Any("error", err))
-			// Decide on retry logic or permanent failure marking here if needed
-		} else {
-			processedCount++
+
+		processErr := p.validateAndRouteMessage(logCtx, msg)
+		if processErr != nil {
+			// Logging is handled within validateAndRouteMessage or its sub-steps
+			// Decide if this error requires stopping the batch or just continuing
+			// For now, continue processing other messages in the batch
+			continue
 		}
+		processedCount++
 	}
 	return processedCount, nil
 }
 
 // validateAndRouteMessage performs validation and routing for a single message.
-// Now takes database.GetMessagesByStatusRow assuming it has needed fields. Adjust if model is different.
 func (p *Processor) validateAndRouteMessage(ctx context.Context, msg database.GetMessagesByStatusRow) error {
 	slog.DebugContext(ctx, "Starting validation and routing")
+	var finalStatus string
+	var logicalError error  // Describes the logical validation/routing failure reason
+	var internalError error // Describes unexpected errors during the process
 
 	// 1. Validate
-	// Pass enriched context down
-	validationRes, valErr := p.validator.Validate(ctx, msg.ServiceProviderID, msg.SenderIDUsed)
+	validationRes, valErr := p.validator.Validate(ctx, msg.ServiceProviderID, msg.OriginalSourceAddr)
 	if valErr != nil {
-		slog.WarnContext(ctx, "Internal error during validation step", slog.Any("error", valErr))
-		// Continue even if there was an internal error, the result might still indicate logical failure
+		internalError = fmt.Errorf("validation internal error: %w", valErr)
+		slog.ErrorContext(ctx, "Internal error during validation step", slog.Any("error", valErr))
 	}
 	if validationRes == nil {
+		// Should not happen if validator implementation is correct
 		validationRes = &ValidationResult{IsValid: false, Error: errors.New("validation step returned nil result")}
 		slog.ErrorContext(ctx, "Validation step returned unexpected nil result")
+		if internalError == nil {
+			internalError = validationRes.Error
+		}
 	}
 
-	// 2. Route (only if validation didn't result in immediate failure)
-	var routingRes *RoutingResult
+	// 2. Route (only if validation didn't cause immediate logical failure)
+	var routingRes *mno.RoutingResult
 	var routeErr error
 	if validationRes.IsValid {
-		// Pass enriched context down
-		routingRes, routeErr = p.router.Route(ctx, msg.DestinationMsisdn)
+		routingRes, routeErr = p.router.Route(ctx, msg.OriginalDestinationAddr)
 		if routeErr != nil {
-			slog.WarnContext(ctx, "Internal error during routing step", slog.Any("error", routeErr))
+			if internalError == nil {
+				internalError = fmt.Errorf("routing internal error: %w", routeErr)
+			} else {
+				internalError = fmt.Errorf("%w; routing internal error: %w", internalError, routeErr)
+			}
+			slog.ErrorContext(ctx, "Internal error during routing step", slog.Any("error", routeErr))
 		}
 		if routingRes == nil {
-			routingRes = &RoutingResult{ShouldUse: false, Error: errors.New("routing step returned nil result")}
+			routingRes = &mno.RoutingResult{ShouldUse: false, Error: errors.New("routing step returned nil result")}
 			slog.ErrorContext(ctx, "Routing step returned unexpected nil result")
+			if internalError == nil {
+				internalError = routingRes.Error
+			}
 		}
 	} else {
-		routingRes = &RoutingResult{ShouldUse: false, Error: validationRes.Error} // Carry over validation error
+		routingRes = &mno.RoutingResult{ShouldUse: false, Error: validationRes.Error} // Carry over validation error
 	}
 
-	// 3. Determine Final Status and Update DB
-	var finalStatus string
-	var combinedError error // The logical error describing why processing stopped
-
+	// 3. Determine Final Status
 	if !validationRes.IsValid {
 		finalStatus = "failed_validation"
-		combinedError = validationRes.Error // This should contain the reason (e.g., "sender ID not approved")
-		if combinedError == nil && valErr != nil {
-			combinedError = valErr // Use internal error if logical error is nil
-		} else if combinedError == nil {
-			combinedError = errors.New("validation failed for unknown reason")
+		logicalError = validationRes.Error
+		if logicalError == nil {
+			logicalError = errors.New("validation failed")
 		}
 	} else if !routingRes.ShouldUse {
 		finalStatus = "failed_routing"
-		combinedError = routingRes.Error // This should contain the reason (e.g., "no route rule matched")
-		if combinedError == nil && routeErr != nil {
-			combinedError = routeErr // Use internal error if logical error is nil
-		} else if combinedError == nil {
-			combinedError = fmt.Errorf("no applicable route found for %s", msg.DestinationMsisdn)
+		logicalError = routingRes.Error
+		if logicalError == nil {
+			logicalError = fmt.Errorf("no route found")
 		}
 	} else {
 		finalStatus = "routed" // Success!
-		if routingRes.MNOID > 0 {
-			ctx = logging.ContextWithMNOID(ctx, routingRes.MNOID)
+		if routingRes.MNOID.Valid {
+			ctx = logging.ContextWithMNOID(ctx, routingRes.MNOID.Int32)
 		}
 	}
 
+	// 4. Prepare and Update DB
 	var dbErrMsg string
-	if combinedError != nil {
-		dbErrMsg = combinedError.Error()
+	var errorCode int32
+	if logicalError != nil {
+		dbErrMsg = logicalError.Error()
+		// TODO: Map logicalError to a specific error code (e.g., "NO_ROUTE", "INVALID_SENDER")
+		// errorCode.String = mapErrorToCode(logicalError)
+	} else if internalError != nil {
+		// Log internal errors differently if needed, but might still use generic failure status
+		dbErrMsg = fmt.Sprintf("Internal processing error: %v", internalError) // Provide internal error info
+		// errorCode.String = "SYS_ERR"
+		// errorCode.Valid = true
 	}
 
-	// Use sqlc generated params struct correctly
 	params := database.UpdateMessageValidatedRoutedParams{
 		ProcessingStatus: finalStatus,
 		RoutedMnoID:      &routingRes.MNOID,
 		ApprovedSenderID: &validationRes.ApprovedSenderID,
-		// TemplateID: validationRes.TemplateID, // Pass sql.NullInt32 if using templates
-		ErrorDescription: &dbErrMsg, // Pass sql.NullString directly
+		TemplateID:       &validationRes.TemplateID,
+		ErrorDescription: &dbErrMsg,
+		ErrorCode:        errorCode,
 		ID:               msg.ID,
 	}
 
-	err := p.dbQueries.UpdateMessageValidatedRouted(ctx, params)
-	if err != nil {
-		// Log the DB update error critically
-		slog.ErrorContext(ctx, "Failed to update message status after validation/routing",
-			slog.Any("error", err),
+	updateErr := p.dbQueries.UpdateMessageValidatedRouted(ctx, params)
+	if updateErr != nil {
+		slog.ErrorContext(ctx, "CRITICAL: Failed to update message status after validation/routing",
+			slog.Any("db_error", updateErr),
 			slog.String("attempted_status", finalStatus),
 		)
-		// Return the DB error, indicating failure to persist state
-		return fmt.Errorf("failed to update status for msg ID %d after validation/routing: %w", msg.ID, err)
+		// This is a critical failure - return error to worker
+		return fmt.Errorf("failed to update DB status for msg ID %d: %w", msg.ID, updateErr)
 	}
 
-	// Log overall outcome of the step
+	// 5. Trigger Failure Notification/DLR if needed
 	logLevel := slog.LevelInfo
 	if finalStatus != "routed" {
-		logLevel = slog.LevelWarn // Log failures as warnings
+		logLevel = slog.LevelWarn
+		// Generate and forward a failure DLR back to the SP
+		// Need SP details (protocol, callback/systemID etc) -> requires fetching from DB
+		go p.generateAndForwardFailureDLR(context.Background(), msg.ID, finalStatus, logicalError, errorCode) // Run async
 	}
+
+	// Log overall outcome
 	slog.LogAttrs(ctx, logLevel, "Routing Step Completed",
 		slog.String("final_status", finalStatus),
-		slog.Int64("msg_id", msg.ID), // msg_id already in context, but can add explicitly
-		slog.Any("sp_id", msg.ServiceProviderID),
 		slog.Any("routed_mno_id", routingRes.MNOID),
-		slog.Any("approved_sid", validationRes.ApprovedSenderID),
-		slog.Any("reason", combinedError), // Use "reason" for the logical error
+		slog.Any("reason", logicalError),          // Log the logical reason for success/failure
+		slog.Any("internal_error", internalError), // Log any unexpected errors separately
 	)
-	return nil // Return nil if DB update succeeded, even if logical validation/routing failed
+
+	// If DB update succeeded, return nil even if logical checks failed (failure is recorded)
+	// Return internalError only if it prevented DB update? No, DB update error is returned above.
+	return nil
 }
 
 // ProcessPricingStep fetches messages needing pricing and processes them.
-func (p *Processor) ProcessPricingStep(ctx context.Context, batchSize int) (int, error) {
-	messages, err := p.dbQueries.GetMessagesByStatus(ctx, database.GetMessagesByStatusParams{
-		ProcessingStatus: "routed", // Process messages that are successfully routed
+func (p *Processor) ProcessPricingStep(ctx context.Context, batchSize int) (processedCount int, err error) {
+	defer func() { // Add recovery
+		if r := recover(); r != nil {
+			slog.ErrorContext(ctx, "PANIC recovered in ProcessPricingStep loop", slog.Any("panic_info", r))
+			err = fmt.Errorf("panic occurred during pricing step: %v", r)
+		}
+	}()
+
+	messages, fetchErr := p.dbQueries.GetMessagesByStatus(ctx, database.GetMessagesByStatusParams{
+		ProcessingStatus: "routed",
 		Limit:            int32(batchSize),
 	})
-	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
-		slog.ErrorContext(ctx, "Failed fetching messages for pricing", slog.Any("error", err))
-		return 0, fmt.Errorf("fetching messages for pricing: %w", err)
+	if fetchErr != nil && !errors.Is(fetchErr, pgx.ErrNoRows) {
+		slog.ErrorContext(ctx, "Failed fetching messages for pricing", slog.Any("error", fetchErr))
+		return 0, fmt.Errorf("fetching messages for pricing: %w", fetchErr)
 	}
-	if errors.Is(err, pgx.ErrNoRows) {
+	if errors.Is(fetchErr, pgx.ErrNoRows) || len(messages) == 0 {
 		slog.DebugContext(ctx, "No messages found in 'routed' state for pricing.")
 		return 0, nil
 	}
 
-	processedCount := 0
 	for _, msg := range messages {
 		logCtx := logging.ContextWithMessageID(ctx, msg.ID)
 		logCtx = logging.ContextWithSPID(logCtx, msg.ServiceProviderID)
-		// Pricer handles its own transaction and logging internally
-		pricingRes, err := p.pricer.PriceAndDebit(logCtx, msg.ID) // Pass context down
-		if err != nil {
-			// Log errors returned by the PriceAndDebit step itself (e.g., begin Tx error)
-			slog.ErrorContext(logCtx, "Error processing pricing/debiting step", slog.Any("error", err))
-			// Error is already logged within Pricer if it's a logical failure (e.g., insufficient funds)
-		} else if pricingRes != nil && pricingRes.Debited {
+		// Pricer handles its own transaction, internal logging, and status updates.
+		pricingRes, pricingErr := p.pricer.PriceAndDebit(logCtx, msg.ID)
+		if pricingErr != nil {
+			// Log internal errors from the pricer step itself (e.g., begin Tx error)
+			// Logical errors like insufficient funds are logged within PriceAndDebit.
+			slog.ErrorContext(logCtx, "Error processing pricing/debiting step", slog.Any("error", pricingErr))
+			// Should we trigger a failure DLR here? Pricer already updated status to failed_pricing.
+			continue // Continue with next message
+		}
+		if pricingRes != nil && pricingRes.Debited {
 			processedCount++
+		} else if pricingRes != nil { // Debited is false, likely logical failure
+			// Pricer already logged and set status to failed_pricing.
+			// Generate failure DLR? Status is already updated. Maybe not needed here.
+			slog.WarnContext(logCtx, "Pricing/debiting failed logically", slog.Any("reason", pricingRes.Error))
 		}
 	}
 	return processedCount, nil
 }
 
 // ProcessSendingStep fetches messages ready to be sent and processes them.
-func (p *Processor) ProcessSendingStep(ctx context.Context, batchSize int) (int, error) {
-	messages, err := p.dbQueries.GetMessagesByStatus(ctx, database.GetMessagesByStatusParams{
+func (p *Processor) ProcessSendingStep(ctx context.Context, batchSize int) (processedCount int, err error) {
+	defer func() { // Add recovery
+		if r := recover(); r != nil {
+			slog.ErrorContext(ctx, "PANIC recovered in ProcessSendingStep loop", slog.Any("panic_info", r))
+			err = fmt.Errorf("panic occurred during sending step: %v", r)
+		}
+	}()
+
+	messages, fetchErr := p.dbQueries.GetMessagesByStatus(ctx, database.GetMessagesByStatusParams{
 		ProcessingStatus: "queued_for_send", // Process messages successfully priced/debited
 		Limit:            int32(batchSize),
 	})
-	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
-		slog.ErrorContext(ctx, "Failed fetching messages for sending", slog.Any("error", err))
-		return 0, fmt.Errorf("fetching messages for sending: %w", err)
+	if fetchErr != nil && !errors.Is(fetchErr, pgx.ErrNoRows) {
+		slog.ErrorContext(ctx, "Failed fetching messages for sending", slog.Any("error", fetchErr))
+		return 0, fmt.Errorf("fetching messages for sending: %w", fetchErr)
 	}
-	if errors.Is(err, pgx.ErrNoRows) {
+	if errors.Is(fetchErr, pgx.ErrNoRows) || len(messages) == 0 {
 		slog.DebugContext(ctx, "No messages found in 'queued_for_send' state for sending.")
 		return 0, nil
 	}
 
-	processedCount := 0
 	for _, msg := range messages {
-		// Prepare context for this message
 		logCtx := logging.ContextWithMessageID(ctx, msg.ID)
 		logCtx = logging.ContextWithSPID(logCtx, msg.ServiceProviderID)
+		var sendErr error                  // To store error from sender.Send or pre-send failures
+		var submitResult *mno.SubmitResult // Store result from sender
 
-		// Need full details for sending
-		fullMsg, err := p.dbQueries.GetMessageDetailsForSending(logCtx, msg.ID)
-		if err != nil {
-			slog.ErrorContext(logCtx, "Error fetching full details for sending message", slog.Any("error", err))
-			// Mark as failed permanently as we can't even get details
-			failErr := fmt.Errorf("failed to fetch details: %w", err)
-			_ = p.markSendFailed(logCtx, msg.ID, nil, failErr) // Use logCtx
-			continue
+		// 1. Fetch full details needed for sending
+		fullMsg, dbErr := p.dbQueries.GetMessageDetailsForSending(logCtx, msg.ID)
+		if dbErr != nil {
+			slog.ErrorContext(logCtx, "CRITICAL: Error fetching full details for sending message", slog.Any("error", dbErr))
+			sendErr = fmt.Errorf("failed to fetch details: %w", dbErr)
+			// Attempt reversal as we can't send, and debit already happened.
+			p.attemptReversal(logCtx, msg.ID, sendErr.Error())
+			_ = p.markAsFailed(logCtx, msg.ID, sendErr, "SYS_ERR") // Mark as failed
+			continue                                               // Next message
 		}
 
-		// Use correct check for sql.NullInt32
-		if fullMsg.RoutedMnoID == nil {
-			failErr := errors.New("missing Routed MNO ID")
-			slog.ErrorContext(logCtx, "Cannot send message", slog.Any("reason", failErr))
-			_ = p.markSendFailed(logCtx, msg.ID, nil, failErr)
-			continue
+		// 2. Basic check before calling sender
+		if fullMsg.RoutedMnoID != nil {
+			sendErr = errors.New("missing Routed MNO ID")
+			slog.ErrorContext(logCtx, "Cannot send message", slog.Any("reason", sendErr))
+			p.attemptReversal(logCtx, msg.ID, sendErr.Error())
+			_ = p.markAsFailed(logCtx, msg.ID, sendErr, "ROUTE_ERR") // Mark as failed
+			continue                                                 // Next message
 		}
-		// Add MNO ID to context
 		logCtx = logging.ContextWithMNOID(logCtx, *fullMsg.RoutedMnoID)
 
-		// Sender handles segmentation and actual sending attempts
-		sendResult, err := p.sender.Send(logCtx, *fullMsg.RoutedMnoID, fullMsg)
-		if err != nil {
-			// Log internal errors within the sender.Send call itself (e.g., client selection)
-			slog.ErrorContext(logCtx, "Internal error trying to send message", slog.Any("error", err))
-			_ = p.markSendFailed(logCtx, msg.ID, nil, err)
-			continue
+		// 3. Call the Sender (handles segmentation & MNO submission attempts)
+		submitResult, sendErr = p.sender.Send(logCtx, fullMsg) // Pass fullMsg directly
+		// sendErr here represents errors *within* the Send logic (e.g., getting MNO client, segmentation issues)
+		// submitResult contains outcome per segment and overall MNO submission errors/success.
+
+		// 4. Process Result / Handle Errors
+		if sendErr != nil {
+			// Internal error within the Sender itself before/during submission attempts
+			slog.ErrorContext(logCtx, "Internal error during send attempt", slog.Any("error", sendErr))
+			p.attemptReversal(logCtx, msg.ID, fmt.Sprintf("Internal sender error: %v", sendErr))
+			_ = p.markAsFailed(logCtx, msg.ID, sendErr, "SYS_ERR")
+			continue // Next message
 		}
 
-		// Update status based on sending attempt result (success/failure logged within these)
-		if sendResult.Sent {
-			err = p.markSent(logCtx, msg.ID, sendResult)
-			if err == nil {
-				processedCount++
+		// Check the SubmitResult
+		if !submitResult.WasSubmitted || submitResult.Error != nil {
+			// Submission attempt failed definitively (e.g., MNO connection down, immediate rejection)
+			failureReason := submitResult.Error
+			if failureReason == nil {
+				failureReason = errors.New("MNO submission failed or was not attempted")
 			}
-		} else {
-			err = p.markSendFailed(logCtx, msg.ID, sendResult, sendResult.Error) // Pass logical send error
+			errorCode := "MNO_FAIL" // TODO: Map specific MNO errors if possible
+			slog.WarnContext(logCtx, "MNO submission failed", slog.Any("reason", failureReason))
+			p.attemptReversal(logCtx, msg.ID, fmt.Sprintf("MNO submission failed: %v", failureReason))
+			_ = p.markAsFailed(logCtx, msg.ID, failureReason, errorCode)
+			// Generate failure DLR? Yes, as MNO rejected/failed submission
+			go p.generateAndForwardFailureDLR(context.Background(), msg.ID, "failed", failureReason, sql.NullString{String: errorCode, Valid: true})
+			continue // Next message
 		}
-		// Log error only if DB update failed
-		if err != nil {
-			slog.ErrorContext(logCtx, "Error updating database after sending attempt", slog.Any("error", err))
+
+		// If WasSubmitted is true and submitResult.Error is nil, it implies *at least* an attempt was made.
+		// Success/failure per segment is recorded by the Sender via DB updates.
+		// Update main message status to indicate send was attempted.
+		updateErr := p.markSendAttempted(logCtx, msg.ID)
+		if updateErr != nil {
+			slog.ErrorContext(logCtx, "Failed to update message status to send_attempted", slog.Any("error", updateErr))
+			// Don't trigger reversal here, as MNO submission might have happened. Needs manual check.
+		} else {
+			processedCount++
+			slog.InfoContext(logCtx, "Message successfully processed for sending (segments submitted/attempted)")
 		}
 	}
 	return processedCount, nil
 }
 
-// markSent updates DB after successful send attempt (potentially partial for multipart)
-func (p *Processor) markSent(ctx context.Context, msgID int64, res *SendingResult) error {
-	// This function might need adjustment depending on whether MarkMessageSent
-	// still exists or if status updates are now purely per-segment.
-	// Assuming MarkMessageSent updates the main message status to 'send_attempted' or similar.
-	// Need to define MarkMessageSent query if it's still relevant.
-	// Let's assume we only log here now, segment updates happen in Sender.Send
-	slog.InfoContext(ctx, "Sending Step Completed (attempted)",
-		slog.Int64("msg_id", msgID), // Already in context, but explicit is ok
-	)
-	return nil // Placeholder - actual DB update might be needed depending on final state machine
+// attemptReversal tries to reverse a previous debit, logging errors.
+func (p *Processor) attemptReversal(ctx context.Context, msgID int64, reason string) {
+	slog.WarnContext(ctx, "Attempting wallet debit reversal", slog.String("reason", reason))
+	reverseErr := p.walletService.ReverseDebit(ctx, msgID, reason)
+	if reverseErr != nil {
+		slog.ErrorContext(ctx, "CRITICAL: Debit reversal FAILED",
+			slog.Any("reversal_error", reverseErr),
+			slog.String("reason", reason),
+		)
+		// ALERTING is essential here - money might be stuck!
+	} else {
+		slog.InfoContext(ctx, "Debit reversal successful")
+	}
 }
 
-// markSendFailed updates DB after failed send attempt
-func (p *Processor) markSendFailed(ctx context.Context, msgID int64, res *SendingResult, sendErr error) error {
-	errMsg := "send failed"
-	if sendErr != nil {
-		errMsg = sendErr.Error()
-	} else if res != nil && res.Error != nil {
-		errMsg = res.Error.Error()
+// markAsFailed updates the main message record to a failed state.
+func (p *Processor) markAsFailed(ctx context.Context, msgID int64, failureReason error, errorCode string) error {
+	errMsg := "processing failed"
+	if failureReason != nil {
+		errMsg = failureReason.Error()
 	}
-
 	dbErrMsg := errMsg
+	dbErrCode := errorCode
 
-	// Update main message status to indicate failure
-	err := p.dbQueries.MarkMessageSendFailed(ctx, database.MarkMessageSendFailedParams{
+	// Update main message status to failed
+	// Use UpdateMessageFinalStatus directly? Or a specific failure update?
+	// Let's assume UpdateMessageFinalStatus sets completed_at as well.
+	err := p.dbQueries.UpdateMessageFinalStatus(ctx, database.UpdateMessageFinalStatusParams{
 		ID:               msgID,
-		ErrorDescription: &dbErrMsg, // Use sql.NullString
-		// ErrorCode: // Map SMPP error code if available
+		FinalStatus:      "failed", // Terminal failed state
+		ErrorCode:        &dbErrCode,
+		ErrorDescription: &dbErrMsg,
 	})
 	if err == nil {
-		slog.WarnContext(ctx, "Sending Step Failed",
-			slog.Int64("msg_id", msgID),
-			slog.String("reason", errMsg),
-		)
+		slog.WarnContext(ctx, "Message marked as failed", slog.String("reason", errMsg), slog.String("error_code", errorCode))
 	} else {
-		slog.ErrorContext(ctx, "Failed to update DB status after send failure", slog.Any("error", err))
+		slog.ErrorContext(ctx, "Failed to update message status to failed", slog.Any("db_error", err))
 	}
 	return err
 }
 
+// markSendAttempted updates the main message status after segments are sent/attempted.
+func (p *Processor) markSendAttempted(ctx context.Context, msgID int64) error {
+	// This query might update processing_status to 'send_attempted'
+	err := p.dbQueries.UpdateMessageSendAttempted(ctx, msgID) // Need this query
+	if err != nil {
+		slog.ErrorContext(ctx, "Failed to update message status to send_attempted", slog.Any("db_error", err))
+	}
+	return err
+}
+
+// ========================================================================================
+// DLR Processing and Forwarding
+// ========================================================================================
+
 // UpdateSegmentDLRStatus processes an incoming DLR for a specific segment.
-func (p *Processor) UpdateSegmentDLRStatus(ctx context.Context, mnoMessageID, dlrStatus string, dlrErrorCode int32, server SMPPServer) error {
-	logCtx := ctx // Use incoming context, may not have msg_id yet
-	slog.InfoContext(logCtx, "Processing DLR",
-		slog.String("mno_msg_id", mnoMessageID),
-		slog.String("dlr_status", dlrStatus),
-		slog.Any("dlr_error_code", dlrErrorCode),
+// This is intended to be called by the MNO Connector's DLR handler.
+func (p *Processor) UpdateSegmentDLRStatus(ctx context.Context, connectorID int32, dlrInfo mno.DLRInfo) error {
+	logCtx := ctx                                                      // Use incoming context
+	logCtx = logging.ContextWithMNOConnID(logCtx, connectorID)         // Add connector ID
+	logCtx = logging.ContextWithMNOMsgID(logCtx, dlrInfo.MnoMessageID) // Add MNO Msg ID
+
+	slog.InfoContext(logCtx, "Processing received DLR",
+		slog.String("dlr_status", dlrInfo.Status),
+		slog.Any("dlr_error_code", dlrInfo.ErrorCode),
+		slog.Time("dlr_timestamp", dlrInfo.Timestamp),
 	)
 
-	// 1. Find the specific segment record
-	segmentInfo, err := p.dbQueries.FindSegmentByMnoMessageID(logCtx, &mnoMessageID)
+	// 1. Find the specific segment record using MNO Message ID
+	segmentInfo, err := p.dbQueries.FindSegmentByMnoMessageID(logCtx, &dlrInfo.MnoMessageID)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			slog.WarnContext(logCtx, "Received DLR for unknown MNO message ID", slog.String("mno_msg_id", mnoMessageID))
-			return nil // Not an error we can handle further
+			slog.WarnContext(logCtx, "Received DLR for unknown/unmatched MNO message ID")
+			return nil // Ignore DLR for unknown ID
 		}
-		slog.ErrorContext(logCtx, "DB error finding segment for DLR", slog.String("mno_msg_id", mnoMessageID), slog.Any("error", err))
-		return fmt.Errorf("db error finding segment for DLR (MNO ID %s): %w", mnoMessageID, err)
+		slog.ErrorContext(logCtx, "DB error finding segment for DLR", slog.Any("error", err))
+		return fmt.Errorf("db error finding segment for DLR (MNO ID %s): %w", dlrInfo.MnoMessageID, err)
 	}
 
-	// Enrich context with MessageID and SegmentID for subsequent logs/calls
+	// Enrich context further
 	logCtx = logging.ContextWithMessageID(logCtx, segmentInfo.MessageID)
-	// logCtx = logging.ContextWithSegmentID(logCtx, segmentInfo.SegmentID) // Add if needed
+	logCtx = logging.ContextWithSegmentID(logCtx, segmentInfo.SegmentID) // Add segment ID
 
-	// 2. Update the segment's DLR status
+	// 2. Update the specific segment's DLR status in DB
 	err = p.dbQueries.UpdateSegmentDLR(logCtx, database.UpdateSegmentDLRParams{
 		ID:        segmentInfo.SegmentID,
-		DlrStatus: &dlrStatus,
-		ErrorCode: &dlrErrorCode,
+		DlrStatus: &dlrInfo.Status,
+		ErrorCode: &dlrInfo.ErrorCode, // Pass through MNO error code
 	})
 	if err != nil {
-		// Log critical error, as we couldn't update the status
-		slog.ErrorContext(logCtx, "CRITICAL: Failed to update segment DLR status in DB",
-			slog.Int64("segment_id", segmentInfo.SegmentID),
-			slog.String("mno_msg_id", mnoMessageID),
-			slog.Any("error", err),
-		)
+		slog.ErrorContext(logCtx, "CRITICAL: Failed to update segment DLR status in DB", slog.Any("error", err))
+		// Don't return error here? Or should we? If DB fails, we might reprocess DLR later.
 		return fmt.Errorf("failed to update segment DLR status: %w", err)
 	}
-	slog.InfoContext(logCtx, "Updated segment DLR status",
-		slog.Int64("segment_id", segmentInfo.SegmentID),
-		slog.Any("segment_seqn", segmentInfo.SegmentSeqn),
-		slog.String("dlr_status", dlrStatus),
+	slog.InfoContext(logCtx, "Updated segment DLR status in DB",
+		slog.Int("segment_seqn", int(segmentInfo.SegmentSeqn)),
+		slog.String("dlr_status", dlrInfo.Status),
 	)
 
-	// 3. Aggregate Status for Parent Message (Run asynchronously)
-	// Pass enriched context if aggregateMessageStatus uses logging
-	go p.aggregateMessageStatus(logging.ContextWithMessageID(context.Background(), segmentInfo.MessageID), segmentInfo.MessageID) // Pass clean context + ID
+	// 3. Aggregate Status for Parent Message (Run asynchronously to avoid blocking DLR processing)
+	// Pass a clean background context enriched with MessageID for tracing aggregation task
+	go p.aggregateMessageStatus(logging.ContextWithMessageID(context.Background(), segmentInfo.MessageID), segmentInfo.MessageID)
 
-	// 4. Forward DLR (if needed) - Pass segmentInfo.MessageID
-	// Pass enriched context if forwardDLR uses logging
-	go p.forwardDLR(logging.ContextWithMessageID(context.Background(), segmentInfo.MessageID), segmentInfo.MessageID, dlrStatus, dlrErrorCode, server) // Pass clean context + ID
+	// 4. Forward DLR back to the originating SP (Run asynchronously)
+	// Pass a clean background context enriched with MessageID for tracing forwarding task
+	go p.generateAndForwardSuccessDLR(logging.ContextWithMessageID(context.Background(), segmentInfo.MessageID), segmentInfo.MessageID, dlrInfo)
 
-	return nil // DLR processing for this segment successful
+	return nil // DLR processing for this segment successful from MNO perspective
 }
 
 // aggregateMessageStatus checks all segments and updates the parent message status
 func (p *Processor) aggregateMessageStatus(ctx context.Context, messageID int64) {
-	// Add message ID if not already in context (it should be from the caller)
-	logCtx := logging.ContextWithMessageID(ctx, messageID)
-	slog.DebugContext(logCtx, "Starting message status aggregation")
+	// Context should already have messageID from caller
+	slog.DebugContext(ctx, "Starting message status aggregation")
+	time.Sleep(100 * time.Millisecond) // Small delay, consider better concurrency control
 
-	// Add slight delay to allow concurrent DLR updates for the same message to potentially settle? Risky. Consider locking or deterministic aggregation trigger.
-	time.Sleep(100 * time.Millisecond)
+	segments, err := p.dbQueries.GetSegmentStatusesForMessage(ctx, messageID)
+	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		slog.ErrorContext(ctx, "Error fetching segments for status aggregation", slog.Any("error", err))
+		return
+	}
 
-	segments, err := p.dbQueries.GetSegmentStatusesForMessage(logCtx, messageID)
+	totalSegmentsDB, err := p.dbQueries.GetMessageTotalSegments(ctx, messageID)
 	if err != nil {
-		// Don't log ErrNoRows as error here, could happen if message deleted?
-		if !errors.Is(err, pgx.ErrNoRows) {
-			slog.ErrorContext(logCtx, "Error fetching segments for status aggregation", slog.Any("error", err))
-		}
+		slog.ErrorContext(ctx, "Error fetching total segment count for status aggregation", slog.Any("error", err))
 		return
 	}
 
-	totalSegmentsDB, err := p.dbQueries.GetMessageTotalSegments(logCtx, messageID)
-	if err != nil {
-		slog.ErrorContext(logCtx, "Error fetching total segment count for status aggregation", slog.Any("error", err))
+	if len(segments) < int(totalSegmentsDB) {
+		slog.DebugContext(ctx, "Skipping aggregation: Not all segment statuses received yet",
+			slog.Int("found", len(segments)), slog.Int("expected", int(totalSegmentsDB)))
 		return
 	}
+	// Optional: Handle len(segments) > int(totalSegmentsDB) warning
 
-	if len(segments) < int(totalSegmentsDB) { // Check if less than expected
-		// Not all segments have reported yet (or DB inconsistency)
-		slog.DebugContext(logCtx, "Skipping aggregation: Not all segment statuses received yet",
-			slog.Int("found", len(segments)),
-			slog.Any("expected", totalSegmentsDB),
-		)
-		return
-	}
-	if len(segments) > int(totalSegmentsDB) {
-		slog.WarnContext(logCtx, "Inconsistent segment count during aggregation",
-			slog.Int("found", len(segments)),
-			slog.Any("expected", totalSegmentsDB),
-		)
-		// Proceed cautiously? Or fail? Let's proceed.
-	}
-
-	deliveredCount := 0
-	failedCount := 0
-	pendingCount := 0
-	finalStatus := "unknown" // Default
+	var deliveredCount, failedCount, pendingCount int
+	finalStatus := "unknown"
 
 	for _, seg := range segments {
-		// Correctly handle sql.NullString
 		status := ""
 		if seg.DlrStatus != nil {
 			status = strings.ToUpper(*seg.DlrStatus)
 		}
-
 		switch status {
 		case "DELIVRD":
 			deliveredCount++
 		case "EXPIRED", "DELETED", "UNDELIV", "REJECTD":
 			failedCount++
-		case "": // Treat NULL/empty as pending
-			pendingCount++
-		default: // ACCEPTD, UNKNOWN etc. also treated as pending for final status aggregation
-			pendingCount++
+		case "":
+			pendingCount++ // Treat NULL/empty as pending
+		default:
+			pendingCount++ // Treat other non-terminal states as pending
 		}
 	}
 
-	// Determine final status based on counts
+	// Determine final status
 	if pendingCount > 0 {
-		finalStatus = "processing" // Still waiting for some DLRs
+		finalStatus = "processing"
 	} else if failedCount > 0 {
-		finalStatus = "failed" // If any segment failed, mark whole message failed
-	} else if deliveredCount > 0 && deliveredCount >= int(totalSegmentsDB) { // Check delivered >= expected
-		finalStatus = "delivered" // All expected segments delivered
-	} else if deliveredCount > 0 && failedCount == 0 && pendingCount == 0 {
-		// Edge case: Fewer segments reported than total_segments, but all are DELIVRD. Risky. Mark delivered?
-		slog.WarnContext(logCtx, "Marking message delivered despite segment count mismatch", slog.Int("delivered", deliveredCount), slog.Int32("expected", totalSegmentsDB))
+		finalStatus = "failed"
+	} else if deliveredCount > 0 && deliveredCount >= int(totalSegmentsDB) {
 		finalStatus = "delivered"
-	} else {
-		slog.WarnContext(logCtx, "Inconsistent segment states during aggregation logic",
-			slog.Int("delivered", deliveredCount),
-			slog.Int("failed", failedCount),
-			slog.Int("pending", pendingCount),
-			slog.Any("expected", totalSegmentsDB),
-		)
-		finalStatus = "unknown"
-	}
+	} // Add warning/handling for mismatch if desired
 
-	// Only update if a terminal state is reached and status changed
+	// Update only if a terminal state is reached and status changed
 	if finalStatus == "delivered" || finalStatus == "failed" {
-		// Optional: Check current status before updating
-		currentStatusRec, err := p.dbQueries.GetMessageFinalStatus(logCtx, messageID) // Needs query: SELECT final_status FROM messages WHERE id=$1
-		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
-			slog.WarnContext(logCtx, "Could not get current final status before aggregation update", slog.Any("error", err))
+		currentStatusRec, err := p.dbQueries.GetMessageFinalStatus(ctx, messageID)
+		statusChanged := true // Assume change unless proven otherwise
+		if err == nil && currentStatusRec != "" && currentStatusRec == finalStatus {
+			statusChanged = false
+		} else if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+			slog.WarnContext(ctx, "Could not get current final status before aggregation update", slog.Any("error", err))
 		}
 
-		// Only update if status is actually changing or not yet set correctly
-		if err == nil && currentStatusRec.FinalStatus == finalStatus {
-			slog.DebugContext(logCtx, "Final status already matches target, skipping update", slog.String("status", finalStatus))
-		} else {
-			slog.InfoContext(logCtx, "Attempting to update final message status", slog.String("new_status", finalStatus))
-			err = p.dbQueries.UpdateMessageFinalStatus(logCtx, database.UpdateMessageFinalStatusParams{
-				ID:          messageID,
-				FinalStatus: finalStatus,
+		if statusChanged {
+			slog.InfoContext(ctx, "Attempting to update final message status", slog.String("new_status", finalStatus))
+			// --- Aggregate Error Code/Description ---
+			// Find first segment error or combine them? Needs logic.
+			// For now, leave ErrorCode/Desc update out of aggregation, handle on initial failure.
+			aggErrCode := ""
+			aggErrMsg := ""
+			// --- End Aggregate Error ---
+			err = p.dbQueries.UpdateMessageFinalStatus(ctx, database.UpdateMessageFinalStatusParams{
+				ID:               messageID,
+				FinalStatus:      finalStatus,
+				ErrorCode:        &aggErrCode, // Use aggregated error info if implemented
+				ErrorDescription: &aggErrMsg,
 			})
 			if err != nil {
-				slog.ErrorContext(logCtx, "Error updating final message status", slog.String("attempted_status", finalStatus), slog.Any("error", err))
+				slog.ErrorContext(ctx, "Error updating final message status", slog.String("attempted_status", finalStatus), slog.Any("error", err))
 			} else {
-				slog.InfoContext(logCtx, "Aggregated final message status updated successfully", slog.String("final_status", finalStatus))
+				slog.InfoContext(ctx, "Aggregated final message status updated successfully", slog.String("final_status", finalStatus))
 			}
+		} else {
+			slog.DebugContext(ctx, "Final status already matches target, skipping update", slog.String("status", finalStatus))
 		}
 	} else {
-		slog.DebugContext(logCtx, "Aggregation determined non-terminal status, no update performed", slog.String("status", finalStatus))
+		slog.DebugContext(ctx, "Aggregation determined non-terminal status, no update performed", slog.String("status", finalStatus))
 	}
 }
 
-// forwardDLR (Extracted forwarding logic)
-func (p *Processor) forwardDLR(ctx context.Context, messageID int64, dlrStatus string, dlrErrorCode sql.NullInt32, server SMPPServer) {
-	logCtx := logging.ContextWithMessageID(ctx, messageID) // Use context with MsgID
-	slog.DebugContext(logCtx, "Attempting to forward DLR")
+// generateAndForwardSuccessDLR constructs and forwards a DLR for a terminal success/failure state received from MNO.
+func (p *Processor) generateAndForwardSuccessDLR(ctx context.Context, messageID int64, dlrInfo mno.DLRInfo) {
+	logCtx := logging.ContextWithMessageID(ctx, messageID)
+	slog.DebugContext(logCtx, "Attempting to generate and forward success/failure DLR", slog.String("dlr_status", dlrInfo.Status))
 
-	// TODO: Implement DLR forwarding logic using slog for logging
-	// 1. Get SP Info (SystemID, ClientRef, Original Src/Dest Addr) from DB using messageID
-	//    spInfo, err := p.dbQueries.GetSPInfoForForwarding(logCtx, messageID) ... handle error with slog
-	// 2. Get active connection writer for SP's systemID from the server
-	//    connWriter, err := server.GetBoundClientWriter(spInfo.SystemID) ... handle error with slog
-	// 3. Construct deliver_sm PDU
-	//    dlrPdu := pdu.NewDeliverSM() ... set fields ... use spInfo.ClientRef for 'id:' field
-	// 4. Write PDU
-	//    err = connWriter.Write(dlrPdu) ... handle error with slog
-	slog.WarnContext(logCtx, "DLR forwarding not fully implemented") // Placeholder log
+	// 1. Get SP Info needed for forwarding (including client ref, original addresses, protocol details)
+	// Need query: SELECT m.id, m.client_ref, m.original_source_addr, m.original_destination_addr, m.submitted_at, m.completed_at, m.total_segments,
+	// spc.protocol, spc.system_id, spc.http_config FROM messages m JOIN sp_credentials spc ON m.sp_credential_id = spc.id WHERE m.id = $1
+	spMsgInfo, err := p.dbQueries.GetSPMessageInfoForDLR(logCtx, messageID)
+	if err != nil {
+		slog.ErrorContext(logCtx, "Cannot forward DLR: Failed to get SP/Message info", slog.Any("error", err))
+		return
+	}
+
+	// 2. Prepare SP Details
+	spDetails := sp.SPDetails{
+		ServiceProviderID: spMsgInfo.ServiceProviderID, // Need SP ID from query
+		Protocol:          spMsgInfo.Protocol,
+		SMPPSystemID:      spMsgInfo.SystemID, // This is sql.NullString from DB
+		HTTPCallbackURL:   sql.NullString{},   // TODO: Extract from spMsgInfo.HttpConfig JSONB
+		HTTPAuthConfig:    sql.NullString{},   // TODO: Extract from spMsgInfo.HttpConfig JSONB
+	}
+
+	// 3. Construct Forwarded DLR Info
+	forwardedDLR := sp.ForwardedDLRInfo{
+		InternalMessageID: messageID,
+		ClientMessageRef:  spMsgInfo.ClientRef,               // Use client's reference
+		SourceAddr:        spMsgInfo.OriginalDestinationAddr, // DLR source is original MT destination
+		DestAddr:          spMsgInfo.OriginalSourceAddr,      // DLR destination is original MT source (sender ID)
+		SubmitDate:        spMsgInfo.SubmittedAt.Time,        // Use submitted_at
+		DoneDate:          dlrInfo.Timestamp,                 // Use timestamp from MNO DLR
+		Status:            dlrInfo.Status,                    // Pass through MNO status
+		ErrorCode:         dlrInfo.ErrorCode,                 // Pass through MNO error code
+		// NetworkCode:    dlrInfo.NetworkCode,          // Pass through if available
+		TotalSegments: spMsgInfo.TotalSegments,
+	}
+
+	// 4. Forward using the DLRForwarder interface
+	err = p.dlrForwarder.ForwardDLR(logCtx, spDetails, forwardedDLR)
+	if err != nil {
+		slog.ErrorContext(logCtx, "Failed to forward DLR to SP",
+			slog.String("protocol", spDetails.Protocol),
+			slog.String("identifier", spDetails.SMPPSystemID.String), // Log identifier used
+			slog.Any("error", err),
+		)
+	} else {
+		slog.InfoContext(logCtx, "Successfully forwarded DLR to SP",
+			slog.String("protocol", spDetails.Protocol),
+			slog.String("identifier", spDetails.SMPPSystemID.String),
+			slog.String("dlr_status", forwardedDLR.Status),
+		)
+	}
 }
 
-// --- Helper ---
-// Interface for smppclient.Manager needed by NewProcessor
-type SMPPClientManager interface {
-	GetClient(ctx context.Context, mnoID int32) (*smppclient.MNOClient, error)
+// generateAndForwardFailureDLR constructs and forwards a DLR when processing fails *before* MNO involvement.
+func (p *Processor) generateAndForwardFailureDLR(ctx context.Context, messageID int64, failureStatus string, failureReason error, errorCode sql.NullString) {
+	logCtx := logging.ContextWithMessageID(ctx, messageID)
+	slog.DebugContext(logCtx, "Attempting to generate and forward internal failure DLR", slog.String("failure_status", failureStatus))
+
+	// 1. Get SP Info (same query as above)
+	spMsgInfo, err := p.dbQueries.GetSPMessageInfoForDLR(logCtx, messageID)
+	if err != nil {
+		slog.ErrorContext(logCtx, "Cannot forward failure DLR: Failed to get SP/Message info", slog.Any("error", err))
+		return
+	}
+
+	// 2. Prepare SP Details (same as above)
+	spDetails := sp.SPDetails{
+		ServiceProviderID: spMsgInfo.ServiceProviderID, // Need SP ID
+		Protocol:          spMsgInfo.Protocol,
+		SMPPSystemID:      spMsgInfo.SystemID,
+		HTTPCallbackURL:   sql.NullString{}, // TODO: Extract from spMsgInfo.HttpConfig
+		HTTPAuthConfig:    sql.NullString{}, // TODO: Extract from spMsgInfo.HttpConfig
+	}
+
+	// Map internal failure status to DLR status code
+	dlrStatusString := "UNDELIV" // Default for failures
+	if failureStatus == "failed_validation" || failureStatus == "failed_routing" {
+		dlrStatusString = "REJECTD"
+	}
+
+	// 3. Construct Forwarded DLR Info
+	forwardedDLR := sp.ForwardedDLRInfo{
+		InternalMessageID: messageID,
+		ClientMessageRef:  spMsgInfo.ClientRef,
+		SourceAddr:        spMsgInfo.OriginalDestinationAddr,
+		DestAddr:          spMsgInfo.OriginalSourceAddr,
+		SubmitDate:        spMsgInfo.SubmittedAt.Time,
+		DoneDate:          time.Now(), // Failure happened now
+		Status:            dlrStatusString,
+		ErrorCode:         errorCode, // Use the mapped internal error code
+		TotalSegments:     spMsgInfo.TotalSegments,
+		// Network code likely N/A for internal failures
+	}
+
+	// 4. Forward using the DLRForwarder interface
+	err = p.dlrForwarder.ForwardDLR(logCtx, spDetails, forwardedDLR)
+	if err != nil {
+		slog.ErrorContext(logCtx, "Failed to forward internal failure DLR to SP",
+			slog.String("protocol", spDetails.Protocol),
+			slog.String("identifier", spDetails.SMPPSystemID.String),
+			slog.Any("error", err),
+		)
+	} else {
+		slog.InfoContext(logCtx, "Successfully forwarded internal failure DLR to SP",
+			slog.String("protocol", spDetails.Protocol),
+			slog.String("identifier", spDetails.SMPPSystemID.String),
+			slog.String("dlr_status", forwardedDLR.Status),
+		)
+	}
 }
 
-// Interface for SMPPServer needed by DLR forwarding
-// type SMPPServer interface { ... } defined above
+// ========================================================================================
+// Placeholders / TODOs
+// ========================================================================================
+// Need to define/implement:
+// - SMPPServer interface used in UpdateSegmentDLRStatus/forwardDLR (specifically GetBoundClientWriter)
+// - pdu.Writer interface (likely from your chosen SMPP library)
+// - smppclient.Manager and smppclient.MNOClient interfaces/structs used in NewProcessor and Sender
+// - WalletService interface and implementation (used for reversals)
+// - DLRForwarder interface and implementations (SMPSPForwarder, HTTPSPForwarder)
+// - Actual implementations for Router, Validator, Pricer, Sender interfaces
+// - Segmentation logic (e.g., pkg/segmenter)
+// - UDH handling (e.g., pkg/smpp/pdu/udh)
+// - Required database queries mentioned in comments (GetSPMessageInfoForDLR, GetMessageTotalSegments, GetMessageFinalStatus, UpdateMessageSendAttempted etc.)
+// - JSONB extraction logic for HTTP config in SPDetails construction.
+// - Error code mapping logic.

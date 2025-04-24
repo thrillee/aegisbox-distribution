@@ -9,41 +9,54 @@ import (
 )
 
 type Querier interface {
+	// Creates initial segment record before sending attempt
 	CreateMessageSegment(ctx context.Context, arg CreateMessageSegmentParams) (int64, error)
-	CreateSMPPCredential(ctx context.Context, arg CreateSMPPCredentialParams) (SmppCredential, error)
+	CreateSMPPCredential(ctx context.Context, arg CreateSMPPCredentialParams) (SpCredential, error)
 	CreateServiceProvider(ctx context.Context, arg CreateServiceProviderParams) (ServiceProvider, error)
 	CreateWallet(ctx context.Context, arg CreateWalletParams) (Wallet, error)
 	CreateWalletTransaction(ctx context.Context, arg CreateWalletTransactionParams) (WalletTransaction, error)
 	FindMessageByMnoMessageID(ctx context.Context, mnoMessageID *string) (FindMessageByMnoMessageIDRow, error)
+	// Finds segment details based on MNO Message ID for DLR processing
 	FindSegmentByMnoMessageID(ctx context.Context, mnoMessageID *string) (FindSegmentByMnoMessageIDRow, error)
 	GetApplicablePrice(ctx context.Context, arg GetApplicablePriceParams) (GetApplicablePriceRow, error)
 	GetApplicableRoutingRule(ctx context.Context, prefix string) (int32, error)
+	// Select fields needed by the Pricer
 	GetMessageDetailsForPricing(ctx context.Context, id int64) (GetMessageDetailsForPricingRow, error)
 	GetMessageDetailsForSending(ctx context.Context, id int64) (GetMessageDetailsForSendingRow, error)
 	GetMessageFinalStatus(ctx context.Context, id int64) (string, error)
 	GetMessageTotalSegments(ctx context.Context, id int64) (int32, error)
 	GetMessagesByStatus(ctx context.Context, arg GetMessagesByStatusParams) ([]GetMessagesByStatusRow, error)
 	GetMessagesToPrice(ctx context.Context, limit int32) ([]GetMessagesToPriceRow, error)
-	GetMessagesToRoute(ctx context.Context, limit int32) ([]GetMessagesToRouteRow, error)
-	GetMessagesToSend(ctx context.Context, limit int32) ([]GetMessagesToSendRow, error)
-	GetSMPPCredentialBySystemID(ctx context.Context, systemID string) (GetSMPPCredentialBySystemIDRow, error)
+	GetSPCredentialBySystemID(ctx context.Context, systemID *string) (GetSPCredentialBySystemIDRow, error)
+	// Optional: Prevent redundant updates
+	// Select fields needed for DLR forwarding
+	GetSPMessageInfoForDLR(ctx context.Context, id int64) (GetSPMessageInfoForDLRRow, error)
+	// Gets all segment statuses for final status aggregation
 	GetSegmentStatusesForMessage(ctx context.Context, messageID int64) ([]GetSegmentStatusesForMessageRow, error)
 	GetServiceProviderByID(ctx context.Context, id int32) (ServiceProvider, error)
 	GetTemplateContent(ctx context.Context, arg GetTemplateContentParams) (string, error)
 	GetWalletForUpdate(ctx context.Context, arg GetWalletForUpdateParams) (GetWalletForUpdateRow, error)
 	GetWalletsBelowThreshold(ctx context.Context) ([]GetWalletsBelowThresholdRow, error)
 	InsertMessageIn(ctx context.Context, arg InsertMessageInParams) (int64, error)
+	// Use this if the Sender.Send fails catastrophically *before* MNO gets involved,
+	// or potentially as the final aggregated status if needed.
 	MarkMessageSendFailed(ctx context.Context, arg MarkMessageSendFailedParams) error
 	MarkMessageSent(ctx context.Context, id int64) error
 	// Check threshold and notification time
 	UpdateLowBalanceNotifiedAt(ctx context.Context, id int32) error
 	UpdateMessageDLRStatus(ctx context.Context, arg UpdateMessageDLRStatusParams) error
+	// Updates the final aggregated status and error info
 	UpdateMessageFinalStatus(ctx context.Context, arg UpdateMessageFinalStatusParams) error
 	UpdateMessagePriced(ctx context.Context, arg UpdateMessagePricedParams) error
 	UpdateMessageRoutingInfo(ctx context.Context, arg UpdateMessageRoutingInfoParams) error
+	// Updates status after Sender.Send finishes (regardless of segment success/failure)
+	UpdateMessageSendAttempted(ctx context.Context, id int64) error
 	UpdateMessageValidatedRouted(ctx context.Context, arg UpdateMessageValidatedRoutedParams) error
+	// Updates segment status based on received DLR
 	UpdateSegmentDLR(ctx context.Context, arg UpdateSegmentDLRParams) error
+	// Updates segment if MNO submission attempt failed
 	UpdateSegmentSendFailed(ctx context.Context, arg UpdateSegmentSendFailedParams) error
+	// Updates segment after successful MNO submission
 	UpdateSegmentSent(ctx context.Context, arg UpdateSegmentSentParams) error
 	// Lock the row for atomic update
 	UpdateWalletBalance(ctx context.Context, arg UpdateWalletBalanceParams) (Wallet, error)

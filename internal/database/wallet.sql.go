@@ -16,7 +16,7 @@ INSERT INTO wallet_transactions (
     wallet_id, message_id, transaction_type, amount, balance_before, balance_after, description
 ) VALUES (
     $1, $2, $3, $4, $5, $6, $7
-) RETURNING id, wallet_id, message_id, transaction_type, amount, balance_before, balance_after, description, transaction_date
+) RETURNING id, wallet_id, message_id, transaction_type, amount, balance_before, balance_after, description, transaction_date, reference_transaction_id
 `
 
 type CreateWalletTransactionParams struct {
@@ -50,6 +50,7 @@ func (q *Queries) CreateWalletTransaction(ctx context.Context, arg CreateWalletT
 		&i.BalanceAfter,
 		&i.Description,
 		&i.TransactionDate,
+		&i.ReferenceTransactionID,
 	)
 	return i, err
 }

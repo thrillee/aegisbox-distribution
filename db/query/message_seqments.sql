@@ -1,60 +1,51 @@
 -- name: FindSegmentByMnoMessageID :one
-SELECT 
-    ms.message_id, 
-    ms.segment_seqn, 
-    ms.id AS segment_id,
-    m.service_provider_id,
-    m.client_message_id
-FROM message_segments ms
-JOIN messages m ON m.id = ms.message_id
-WHERE ms.mno_message_id = $1
+-- Finds segment details based on MNO Message ID for DLR processing
+SELECT id as segment_id, message_id, segment_seqn
+FROM message_segments
+WHERE mno_message_id = $1 -- Expects sql.NullString
 LIMIT 1;
 
 -- name: CreateMessageSegment :one
+-- Creates initial segment record before sending attempt
 INSERT INTO message_segments (message_id, segment_seqn, created_at)
 VALUES ($1, $2, NOW())
 RETURNING id;
 
 -- name: UpdateSegmentSent :exec
+-- Updates segment after successful MNO submission
 UPDATE message_segments
-SET mno_message_id = $1,
-    mno_connection_id = $2,
-    sent_to_mno_at = NOW()
+SET
+    mno_message_id = $1,    -- sql.NullString
+    mno_connection_id = $2, -- sql.NullInt32
+    sent_to_mno_at = NOW(),
+    error_code = NULL,      -- Clear previous errors if any
+    error_description = NULL
 WHERE id = $3;
 
 -- name: UpdateSegmentSendFailed :exec
+-- Updates segment if MNO submission attempt failed
 UPDATE message_segments
-SET error_code = $1,
+SET
+    error_code = $1,
     error_description = $2,
-    sent_to_mno_at = NOW() -- Mark attempt time even on failure
+    sent_to_mno_at = NOW()  -- Mark attempt time even on failure
 WHERE id = $3;
 
 
 -- name: UpdateSegmentDLR :exec
+-- Updates segment status based on received DLR
 UPDATE message_segments
-SET dlr_status = $1,
+SET
+    dlr_status = $1,
     dlr_received_at = NOW(),
-    error_code = $2 -- DLR error code
+    error_code = $2       -- (Error code from DLR)
+    -- Keep segment-level error_description from MNO? Or clear it? Let's clear.
+    -- error_description = NULL
 WHERE id = $3;
 
 -- name: GetSegmentStatusesForMessage :many
-SELECT segment_seqn, dlr_status FROM message_segments
+-- Gets all segment statuses for final status aggregation
+SELECT segment_seqn, dlr_status -- dlr_status is sql.NullString
+FROM message_segments
 WHERE message_id = $1
 ORDER BY segment_seqn;
-
--- name: UpdateMessageFinalStatus :exec
-UPDATE messages
-SET final_status = $1,
-    completed_at = NOW()
-WHERE id = $2;
-
--- name: GetMessageTotalSegments :one
-SELECT total_segments
-FROM messages
-WHERE id = $1;
-
--- name: GetMessageFinalStatus :one
-SELECT final_status
-FROM messages
-WHERE id = $1;
-

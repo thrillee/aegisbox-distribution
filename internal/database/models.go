@@ -11,7 +11,7 @@ import (
 
 type DeliveryReportsRaw struct {
 	ID               int64              `json:"id"`
-	MessageID        int64              `json:"messageId"`
+	MessageSegmentID *int64             `json:"messageSegmentId"`
 	MnoConnectionID  int32              `json:"mnoConnectionId"`
 	RawPdu           *string            `json:"rawPdu"`
 	ReceivedAt       pgtype.Timestamptz `json:"receivedAt"`
@@ -20,28 +20,27 @@ type DeliveryReportsRaw struct {
 }
 
 type Message struct {
-	ID                  int64              `json:"id"`
-	ServiceProviderID   int32              `json:"serviceProviderId"`
-	SmppCredentialID    int32              `json:"smppCredentialId"`
-	ClientMessageID     *string            `json:"clientMessageId"`
-	SenderIDUsed        string             `json:"senderIdUsed"`
-	DestinationMsisdn   string             `json:"destinationMsisdn"`
-	ShortMessage        string             `json:"shortMessage"`
-	TemplateID          *int32             `json:"templateId"`
-	ApprovedSenderID    *int32             `json:"approvedSenderId"`
-	RoutedMnoID         *int32             `json:"routedMnoId"`
-	CurrencyCode        *string            `json:"currencyCode"`
-	TotalSegments       int32              `json:"totalSegments"`
-	ClientRef           *string            `json:"clientRef"`
-	SubmittedAt         pgtype.Timestamptz `json:"submittedAt"`
-	ReceivedAt          pgtype.Timestamptz `json:"receivedAt"`
-	ProcessedForQueueAt pgtype.Timestamptz `json:"processedForQueueAt"`
-	CompletedAt         pgtype.Timestamptz `json:"completedAt"`
-	ProcessingStatus    string             `json:"processingStatus"`
-	SendStatus          *string            `json:"sendStatus"`
-	FinalStatus         string             `json:"finalStatus"`
-	ErrorCode           *int32             `json:"errorCode"`
-	ErrorDescription    *string            `json:"errorDescription"`
+	ID                      int64              `json:"id"`
+	ServiceProviderID       int32              `json:"serviceProviderId"`
+	SpCredentialID          int32              `json:"spCredentialId"`
+	ClientMessageID         *string            `json:"clientMessageId"`
+	ClientRef               *string            `json:"clientRef"`
+	OriginalSourceAddr      string             `json:"originalSourceAddr"`
+	OriginalDestinationAddr string             `json:"originalDestinationAddr"`
+	ShortMessage            string             `json:"shortMessage"`
+	TotalSegments           int32              `json:"totalSegments"`
+	SubmittedAt             pgtype.Timestamptz `json:"submittedAt"`
+	ReceivedAt              pgtype.Timestamptz `json:"receivedAt"`
+	ApprovedSenderID        *int32             `json:"approvedSenderId"`
+	TemplateID              *int32             `json:"templateId"`
+	RoutedMnoID             *int32             `json:"routedMnoId"`
+	CurrencyCode            string             `json:"currencyCode"`
+	ProcessingStatus        string             `json:"processingStatus"`
+	FinalStatus             string             `json:"finalStatus"`
+	ErrorCode               *string            `json:"errorCode"`
+	ErrorDescription        *string            `json:"errorDescription"`
+	ProcessedForQueueAt     pgtype.Timestamptz `json:"processedForQueueAt"`
+	CompletedAt             pgtype.Timestamptz `json:"completedAt"`
 }
 
 type MessageSegment struct {
@@ -53,7 +52,7 @@ type MessageSegment struct {
 	SentToMnoAt      pgtype.Timestamptz `json:"sentToMnoAt"`
 	DlrStatus        *string            `json:"dlrStatus"`
 	DlrReceivedAt    pgtype.Timestamptz `json:"dlrReceivedAt"`
-	ErrorCode        *int32             `json:"errorCode"`
+	ErrorCode        *string            `json:"errorCode"`
 	ErrorDescription *string            `json:"errorDescription"`
 	CreatedAt        pgtype.Timestamptz `json:"createdAt"`
 }
@@ -69,17 +68,19 @@ type Mno struct {
 }
 
 type MnoConnection struct {
-	ID        int32              `json:"id"`
-	MnoID     int32              `json:"mnoId"`
-	SystemID  string             `json:"systemId"`
-	Password  string             `json:"password"`
-	Host      string             `json:"host"`
-	Port      int32              `json:"port"`
-	UseTls    bool               `json:"useTls"`
-	BindType  string             `json:"bindType"`
-	Status    string             `json:"status"`
-	CreatedAt pgtype.Timestamptz `json:"createdAt"`
-	UpdatedAt pgtype.Timestamptz `json:"updatedAt"`
+	ID         int32              `json:"id"`
+	MnoID      int32              `json:"mnoId"`
+	Protocol   string             `json:"protocol"`
+	Status     string             `json:"status"`
+	SystemID   *string            `json:"systemId"`
+	Password   *string            `json:"password"`
+	Host       *string            `json:"host"`
+	Port       *int32             `json:"port"`
+	UseTls     *bool              `json:"useTls"`
+	BindType   *string            `json:"bindType"`
+	HttpConfig []byte             `json:"httpConfig"`
+	CreatedAt  pgtype.Timestamptz `json:"createdAt"`
+	UpdatedAt  pgtype.Timestamptz `json:"updatedAt"`
 }
 
 type PricingRule struct {
@@ -111,21 +112,24 @@ type SenderID struct {
 }
 
 type ServiceProvider struct {
-	ID        int32              `json:"id"`
-	Name      string             `json:"name"`
-	Email     string             `json:"email"`
-	Status    string             `json:"status"`
-	CreatedAt pgtype.Timestamptz `json:"createdAt"`
-	UpdatedAt pgtype.Timestamptz `json:"updatedAt"`
+	ID                  int32              `json:"id"`
+	Name                string             `json:"name"`
+	Email               string             `json:"email"`
+	Status              string             `json:"status"`
+	DefaultCurrencyCode string             `json:"defaultCurrencyCode"`
+	CreatedAt           pgtype.Timestamptz `json:"createdAt"`
+	UpdatedAt           pgtype.Timestamptz `json:"updatedAt"`
 }
 
-type SmppCredential struct {
+type SpCredential struct {
 	ID                int32              `json:"id"`
 	ServiceProviderID int32              `json:"serviceProviderId"`
-	SystemID          string             `json:"systemId"`
-	PasswordHash      string             `json:"passwordHash"`
-	BindType          string             `json:"bindType"`
+	Protocol          string             `json:"protocol"`
 	Status            string             `json:"status"`
+	SystemID          *string            `json:"systemId"`
+	PasswordHash      *string            `json:"passwordHash"`
+	BindType          *string            `json:"bindType"`
+	HttpConfig        []byte             `json:"httpConfig"`
 	CreatedAt         pgtype.Timestamptz `json:"createdAt"`
 	UpdatedAt         pgtype.Timestamptz `json:"updatedAt"`
 }
@@ -152,13 +156,14 @@ type Wallet struct {
 }
 
 type WalletTransaction struct {
-	ID              int64              `json:"id"`
-	WalletID        int32              `json:"walletId"`
-	MessageID       *int64             `json:"messageId"`
-	TransactionType string             `json:"transactionType"`
-	Amount          decimal.Decimal    `json:"amount"`
-	BalanceBefore   decimal.Decimal    `json:"balanceBefore"`
-	BalanceAfter    decimal.Decimal    `json:"balanceAfter"`
-	Description     *string            `json:"description"`
-	TransactionDate pgtype.Timestamptz `json:"transactionDate"`
+	ID                     int64              `json:"id"`
+	WalletID               int32              `json:"walletId"`
+	MessageID              *int64             `json:"messageId"`
+	TransactionType        string             `json:"transactionType"`
+	Amount                 decimal.Decimal    `json:"amount"`
+	BalanceBefore          decimal.Decimal    `json:"balanceBefore"`
+	BalanceAfter           decimal.Decimal    `json:"balanceAfter"`
+	Description            *string            `json:"description"`
+	TransactionDate        pgtype.Timestamptz `json:"transactionDate"`
+	ReferenceTransactionID *int64             `json:"referenceTransactionId"`
 }

@@ -12,6 +12,8 @@ const (
 	SystemIDKey  contextKey = "system_id"
 	MessageIDKey contextKey = "msg_id"
 	MNOIDKey     contextKey = "mno_id"
+	MNOConnIDKey contextKey = "mno_conn_id"
+	MNOMsgIDKey  contextKey = "mno_msg_id"
 	// Add other keys as needed
 )
 
@@ -59,4 +61,12 @@ func ContextWithMessageID(ctx context.Context, msgID int64) context.Context {
 
 func ContextWithMNOID(ctx context.Context, mnoID int32) context.Context {
 	return context.WithValue(ctx, MNOIDKey, mnoID)
+}
+
+func ContextWithMNOConnID(ctx context.Context, connID int32) context.Context {
+	return context.WithValue(ctx, MNOConnIDKey, connID)
+}
+
+func ContextWithMNOMsgID(ctx context.Context, msgID string) context.Context {
+	return context.WithValue(ctx, MNOMsgIDKey, msgID)
 }

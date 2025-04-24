@@ -13,35 +13,49 @@ import (
 )
 
 const createSMPPCredential = `-- name: CreateSMPPCredential :one
-INSERT INTO smpp_credentials (service_provider_id, system_id, password_hash, bind_type, status)
-VALUES ($1, $2, $3, $4, $5)
-RETURNING id, service_provider_id, system_id, password_hash, bind_type, status, created_at, updated_at
+INSERT INTO sp_credentials (
+    service_provider_id,
+    protocol,
+    status,
+    system_id,
+    password_hash,
+    bind_type,
+    http_config
+) VALUES (
+    $1, $2, $3, $4, $5, $6, $7
+) RETURNING id, service_provider_id, protocol, status, system_id, password_hash, bind_type, http_config, created_at, updated_at
 `
 
 type CreateSMPPCredentialParams struct {
-	ServiceProviderID int32  `json:"serviceProviderId"`
-	SystemID          string `json:"systemId"`
-	PasswordHash      string `json:"passwordHash"`
-	BindType          string `json:"bindType"`
-	Status            string `json:"status"`
+	ServiceProviderID int32   `json:"serviceProviderId"`
+	Protocol          string  `json:"protocol"`
+	Status            string  `json:"status"`
+	SystemID          *string `json:"systemId"`
+	PasswordHash      *string `json:"passwordHash"`
+	BindType          *string `json:"bindType"`
+	HttpConfig        []byte  `json:"httpConfig"`
 }
 
-func (q *Queries) CreateSMPPCredential(ctx context.Context, arg CreateSMPPCredentialParams) (SmppCredential, error) {
+func (q *Queries) CreateSMPPCredential(ctx context.Context, arg CreateSMPPCredentialParams) (SpCredential, error) {
 	row := q.db.QueryRow(ctx, createSMPPCredential,
 		arg.ServiceProviderID,
+		arg.Protocol,
+		arg.Status,
 		arg.SystemID,
 		arg.PasswordHash,
 		arg.BindType,
-		arg.Status,
+		arg.HttpConfig,
 	)
-	var i SmppCredential
+	var i SpCredential
 	err := row.Scan(
 		&i.ID,
 		&i.ServiceProviderID,
+		&i.Protocol,
+		&i.Status,
 		&i.SystemID,
 		&i.PasswordHash,
 		&i.BindType,
-		&i.Status,
+		&i.HttpConfig,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)
@@ -49,25 +63,32 @@ func (q *Queries) CreateSMPPCredential(ctx context.Context, arg CreateSMPPCreden
 }
 
 const createServiceProvider = `-- name: CreateServiceProvider :one
-INSERT INTO service_providers (name, email, status)
-VALUES ($1, $2, $3)
-RETURNING id, name, email, status, created_at, updated_at
+INSERT INTO service_providers (name, email, status, default_currency_code)
+VALUES ($1, $2, $3, $4)
+RETURNING id, name, email, status, default_currency_code, created_at, updated_at
 `
 
 type CreateServiceProviderParams struct {
-	Name   string `json:"name"`
-	Email  string `json:"email"`
-	Status string `json:"status"`
+	Name                string `json:"name"`
+	Email               string `json:"email"`
+	Status              string `json:"status"`
+	DefaultCurrencyCode string `json:"defaultCurrencyCode"`
 }
 
 func (q *Queries) CreateServiceProvider(ctx context.Context, arg CreateServiceProviderParams) (ServiceProvider, error) {
-	row := q.db.QueryRow(ctx, createServiceProvider, arg.Name, arg.Email, arg.Status)
+	row := q.db.QueryRow(ctx, createServiceProvider,
+		arg.Name,
+		arg.Email,
+		arg.Status,
+		arg.DefaultCurrencyCode,
+	)
 	var i ServiceProvider
 	err := row.Scan(
 		&i.ID,
 		&i.Name,
 		&i.Email,
 		&i.Status,
+		&i.DefaultCurrencyCode,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)
@@ -108,48 +129,65 @@ func (q *Queries) CreateWallet(ctx context.Context, arg CreateWalletParams) (Wal
 	return i, err
 }
 
-const getSMPPCredentialBySystemID = `-- name: GetSMPPCredentialBySystemID :one
-SELECT sp.id as service_provider_id, sp.name as service_provider_name, sc.id, sc.service_provider_id, sc.system_id, sc.password_hash, sc.bind_type, sc.status, sc.created_at, sc.updated_at
-FROM smpp_credentials sc
-JOIN service_providers sp ON sc.service_provider_id = sp.id
-WHERE sc.system_id = $1 AND sc.status = 'active'
+const getSPCredentialBySystemID = `-- name: GetSPCredentialBySystemID :one
+SELECT
+    spc.id,
+    spc.service_provider_id,
+    spc.protocol,
+    spc.status,
+    spc.system_id,
+    spc.password_hash,
+    spc.bind_type,
+    spc.http_config,
+    spc.created_at,
+    spc.updated_at,
+    sp.name as service_provider_name,
+    sp.default_currency_code -- Include currency
+FROM sp_credentials spc -- Use new table name
+JOIN service_providers sp ON spc.service_provider_id = sp.id
+WHERE spc.protocol = 'smpp' -- Ensure it's an SMPP credential
+  AND spc.system_id = $1    -- Expects sql.NullString or string based on sqlc generation
+  AND spc.status = 'active'
 LIMIT 1
 `
 
-type GetSMPPCredentialBySystemIDRow struct {
-	ServiceProviderID   int32              `json:"serviceProviderId"`
-	ServiceProviderName string             `json:"serviceProviderName"`
+type GetSPCredentialBySystemIDRow struct {
 	ID                  int32              `json:"id"`
-	ServiceProviderID_2 int32              `json:"serviceProviderId2"`
-	SystemID            string             `json:"systemId"`
-	PasswordHash        string             `json:"passwordHash"`
-	BindType            string             `json:"bindType"`
+	ServiceProviderID   int32              `json:"serviceProviderId"`
+	Protocol            string             `json:"protocol"`
 	Status              string             `json:"status"`
+	SystemID            *string            `json:"systemId"`
+	PasswordHash        *string            `json:"passwordHash"`
+	BindType            *string            `json:"bindType"`
+	HttpConfig          []byte             `json:"httpConfig"`
 	CreatedAt           pgtype.Timestamptz `json:"createdAt"`
 	UpdatedAt           pgtype.Timestamptz `json:"updatedAt"`
+	ServiceProviderName string             `json:"serviceProviderName"`
+	DefaultCurrencyCode string             `json:"defaultCurrencyCode"`
 }
 
-func (q *Queries) GetSMPPCredentialBySystemID(ctx context.Context, systemID string) (GetSMPPCredentialBySystemIDRow, error) {
-	row := q.db.QueryRow(ctx, getSMPPCredentialBySystemID, systemID)
-	var i GetSMPPCredentialBySystemIDRow
+func (q *Queries) GetSPCredentialBySystemID(ctx context.Context, systemID *string) (GetSPCredentialBySystemIDRow, error) {
+	row := q.db.QueryRow(ctx, getSPCredentialBySystemID, systemID)
+	var i GetSPCredentialBySystemIDRow
 	err := row.Scan(
-		&i.ServiceProviderID,
-		&i.ServiceProviderName,
 		&i.ID,
-		&i.ServiceProviderID_2,
+		&i.ServiceProviderID,
+		&i.Protocol,
+		&i.Status,
 		&i.SystemID,
 		&i.PasswordHash,
 		&i.BindType,
-		&i.Status,
+		&i.HttpConfig,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.ServiceProviderName,
+		&i.DefaultCurrencyCode,
 	)
 	return i, err
 }
 
 const getServiceProviderByID = `-- name: GetServiceProviderByID :one
-SELECT id, name, email, status, created_at, updated_at FROM service_providers
-WHERE id = $1 LIMIT 1
+SELECT id, name, email, status, default_currency_code, created_at, updated_at FROM service_providers WHERE id = $1 LIMIT 1
 `
 
 func (q *Queries) GetServiceProviderByID(ctx context.Context, id int32) (ServiceProvider, error) {
@@ -160,6 +198,7 @@ func (q *Queries) GetServiceProviderByID(ctx context.Context, id int32) (Service
 		&i.Name,
 		&i.Email,
 		&i.Status,
+		&i.DefaultCurrencyCode,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)

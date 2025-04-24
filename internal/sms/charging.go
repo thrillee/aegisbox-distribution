@@ -139,9 +139,9 @@ func (p *DefaultPricer) PriceAndDebit(ctx context.Context, msgID int64) (result 
 	logCtx = logging.ContextWithSPID(logCtx, pricingDetails.ServiceProviderID)
 
 	spID := pricingDetails.ServiceProviderID
-	mnoID := pricingDetails.RoutedMnoID // This is sql.NullInt32
-	currency := *pricingDetails.CurrencyCode
-	totalSegments := pricingDetails.TotalSegments // This is int32
+	mnoID := pricingDetails.RoutedMnoID
+	currency := pricingDetails.CurrencyCode
+	totalSegments := pricingDetails.TotalSegments
 
 	logCtx = logging.ContextWithSPID(logCtx, spID)
 

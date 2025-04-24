@@ -7,6 +7,8 @@ package database
 
 import (
 	"context"
+
+	"github.com/jackc/pgx/v5/pgtype"
 )
 
 const findMessageByMnoMessageID = `-- name: FindMessageByMnoMessageID :one
@@ -34,23 +36,31 @@ func (q *Queries) FindMessageByMnoMessageID(ctx context.Context, mnoMessageID *s
 }
 
 const getMessageDetailsForPricing = `-- name: GetMessageDetailsForPricing :one
-SELECT service_provider_id, routed_mno_id, currency_code, total_segments
+SELECT
+    id,
+    service_provider_id,
+    routed_mno_id,
+    currency_code,
+    total_segments
 FROM messages
 WHERE id = $1
 LIMIT 1
 `
 
 type GetMessageDetailsForPricingRow struct {
-	ServiceProviderID int32   `json:"serviceProviderId"`
-	RoutedMnoID       *int32  `json:"routedMnoId"`
-	CurrencyCode      *string `json:"currencyCode"`
-	TotalSegments     int32   `json:"totalSegments"`
+	ID                int64  `json:"id"`
+	ServiceProviderID int32  `json:"serviceProviderId"`
+	RoutedMnoID       *int32 `json:"routedMnoId"`
+	CurrencyCode      string `json:"currencyCode"`
+	TotalSegments     int32  `json:"totalSegments"`
 }
 
+// Select fields needed by the Pricer
 func (q *Queries) GetMessageDetailsForPricing(ctx context.Context, id int64) (GetMessageDetailsForPricingRow, error) {
 	row := q.db.QueryRow(ctx, getMessageDetailsForPricing, id)
 	var i GetMessageDetailsForPricingRow
 	err := row.Scan(
+		&i.ID,
 		&i.ServiceProviderID,
 		&i.RoutedMnoID,
 		&i.CurrencyCode,
@@ -60,18 +70,35 @@ func (q *Queries) GetMessageDetailsForPricing(ctx context.Context, id int64) (Ge
 }
 
 const getMessageDetailsForSending = `-- name: GetMessageDetailsForSending :one
-SELECT id, destination_msisdn, short_message, approved_sender_id, routed_mno_id, sender_id_used
+SELECT
+    id,
+    service_provider_id,
+    original_source_addr, -- Used as SenderID for MNO
+    original_destination_addr,
+    short_message,        -- Full content
+    total_segments,
+    currency_code,
+    client_ref,
+    submitted_at,
+    -- Also select fields needed for DataCoding, ESMClass, RequestDLR etc. if stored
+    -- data_coding, esm_class, request_dlr, is_flash
+    routed_mno_id         -- Needed by Processor to select MNO Connector
 FROM messages
 WHERE id = $1
+LIMIT 1
 `
 
 type GetMessageDetailsForSendingRow struct {
-	ID                int64  `json:"id"`
-	DestinationMsisdn string `json:"destinationMsisdn"`
-	ShortMessage      string `json:"shortMessage"`
-	ApprovedSenderID  *int32 `json:"approvedSenderId"`
-	RoutedMnoID       *int32 `json:"routedMnoId"`
-	SenderIDUsed      string `json:"senderIdUsed"`
+	ID                      int64              `json:"id"`
+	ServiceProviderID       int32              `json:"serviceProviderId"`
+	OriginalSourceAddr      string             `json:"originalSourceAddr"`
+	OriginalDestinationAddr string             `json:"originalDestinationAddr"`
+	ShortMessage            string             `json:"shortMessage"`
+	TotalSegments           int32              `json:"totalSegments"`
+	CurrencyCode            string             `json:"currencyCode"`
+	ClientRef               *string            `json:"clientRef"`
+	SubmittedAt             pgtype.Timestamptz `json:"submittedAt"`
+	RoutedMnoID             *int32             `json:"routedMnoId"`
 }
 
 func (q *Queries) GetMessageDetailsForSending(ctx context.Context, id int64) (GetMessageDetailsForSendingRow, error) {
@@ -79,20 +106,46 @@ func (q *Queries) GetMessageDetailsForSending(ctx context.Context, id int64) (Ge
 	var i GetMessageDetailsForSendingRow
 	err := row.Scan(
 		&i.ID,
-		&i.DestinationMsisdn,
+		&i.ServiceProviderID,
+		&i.OriginalSourceAddr,
+		&i.OriginalDestinationAddr,
 		&i.ShortMessage,
-		&i.ApprovedSenderID,
+		&i.TotalSegments,
+		&i.CurrencyCode,
+		&i.ClientRef,
+		&i.SubmittedAt,
 		&i.RoutedMnoID,
-		&i.SenderIDUsed,
 	)
 	return i, err
 }
 
+const getMessageFinalStatus = `-- name: GetMessageFinalStatus :one
+SELECT final_status FROM messages WHERE id = $1
+`
+
+func (q *Queries) GetMessageFinalStatus(ctx context.Context, id int64) (string, error) {
+	row := q.db.QueryRow(ctx, getMessageFinalStatus, id)
+	var final_status string
+	err := row.Scan(&final_status)
+	return final_status, err
+}
+
+const getMessageTotalSegments = `-- name: GetMessageTotalSegments :one
+SELECT total_segments FROM messages WHERE id = $1
+`
+
+func (q *Queries) GetMessageTotalSegments(ctx context.Context, id int64) (int32, error) {
+	row := q.db.QueryRow(ctx, getMessageTotalSegments, id)
+	var total_segments int32
+	err := row.Scan(&total_segments)
+	return total_segments, err
+}
+
 const getMessagesByStatus = `-- name: GetMessagesByStatus :many
-SELECT id, service_provider_id, destination_msisdn, sender_id_used, routed_mno_id
+SELECT id, service_provider_id, original_destination_addr, original_source_addr 
 FROM messages
-WHERE processing_status = $1
-ORDER BY received_at
+WHERE processing_status = $1 -- e.g., 'received', 'routed', 'queued_for_send'
+ORDER BY received_at -- Process in FIFO order
 LIMIT $2
 FOR UPDATE SKIP LOCKED
 `
@@ -103,11 +156,10 @@ type GetMessagesByStatusParams struct {
 }
 
 type GetMessagesByStatusRow struct {
-	ID                int64  `json:"id"`
-	ServiceProviderID int32  `json:"serviceProviderId"`
-	DestinationMsisdn string `json:"destinationMsisdn"`
-	SenderIDUsed      string `json:"senderIdUsed"`
-	RoutedMnoID       *int32 `json:"routedMnoId"`
+	ID                      int64  `json:"id"`
+	ServiceProviderID       int32  `json:"serviceProviderId"`
+	OriginalDestinationAddr string `json:"originalDestinationAddr"`
+	OriginalSourceAddr      string `json:"originalSourceAddr"`
 }
 
 func (q *Queries) GetMessagesByStatus(ctx context.Context, arg GetMessagesByStatusParams) ([]GetMessagesByStatusRow, error) {
@@ -122,9 +174,8 @@ func (q *Queries) GetMessagesByStatus(ctx context.Context, arg GetMessagesByStat
 		if err := rows.Scan(
 			&i.ID,
 			&i.ServiceProviderID,
-			&i.DestinationMsisdn,
-			&i.SenderIDUsed,
-			&i.RoutedMnoID,
+			&i.OriginalDestinationAddr,
+			&i.OriginalSourceAddr,
 		); err != nil {
 			return nil, err
 		}
@@ -171,121 +222,106 @@ func (q *Queries) GetMessagesToPrice(ctx context.Context, limit int32) ([]GetMes
 	return items, nil
 }
 
-const getMessagesToRoute = `-- name: GetMessagesToRoute :many
-SELECT id, destination_msisdn, service_provider_id, sender_id_used
-FROM messages
-WHERE processing_status = 'received'
-ORDER BY received_at
-LIMIT $1
-FOR UPDATE SKIP LOCKED
+const getSPMessageInfoForDLR = `-- name: GetSPMessageInfoForDLR :one
+
+SELECT
+    m.id,
+    m.service_provider_id,
+    m.client_ref,
+    m.original_source_addr,
+    m.original_destination_addr,
+    m.submitted_at,
+    m.completed_at, -- May not be set when DLR arrives
+    m.total_segments,
+    spc.protocol,
+    spc.system_id,    -- This column is nullable
+    spc.http_config   -- This is JSONB (likely []byte or custom type in Go)
+FROM messages m
+JOIN sp_credentials spc ON m.sp_credential_id = spc.id -- Use correct table name
+WHERE m.id = $1
+LIMIT 1
 `
 
-type GetMessagesToRouteRow struct {
-	ID                int64  `json:"id"`
-	DestinationMsisdn string `json:"destinationMsisdn"`
-	ServiceProviderID int32  `json:"serviceProviderId"`
-	SenderIDUsed      string `json:"senderIdUsed"`
+type GetSPMessageInfoForDLRRow struct {
+	ID                      int64              `json:"id"`
+	ServiceProviderID       int32              `json:"serviceProviderId"`
+	ClientRef               *string            `json:"clientRef"`
+	OriginalSourceAddr      string             `json:"originalSourceAddr"`
+	OriginalDestinationAddr string             `json:"originalDestinationAddr"`
+	SubmittedAt             pgtype.Timestamptz `json:"submittedAt"`
+	CompletedAt             pgtype.Timestamptz `json:"completedAt"`
+	TotalSegments           int32              `json:"totalSegments"`
+	Protocol                string             `json:"protocol"`
+	SystemID                *string            `json:"systemId"`
+	HttpConfig              []byte             `json:"httpConfig"`
 }
 
-func (q *Queries) GetMessagesToRoute(ctx context.Context, limit int32) ([]GetMessagesToRouteRow, error) {
-	rows, err := q.db.Query(ctx, getMessagesToRoute, limit)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []GetMessagesToRouteRow
-	for rows.Next() {
-		var i GetMessagesToRouteRow
-		if err := rows.Scan(
-			&i.ID,
-			&i.DestinationMsisdn,
-			&i.ServiceProviderID,
-			&i.SenderIDUsed,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
-const getMessagesToSend = `-- name: GetMessagesToSend :many
-SELECT id, destination_msisdn, short_message, sender_id_used, routed_mno_id, approved_sender_id, template_id
-FROM messages
-WHERE processing_status = 'queued_for_send'
-ORDER BY processed_for_queue_at
-LIMIT $1
-FOR UPDATE SKIP LOCKED
-`
-
-type GetMessagesToSendRow struct {
-	ID                int64  `json:"id"`
-	DestinationMsisdn string `json:"destinationMsisdn"`
-	ShortMessage      string `json:"shortMessage"`
-	SenderIDUsed      string `json:"senderIdUsed"`
-	RoutedMnoID       *int32 `json:"routedMnoId"`
-	ApprovedSenderID  *int32 `json:"approvedSenderId"`
-	TemplateID        *int32 `json:"templateId"`
-}
-
-func (q *Queries) GetMessagesToSend(ctx context.Context, limit int32) ([]GetMessagesToSendRow, error) {
-	rows, err := q.db.Query(ctx, getMessagesToSend, limit)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []GetMessagesToSendRow
-	for rows.Next() {
-		var i GetMessagesToSendRow
-		if err := rows.Scan(
-			&i.ID,
-			&i.DestinationMsisdn,
-			&i.ShortMessage,
-			&i.SenderIDUsed,
-			&i.RoutedMnoID,
-			&i.ApprovedSenderID,
-			&i.TemplateID,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
+// Optional: Prevent redundant updates
+// Select fields needed for DLR forwarding
+func (q *Queries) GetSPMessageInfoForDLR(ctx context.Context, id int64) (GetSPMessageInfoForDLRRow, error) {
+	row := q.db.QueryRow(ctx, getSPMessageInfoForDLR, id)
+	var i GetSPMessageInfoForDLRRow
+	err := row.Scan(
+		&i.ID,
+		&i.ServiceProviderID,
+		&i.ClientRef,
+		&i.OriginalSourceAddr,
+		&i.OriginalDestinationAddr,
+		&i.SubmittedAt,
+		&i.CompletedAt,
+		&i.TotalSegments,
+		&i.Protocol,
+		&i.SystemID,
+		&i.HttpConfig,
+	)
+	return i, err
 }
 
 const insertMessageIn = `-- name: InsertMessageIn :one
 INSERT INTO messages (
-    service_provider_id, smpp_credential_id, client_message_id, sender_id_used,
-    destination_msisdn, short_message, processing_status, final_status,
-    received_at
+    service_provider_id,
+    sp_credential_id, -- Use new table name FK
+    client_message_id,
+    client_ref,
+    original_source_addr,
+    original_destination_addr,
+    short_message,
+    total_segments,
+    currency_code,
+    submitted_at,
+    received_at,
+    processing_status, -- Initial status
+    final_status       -- Initial status
 ) VALUES (
-    $1, $2, $3, $4, $5, $6, 'received', 'pending', NOW()
+    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, NOW(), 'received', 'pending'
 ) RETURNING id
 `
 
 type InsertMessageInParams struct {
-	ServiceProviderID int32   `json:"serviceProviderId"`
-	SmppCredentialID  int32   `json:"smppCredentialId"`
-	ClientMessageID   *string `json:"clientMessageId"`
-	SenderIDUsed      string  `json:"senderIdUsed"`
-	DestinationMsisdn string  `json:"destinationMsisdn"`
-	ShortMessage      string  `json:"shortMessage"`
+	ServiceProviderID       int32              `json:"serviceProviderId"`
+	SpCredentialID          int32              `json:"spCredentialId"`
+	ClientMessageID         *string            `json:"clientMessageId"`
+	ClientRef               *string            `json:"clientRef"`
+	OriginalSourceAddr      string             `json:"originalSourceAddr"`
+	OriginalDestinationAddr string             `json:"originalDestinationAddr"`
+	ShortMessage            string             `json:"shortMessage"`
+	TotalSegments           int32              `json:"totalSegments"`
+	CurrencyCode            string             `json:"currencyCode"`
+	SubmittedAt             pgtype.Timestamptz `json:"submittedAt"`
 }
 
 func (q *Queries) InsertMessageIn(ctx context.Context, arg InsertMessageInParams) (int64, error) {
 	row := q.db.QueryRow(ctx, insertMessageIn,
 		arg.ServiceProviderID,
-		arg.SmppCredentialID,
+		arg.SpCredentialID,
 		arg.ClientMessageID,
-		arg.SenderIDUsed,
-		arg.DestinationMsisdn,
+		arg.ClientRef,
+		arg.OriginalSourceAddr,
+		arg.OriginalDestinationAddr,
 		arg.ShortMessage,
+		arg.TotalSegments,
+		arg.CurrencyCode,
+		arg.SubmittedAt,
 	)
 	var id int64
 	err := row.Scan(&id)
@@ -294,8 +330,8 @@ func (q *Queries) InsertMessageIn(ctx context.Context, arg InsertMessageInParams
 
 const markMessageSendFailed = `-- name: MarkMessageSendFailed :exec
 UPDATE messages
-SET processing_status = 'failed_queueing',
-    send_status = 'send_failed',
+SET
+    processing_status = 'send_failed', -- Or keep 'send_attempted' and set final_status?
     final_status = 'failed',
     error_code = $1,
     error_description = $2,
@@ -304,11 +340,13 @@ WHERE id = $3
 `
 
 type MarkMessageSendFailedParams struct {
-	ErrorCode        *int32  `json:"errorCode"`
+	ErrorCode        *string `json:"errorCode"`
 	ErrorDescription *string `json:"errorDescription"`
 	ID               int64   `json:"id"`
 }
 
+// Use this if the Sender.Send fails catastrophically *before* MNO gets involved,
+// or potentially as the final aggregated status if needed.
 func (q *Queries) MarkMessageSendFailed(ctx context.Context, arg MarkMessageSendFailedParams) error {
 	_, err := q.db.Exec(ctx, markMessageSendFailed, arg.ErrorCode, arg.ErrorDescription, arg.ID)
 	return err
@@ -338,7 +376,7 @@ WHERE mno_message_id = $4
 
 type UpdateMessageDLRStatusParams struct {
 	DlrStatus        *string `json:"dlrStatus"`
-	ErrorCode        *int32  `json:"errorCode"`
+	ErrorCode        *string `json:"errorCode"`
 	ErrorDescription *string `json:"errorDescription"`
 	MnoMessageID     *string `json:"mnoMessageId"`
 }
@@ -353,18 +391,48 @@ func (q *Queries) UpdateMessageDLRStatus(ctx context.Context, arg UpdateMessageD
 	return err
 }
 
+const updateMessageFinalStatus = `-- name: UpdateMessageFinalStatus :exec
+UPDATE messages
+SET
+    final_status = $1, -- 'delivered', 'failed', 'expired', 'rejected'
+    error_code = $2,   -- (Aggregated/final error code)
+    error_description = $3, -- (Aggregated/final error description)
+    completed_at = NOW()
+WHERE id = $4
+  AND final_status != $1
+`
+
+type UpdateMessageFinalStatusParams struct {
+	FinalStatus      string  `json:"finalStatus"`
+	ErrorCode        *string `json:"errorCode"`
+	ErrorDescription *string `json:"errorDescription"`
+	ID               int64   `json:"id"`
+}
+
+// Updates the final aggregated status and error info
+func (q *Queries) UpdateMessageFinalStatus(ctx context.Context, arg UpdateMessageFinalStatusParams) error {
+	_, err := q.db.Exec(ctx, updateMessageFinalStatus,
+		arg.FinalStatus,
+		arg.ErrorCode,
+		arg.ErrorDescription,
+		arg.ID,
+	)
+	return err
+}
+
 const updateMessagePriced = `-- name: UpdateMessagePriced :exec
 UPDATE messages
-SET processing_status = $1,
-    error_code = $2,
-    error_description = $3,
+SET
+    processing_status = $1, -- 'queued_for_send' or 'failed_pricing'
+    error_code = $2,    
+    error_description = $3, 
     processed_for_queue_at = CASE WHEN $1 = 'queued_for_send' THEN NOW() ELSE processed_for_queue_at END
 WHERE id = $4
 `
 
 type UpdateMessagePricedParams struct {
 	ProcessingStatus string  `json:"processingStatus"`
-	ErrorCode        *int32  `json:"errorCode"`
+	ErrorCode        *string `json:"errorCode"`
 	ErrorDescription *string `json:"errorDescription"`
 	ID               int64   `json:"id"`
 }
@@ -391,7 +459,7 @@ WHERE id = $5
 type UpdateMessageRoutingInfoParams struct {
 	ProcessingStatus string  `json:"processingStatus"`
 	RoutedMnoID      *int32  `json:"routedMnoId"`
-	ErrorCode        *int32  `json:"errorCode"`
+	ErrorCode        *string `json:"errorCode"`
 	ErrorDescription *string `json:"errorDescription"`
 	ID               int64   `json:"id"`
 }
@@ -407,14 +475,29 @@ func (q *Queries) UpdateMessageRoutingInfo(ctx context.Context, arg UpdateMessag
 	return err
 }
 
+const updateMessageSendAttempted = `-- name: UpdateMessageSendAttempted :exec
+UPDATE messages
+SET
+    processing_status = 'send_attempted'
+    -- Optionally clear error code/description if previous failure was transient?
+WHERE id = $1
+`
+
+// Updates status after Sender.Send finishes (regardless of segment success/failure)
+func (q *Queries) UpdateMessageSendAttempted(ctx context.Context, id int64) error {
+	_, err := q.db.Exec(ctx, updateMessageSendAttempted, id)
+	return err
+}
+
 const updateMessageValidatedRouted = `-- name: UpdateMessageValidatedRouted :exec
 UPDATE messages
-SET processing_status = $1,
-    routed_mno_id = $2,
+SET
+    processing_status = $1, -- 'routed', 'failed_validation', 'failed_routing'
+    routed_mno_id = $2,   
     approved_sender_id = $3,
     template_id = $4,
-    error_code = $5,
-    error_description = $6
+    error_code = $5,        -- (Mapped internal code)
+    error_description = $6 -- (Reason for failure)
 WHERE id = $7
 `
 
@@ -423,7 +506,7 @@ type UpdateMessageValidatedRoutedParams struct {
 	RoutedMnoID      *int32  `json:"routedMnoId"`
 	ApprovedSenderID *int32  `json:"approvedSenderId"`
 	TemplateID       *int32  `json:"templateId"`
-	ErrorCode        *int32  `json:"errorCode"`
+	ErrorCode        *string `json:"errorCode"`
 	ErrorDescription *string `json:"errorDescription"`
 	ID               int64   `json:"id"`
 }
