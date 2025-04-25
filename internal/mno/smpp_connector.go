@@ -2,10 +2,10 @@ package mno
 
 import (
 	"context"
-	"database/sql"
 	"errors"
 	"fmt"
 	"log/slog"
+	"regexp"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -22,6 +22,10 @@ import (
 
 // Compile-time check
 var _ Connector = (*SMPPMNOConnector)(nil)
+
+// Regular expression to parse simple Appendix B DLR format (adjust if needed)
+// Example: "id:12345 sub:001 dlvrd:001 submit date:2404251000 done date:2404251001 stat:DELIVRD err:000 text:Hello"
+var dlrRegex = regexp.MustCompile(`id:([\S]+)\s+sub:(\d{1,3})\s+dlvrd:(\d{1,3})\s+submit date:(\d{10,12})\s+done date:(\d{10,12})\s+stat:([A-Z]{5,7})\s+err:([\dA-Fa-f]{3})\s+text:(.*)`)
 
 // SMPPConnectorConfig holds specific configuration for an SMPP connection derived from mno_connections.
 type SMPPConnectorConfig struct {
@@ -49,43 +53,80 @@ type SMPPConnectorConfig struct {
 // Assumes sqlc model `database.MnoConnection` has fields matching the ALTER TABLE additions
 func NewSMPPConfigFromDB(dbConn database.MnoConnection) (SMPPConnectorConfig, error) {
 	cfg := SMPPConnectorConfig{
-		ConnectionID:      dbConn.ID,
-		MNOID:             dbConn.MnoID,
-		SystemID:          *dbConn.SystemID,
-		Password:          *dbConn.Password,
-		Host:              *dbConn.Host,
-		Port:              int(*dbConn.Port),
-		UseTLS:            *dbConn.UseTls,
-		BindType:          *dbConn.BindType,
-		SystemType:        *dbConn.SystemType,
-		EnquireLink:       time.Duration(*dbConn.EnquireLinkIntervalSecs) * time.Second,
-		RequestTimeout:    time.Duration(*dbConn.RequestTimeoutSecs) * time.Second,
-		ConnectRetryDelay: time.Duration(*dbConn.ConnectRetryDelaySecs) * time.Second,
-		MaxWindowSize:     uint(*dbConn.MaxWindowSize),              // Handle NullInt32 - Provide default?
-		DefaultDataCoding: data.Encoding(*dbConn.DefaultDataCoding), // Handle NullInt32/byte mapping
-		SourceAddrTON:     byte(*dbConn.SourceAddrTon),              // Handle NullInt32/byte mapping
-		SourceAddrNPI:     byte(*dbConn.SourceAddrNpi),              // Handle NullInt32/byte mapping
-		DestAddrTON:       byte(*dbConn.DestAddrTon),                // Handle NullInt32/byte mapping
-		DestAddrNPI:       byte(*dbConn.DestAddrNpi),                // Handle NullInt32/byte mapping
+		ConnectionID: dbConn.ID,
+		MNOID:        dbConn.MnoID,
+		SystemID:     *dbConn.SystemID,   // Default to empty string if NULL
+		Password:     *dbConn.Password,   // Default to empty string if NULL
+		Host:         *dbConn.Host,       // Default to empty string if NULL
+		Port:         0,                  // Default, set below
+		UseTLS:       *dbConn.UseTls,     // Default to false if NULL
+		BindType:     "trx",              // Default, set below
+		SystemType:   *dbConn.SystemType, // Default to empty string if NULL
+		// Set defaults for durations/int, override below if valid
+		EnquireLink:       30 * time.Second,
+		RequestTimeout:    10 * time.Second,
+		ConnectRetryDelay: 5 * time.Second,
+		MaxWindowSize:     10,
+		DefaultDataCoding: data.GSM7BIT, // Default coding
+		SourceAddrTON:     1,            // Default TON/NPI
+		SourceAddrNPI:     1,
+		DestAddrTON:       1,
+		DestAddrNPI:       1,
 	}
 
-	// Add validation and default values if DB values are missing/invalid
-	if cfg.EnquireLink <= 0 {
-		cfg.EnquireLink = 30 * time.Second
+	// --- Assign values from DB, checking Valid flag for Null types ---
+	if dbConn.Password != nil {
+		cfg.Password = *dbConn.Password
 	}
-	if cfg.RequestTimeout <= 0 {
-		cfg.RequestTimeout = 10 * time.Second
+	if dbConn.Host != nil {
+		cfg.Host = *dbConn.Host
 	}
-	if cfg.ConnectRetryDelay <= 0 {
-		cfg.ConnectRetryDelay = 5 * time.Second
+	if dbConn.Port != nil {
+		cfg.Port = int(*dbConn.Port)
 	}
-	if cfg.MaxWindowSize <= 0 {
-		cfg.MaxWindowSize = 10
+	if dbConn.UseTls != nil {
+		cfg.UseTLS = *dbConn.UseTls
 	}
+	if dbConn.BindType != nil && *dbConn.BindType == "" {
+		cfg.BindType = *dbConn.BindType
+	}
+	if dbConn.SystemType != nil {
+		cfg.SystemType = *dbConn.SystemType
+	}
+
+	if dbConn.EnquireLinkIntervalSecs != nil && *dbConn.EnquireLinkIntervalSecs > 0 {
+		cfg.EnquireLink = time.Duration(*dbConn.EnquireLinkIntervalSecs) * time.Second
+	}
+	if dbConn.RequestTimeoutSecs != nil && *dbConn.RequestTimeoutSecs > 0 {
+		cfg.RequestTimeout = time.Duration(*dbConn.RequestTimeoutSecs) * time.Second
+	}
+	if dbConn.ConnectRetryDelaySecs != nil && *dbConn.ConnectRetryDelaySecs > 0 {
+		cfg.ConnectRetryDelay = time.Duration(*dbConn.ConnectRetryDelaySecs) * time.Second
+	}
+	if dbConn.MaxWindowSize != nil && *dbConn.MaxWindowSize > 0 {
+		cfg.MaxWindowSize = uint(*dbConn.MaxWindowSize)
+	}
+	if dbConn.DefaultDataCoding != nil {
+		// Cast int32 from DB to byte, then to data.Coding
+		// cfg.DefaultDataCoding = data.Coding(byte(*dbConn.DefaultDataCoding))
+	}
+	if dbConn.SourceAddrTon != nil {
+		cfg.SourceAddrTON = byte(*dbConn.SourceAddrTon)
+	}
+	if dbConn.SourceAddrNpi != nil {
+		cfg.SourceAddrNPI = byte(*dbConn.SourceAddrNpi)
+	}
+	if dbConn.DestAddrTon != nil {
+		cfg.DestAddrTON = byte(*dbConn.DestAddrTon)
+	}
+	if dbConn.DestAddrNpi != nil {
+		cfg.DestAddrNPI = byte(*dbConn.DestAddrNpi)
+	}
+
+	// Final validation of essential fields
 	if cfg.Host == "" || cfg.Port == 0 || cfg.SystemID == "" {
-		return cfg, errors.New("missing required SMPP config fields (Host, Port, SystemID)")
+		return cfg, errors.New("missing required SMPP config fields after processing DB values (Host, Port, SystemID)")
 	}
-	// Validate BindType? TON/NPI values?
 
 	return cfg, nil
 }
@@ -443,7 +484,8 @@ func (c *SMPPMNOConnector) SubmitMessage(ctx context.Context, msg PreparedMessag
 }
 
 // buildSubmitSM constructs the PDU for a single segment.
-func (c *SMPPMNOConnector) buildSubmitSM(ctx context.Context, msg PreparedMessage, segmentContent string, totalSegments int, segmentSeqn int32, requiresUCS2 bool) (*pdu.SubmitSM, error) {
+func (c *SMPPMNOConnector) buildSubmitSM(_ context.Context, msg PreparedMessage, segmentContent string, totalSegments int, segmentSeqn int32, requiresUCS2 bool,
+) (*pdu.SubmitSM, error) {
 	p := pdu.NewSubmitSM().(*pdu.SubmitSM)
 
 	// Set Addresses
@@ -502,7 +544,9 @@ func (c *SMPPMNOConnector) onSubmitError(p pdu.PDU, err error) {
 	// Error during the Submit() call itself (e.g., window full)
 	logCtx := context.Background() // No request context here
 	logCtx = logging.ContextWithMNOConnID(logCtx, c.ConnectionID())
-	slog.WarnContext(logCtx, "gosmpp OnSubmitError callback triggered", slog.Any("error", err), slog.String("pdu_cmd", p.CommandID().String()), slog.Uint32("pdu_seq", p.GetSequenceNumber()))
+	slog.WarnContext(logCtx,
+		"gosmpp OnSubmitError callback triggered",
+		slog.Any("error", err), slog.String("pdu_cmd", p.GetHeader().CommandID.String()), slog.Uint64("pdu_seq", uint64(p.GetSequenceNumber())))
 
 	// We already handled error returned by Submit() call in SubmitMessage.
 	// This callback might be redundant or provide extra info.
@@ -578,29 +622,38 @@ func (c *SMPPMNOConnector) handleReceivedPduRequest() func(pdu.PDU) (pdu.PDU, bo
 
 func (c *SMPPMNOConnector) handleExpectedPduResponse() func(response gosmpp.Response) {
 	return func(response gosmpp.Response) {
-		// Handles responses to our requests (SubmitSMResp, BindResp, EnquireLinkResp...)
 		reqPDU := response.OriginalRequest.PDU
 		respPDU := response.PDU
 
-		logCtx := context.Background()
+		logCtx := context.Background() // Consider adding correlation ID if possible
 		logCtx = logging.ContextWithMNOConnID(logCtx, c.ConnectionID())
-		logCtx = logging.ContextWithPDUInfo(logCtx, reqPDU.GetHeader().CommandID.String(), reqPDU.GetSequenceNumber()) // Original Seq No
+		// Include PDU SeqNum if available and helpful
+		if reqPDU != nil {
+			logCtx = logging.ContextWithPDUInfo(logCtx, reqPDU.GetHeader().CommandID.String(), reqPDU.GetSequenceNumber())
+		}
 
 		switch resp := respPDU.(type) {
-		case *pdu.SubmitSMResp:
+		case *pdu.SubmitSMResp: // This seems correct based on linxGnu examples
 			slog.DebugContext(logCtx, "Received SubmitSMResp")
-			c.processSubmitSMResp(logCtx, uint32(reqPDU.GetSequenceNumber()), resp)
-
-		case *pdu.BindTransceiverResp, *pdu.BindTransmitterResp, *pdu.BindReceiverResp:
-			status := respPDU.CommandStatus()
-			slog.InfoContext(logCtx, "Received BindResp", slog.String("status", status.String()))
-			if status != pdu.StatusOK {
-				slog.ErrorContext(logCtx, "Bind failed", slog.String("status", status.String()))
-				c.status.Store(codes.StatusBindingFailed) // Update status on bind failure
-				// Close session? Library might auto-retry or close.
-				go c.closeSession(context.Background()) // Close session on bind fail
+			// Get sequence number from original request if available
+			if reqPDU != nil {
+				c.processSubmitSMResp(logCtx, uint32(reqPDU.GetSequenceNumber()), resp)
 			} else {
+				slog.ErrorContext(logCtx, "Received SubmitSMResp but original request PDU is nil, cannot correlate")
+			}
+
+		case *pdu.BindResp: // Use generic BindResp
+			status := resp.CommandStatus
+			slog.InfoContext(logCtx, "Received BindResp", slog.String("status", status.String()))
+			// Use the correct constant for OK status
+			if status != data.ESME_ROK { // Correct status constant
+				slog.ErrorContext(logCtx, "Bind failed", slog.String("status", status.String()), slog.Uint64("status_code", uint64(status)))
+				c.status.Store(codes.StatusBindingFailed) // Update status
+				go c.closeSession(context.Background())   // Close session on bind fail
+			} else {
+				// Bind successful, status should ideally be set to Bound here
 				c.status.Store(codes.StatusBound) // Confirm bound status
+				slog.InfoContext(logCtx, "Bind successful, session is bound.")
 			}
 
 		case *pdu.EnquireLinkResp:
@@ -609,10 +662,14 @@ func (c *SMPPMNOConnector) handleExpectedPduResponse() func(response gosmpp.Resp
 
 		case *pdu.UnbindResp:
 			slog.InfoContext(logCtx, "Received UnbindResp")
-			// Session should be closing
+			// Session should be closing or closed
 
 		default:
-			slog.WarnContext(logCtx, "Received unexpected response PDU type", slog.String("resp_type", respPDU.GetHeader().CommandID.String()))
+			typeName := "Unknown"
+			if respPDU != nil {
+				typeName = respPDU.GetHeader().CommandID.String()
+			}
+			slog.WarnContext(logCtx, "Received unexpected response PDU type", slog.String("resp_type", typeName))
 		}
 	}
 }
@@ -684,7 +741,7 @@ func (c *SMPPMNOConnector) processSubmitSMResp(ctx context.Context, sequence uin
 
 	status := resp.CommandStatus
 
-	if status == pdu.StatusOK {
+	if status == data.ESME_ROK {
 		mnoMsgID := resp.MessageID
 		slog.InfoContext(logCtx, "SubmitSM successful according to Resp", slog.String("mno_msg_id", mnoMsgID))
 		// Update segment as successfully submitted (MNO accepted)
@@ -743,6 +800,56 @@ func (c *SMPPMNOConnector) processSubmitSMTimeout(ctx context.Context, sequence 
 	// TODO: Generate failure DLR? Status is unknown, maybe wait or send specific 'TIMEOUT' status DLR?
 }
 
+// DLRParseResult holds parsed values from DLR text
+type DLRParseResult struct {
+	ID         string
+	SubmitDate time.Time
+	DoneDate   time.Time
+	Stat       string
+	Err        string
+}
+
+// parseDLRContent attempts to parse the short message text based on Appendix B format.
+// Returns parsed info or error. A more robust implementation is needed for production.
+func parseDLRContent(text string) (DLRParseResult, error) {
+	match := dlrRegex.FindStringSubmatch(text)
+	if len(match) != 9 {
+		return DLRParseResult{}, fmt.Errorf("failed to match standard DLR format (found %d parts)", len(match))
+	}
+
+	res := DLRParseResult{
+		ID:   match[1],
+		Stat: match[6],
+		Err:  match[7],
+		// Ignoring sub, dlvrd, text for now
+	}
+
+	// Parse dates (YYMMDDhhmm or YYYYMMDDhhmm)
+	submitDateStr := match[4]
+	doneDateStr := match[5]
+	layout := "0601021504" // YYMMDDhhmm
+	if len(submitDateStr) == 12 {
+		layout = "200601021504" // YYYYMMDDhhmm - Assuming 4 digit year if 12 chars
+	}
+	var err error
+	res.SubmitDate, err = time.Parse(layout, submitDateStr[:len(layout)]) // Adjust length based on detected layout
+	if err != nil {
+		return res, fmt.Errorf("failed to parse submit date '%s': %w", submitDateStr, err)
+	}
+	// Use same layout logic for done date
+	if len(doneDateStr) == 12 {
+		layout = "200601021504"
+	} else {
+		layout = "0601021504"
+	}
+	res.DoneDate, err = time.Parse(layout, doneDateStr[:len(layout)])
+	if err != nil {
+		return res, fmt.Errorf("failed to parse done date '%s': %w", doneDateStr, err)
+	}
+
+	return res, nil
+}
+
 // processIncomingDeliverSM handles received DeliverSM PDUs (potential DLRs or MO messages).
 func (c *SMPPMNOConnector) processIncomingDeliverSM(ctx context.Context, p *pdu.DeliverSM) {
 	c.handlerMu.RLock()
@@ -754,10 +861,20 @@ func (c *SMPPMNOConnector) processIncomingDeliverSM(ctx context.Context, p *pdu.
 		return
 	}
 
-	if p.IsReceipt() { // Check ESM class bit for DLR
+	// Common values are 0x04 or checking specific bits. Let's assume it's a defined constant.
+	isReceipt := (p.EsmClass) != 0 //(p.EsmClass & pdu.MSG_TYPE_DEL_RCPT) != 0
+	if isReceipt {                 // Check ESM class bit for DLR
 		slog.InfoContext(ctx, "DeliverSM is a Delivery Receipt")
 		// Attempt to parse standard receipt format
-		receipt, err := p.Receipt() // Use gosmpp helper
+
+		// Get short message content
+		messageText, err := p.Message.GetMessage()
+		if err != nil {
+			slog.ErrorContext(ctx, "Failed to get short message content from DLR", slog.Any("error", err))
+			return // Cannot process without content
+		}
+
+		receipt, err := parseDLRContent(messageText)
 		if err != nil {
 			slog.WarnContext(ctx, "Failed to parse standard DLR format from DeliverSM short_message", slog.Any("error", err))
 			// TODO: Implement manual parsing for non-standard formats if needed
@@ -767,7 +884,7 @@ func (c *SMPPMNOConnector) processIncomingDeliverSM(ctx context.Context, p *pdu.
 		}
 
 		dlrInfo := DLRInfo{
-			MnoMessageID: receipt.MessageID,
+			MnoMessageID: receipt.ID,
 			Status:       receipt.Stat,
 			ErrorCode:    receipt.Err,      // Map error code if present
 			Timestamp:    receipt.DoneDate, // Use DoneDate from DLR
@@ -779,13 +896,19 @@ func (c *SMPPMNOConnector) processIncomingDeliverSM(ctx context.Context, p *pdu.
 		// Call the registered handler (e.g., sms.Processor.UpdateSegmentDLRStatus)
 		err = handler(ctx, c.ConnectionID(), dlrInfo)
 		if err != nil {
-			slog.ErrorContext(ctx, "DLR Handler failed processing", slog.String("mno_msg_id", receipt.MessageID), slog.Any("error", err))
+			slog.ErrorContext(ctx, "DLR Handler failed processing", slog.String("mno_msg_id", receipt.ID), slog.Any("error", err))
 			// Should we NACK the DeliverSM? Usually no, just log the processing error.
 		}
 
 	} else {
 		// This is a Mobile Originated (MO) message
 		slog.InfoContext(ctx, "Received Mobile Originated (MO) message")
+		slog.InfoContext(ctx, "Received Mobile Originated (MO) message")
+		sourceAddr := p.SourceAddr.Address()
+		destAddr := p.DestAddr.Address()
+		content, _ := p.Message.GetMessage()
+		slog.DebugContext(ctx, "MO Message Details", slog.String("from", sourceAddr), slog.String("to", destAddr), slog.String("content", content))
+
 		// TODO: Implement MO message handling:
 		// 1. Extract details: source_addr (MSISDN), dest_addr (Shortcode), short_message, data_coding etc.
 		// 2. Insert into a dedicated 'mo_messages' table or route to an application logic handler.
