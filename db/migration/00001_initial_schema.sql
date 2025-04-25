@@ -28,6 +28,8 @@ CREATE TABLE sp_credentials ( -- Renamed from smpp_credentials for clarity
     password_hash VARCHAR(255),
     bind_type VARCHAR(10) DEFAULT 'trx',
     -- HTTP Specific Fields (NULLable if protocol is not 'http')
+    api_key_hash VARCHAR(255),
+    api_key_identifier VARCHAR(64) UNIQUE,
     http_config JSONB, -- Store API keys, callback URLs, IP Whitelists etc.
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()

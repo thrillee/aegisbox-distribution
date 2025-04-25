@@ -15,6 +15,7 @@ type Config struct {
 	MNOClientConfig     MNOClientConfig // Assuming MNOClientConfig defined in smppclient pkg or here
 	WorkerConfig        workers.Config  // Assuming workers.Config defined in workers pkg or here
 	ServerConfig        ServerConfig
+	HttpConfig          HttpConfig
 	DLRForwardInterval  time.Duration `envconfig:"WORKER_DLR_INTERVAL" default:"2s"`
 	DLRForwardBatchSize int           `envconfig:"WORKER_DLR_BATCH_SIZE" default:"100"`
 }
@@ -32,6 +33,7 @@ type ServerConfig struct {
 // MNOClientConfig placeholder (define actual fields needed)
 type MNOClientConfig struct {
 	// Example:
+	SyncInterval       time.Duration `envconfig:"MNO_SYNC_INTERVAL" default:"2s"`
 	ConnectTimeout     time.Duration `envconfig:"MNO_CONNECT_TIMEOUT" default:"5s"`
 	DefaultEnquireLink time.Duration `envconfig:"MNO_ENQUIRE_LINK" default:"30s"`
 }
@@ -45,6 +47,13 @@ type WorkerConfig struct {
 	RoutingBatchSize   int           `envconfig:"WORKER_ROUTING_BATCH_SIZE" default:"1000"`
 	PricingBatchSize   int           `envconfig:"WORKER_PRICING_BATCH_SIZE" default:"1000"`
 	SendingBatchSize   int           `envconfig:"WORKER_SENDING_BATCH_SIZE" default:"5000"`
+}
+
+type HttpConfig struct {
+	Addr         string        `json:"addr" envconfig:"HTTP_CONFIG_ADDR" default:"0.0.0.0:8000"`
+	ReadTimeout  time.Duration `json:"read_timeout" envconfig:"HTTP_CONFIG_READ_TIMEOUT" default:"1s"`
+	WriteTimeout time.Duration `json:"write_timeout" envconfig:"HTTP_CONFIG_WRITE_TIMEOUT" default:"1s"`
+	IdleTimeout  time.Duration `json:"idle_timeout" envconfig:"HTTP_CONFIG_IDLE_TIMEOUT" default:"1s"`
 }
 
 // Load reads configuration from environment variables.

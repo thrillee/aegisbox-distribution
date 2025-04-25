@@ -153,6 +153,8 @@ type SpCredential struct {
 	SystemID          *string            `json:"systemId"`
 	PasswordHash      *string            `json:"passwordHash"`
 	BindType          *string            `json:"bindType"`
+	ApiKeyHash        *string            `json:"apiKeyHash"`
+	ApiKeyIdentifier  *string            `json:"apiKeyIdentifier"`
 	HttpConfig        []byte             `json:"httpConfig"`
 	CreatedAt         pgtype.Timestamptz `json:"createdAt"`
 	UpdatedAt         pgtype.Timestamptz `json:"updatedAt"`

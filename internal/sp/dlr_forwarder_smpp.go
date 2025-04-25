@@ -7,6 +7,8 @@ import (
 	"log/slog"
 	"strings"
 
+	"github.com/linxGnu/gosmpp"
+	"github.com/linxGnu/gosmpp/data"
 	"github.com/linxGnu/gosmpp/pdu"
 	"github.com/thrillee/aegisbox/internal/logging"
 	"github.com/thrillee/aegisbox/pkg/errormapper"
@@ -15,7 +17,7 @@ import (
 // ServerSessionManager defines the dependency needed to get a writer for an SP connection.
 // The SMPP server implementation needs to provide this.
 type ServerSessionManager interface {
-	GetBoundClientWriter(systemID string) (pdu.Writer, error)
+	GetBoundClientConnection(systemID string) (*gosmpp.Connection, error)
 }
 
 // SMPSPForwarder implements DLRForwarder for SMPP clients.
@@ -41,24 +43,40 @@ func (f *SMPSPForwarder) ForwardDLR(ctx context.Context, spDetails SPDetails, dl
 	slog.InfoContext(logCtx, "Attempting to forward DLR via SMPP", slog.String("dlr_status", dlr.Status))
 
 	// 1. Get SP Connection Writer
-	writer, err := f.sessionMgr.GetBoundClientWriter(systemID)
+	conn, err := f.sessionMgr.GetBoundClientConnection(systemID) // Use new method
 	if err != nil {
-		// SP is likely not connected or session not found
-		slog.WarnContext(logCtx, "Cannot forward DLR: SP session not found or writer unavailable", slog.Any("error", err))
-		// This might be temporary, returning error could trigger retry if using a queue worker later
-		return fmt.Errorf("SP session %s not found or writer unavailable: %w", systemID, err)
+		slog.WarnContext(logCtx, "Cannot forward DLR: SP session not found or connection unavailable", slog.Any("error", err))
+		return fmt.Errorf("SP session %s not found or connection unavailable: %w", systemID, err)
 	}
 
 	// 2. Construct deliver_sm PDU
-	deliverSM := pdu.NewDeliverSM()
+	deliverSM := pdu.NewDeliverSM() // Assume this returns *pdu.DeliverSM
 
-	// Set Addresses
-	deliverSM.SetSourceAddr(dlr.SourceAddr) // Original Destination is Source for DLR PDU
-	deliverSM.SetDestAddr(dlr.DestAddr)     // Original SenderID is Destination for DLR PDU
+	// --- Set Addresses ---
+	// Create Address objects first
+	sourceAddress := pdu.NewAddress()
+	sourceAddress.SetTon(1) // National? International? Use appropriate default/logic
+	sourceAddress.SetNpi(1) // E.164
+	if err := sourceAddress.SetAddress(dlr.SourceAddr); err != nil {
+		slog.ErrorContext(logCtx, "Failed to set DLR source address", slog.String("address", dlr.SourceAddr), slog.Any("error", err))
+		return fmt.Errorf("invalid DLR source address '%s': %w", dlr.SourceAddr, err)
+	}
+
+	deliverSM.SourceAddr = sourceAddress
+
+	destAddress := pdu.NewAddress()
+	// TODO: Determine TON/NPI based on dlr.DestAddr content or SP config?
+	destAddress.SetTon(5) // Alphanumeric? Use appropriate default/logic
+	destAddress.SetNpi(0) // Unknown
+	if err := destAddress.SetAddress(dlr.DestAddr); err != nil {
+		slog.ErrorContext(logCtx, "Failed to set DLR destination address", slog.String("address", dlr.DestAddr), slog.Any("error", err))
+		return fmt.Errorf("invalid DLR destination address '%s': %w", dlr.DestAddr, err)
+	}
+	deliverSM.DestAddr = destAddress // Assign Address struct
 
 	// Set Flags
-	deliverSM.SetEsmClass(smpp.MES_TYPE_DEL_RCPT) // Set ESM class bit for Delivery Receipt
-	deliverSM.SetRegisteredDelivery(0)            // Do not request DLR for a DLR
+	deliverSM.EsmClass = 0x04        // Set ESM class bit 2 for Delivery Receipt
+	deliverSM.RegisteredDelivery = 0 // Do not request DLR for a DLR
 
 	// 3. Format Short Message according to SMPP Appendix B
 	// id:IIIIIIIIII sub:SSS dlvrd:DDD submit date:YYMMDDhhmm done date:YYMMDDhhmm stat:DDDDDDD err:E network:NNN text: ...
@@ -111,15 +129,20 @@ func (f *SMPSPForwarder) ForwardDLR(ctx context.Context, spDetails SPDetails, dl
 
 	// TODO: Handle encoding of dlrText properly (should be default GSM-7 or Latin-1 usually for DLRs)
 	// Check if library handles encoding or set appropriate data_coding
-	deliverSM.SetShortMessage(dlrText)
+	err = deliverSM.Message.SetMessageWithEncoding(dlrText, data.GSM7BIT) // Assuming GSM7 is default/suitable
+	if err != nil {
+		slog.ErrorContext(logCtx, "Failed to set DLR short message content", slog.Any("error", err))
+		return fmt.Errorf("failed to set DLR text: %w", err)
+	}
+	deliverSM.DataCoding = data.GSM7BIT
 	// deliverSM.SetDataCoding(0x00) // Default encoding
 
 	// 4. Write PDU to the specific client connection
-	err = writer.Write(deliverSM)
+	err = conn.Write(deliverSM) // Use the Write method on gosmpp.Connection
 	if err != nil {
-		slog.ErrorContext(logCtx, "Failed to write forwarded DLR PDU to SP", slog.Any("error", err))
-		// This indicates a connection problem, session manager might need to handle cleanup
-		return fmt.Errorf("failed writing DLR to SP %s: %w", systemID, err)
+		slog.ErrorContext(logCtx, "Failed to write forwarded DLR PDU to SP connection", slog.Any("error", err))
+		// This indicates a connection problem, session manager mi
+		return fmt.Errorf("failed writing DLR to SP %s connection: %w", systemID, err)
 	}
 
 	slog.InfoContext(logCtx, "Successfully forwarded DLR via SMPP", slog.String("dlr_status", dlr.Status))

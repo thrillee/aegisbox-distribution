@@ -8,20 +8,24 @@ import (
 type contextKey string
 
 const (
-	SPIDKey      contextKey = "sp_id"
-	SystemIDKey  contextKey = "system_id"
-	MessageIDKey contextKey = "msg_id"
-	MNOIDKey     contextKey = "mno_id"
-	MNOConnIDKey contextKey = "mno_conn_id"
-	MNOMsgIDKey  contextKey = "mno_msg_id"
-	SegMsgIDKey  contextKey = "seg_msg_id"
-	MSISDNKey    contextKey = "msisdn"
-	WalletIDKey  contextKey = "wallet_id"
-	CallBackKey  contextKey = "callback_url"
-	WorkerID     contextKey = "worker_id"
-	JobIDKey     contextKey = "job_id"
-	CommandIDKey contextKey = "cmd_id"
-	SeqNumberKey contextKey = "seq_num"
+	SPIDKey             contextKey = "sp_id"
+	SystemIDKey         contextKey = "system_id"
+	MessageIDKey        contextKey = "msg_id"
+	MNOIDKey            contextKey = "mno_id"
+	MNOConnIDKey        contextKey = "mno_conn_id"
+	MNOMsgIDKey         contextKey = "mno_msg_id"
+	SegMsgIDKey         contextKey = "seg_msg_id"
+	MSISDNKey           contextKey = "msisdn"
+	WalletIDKey         contextKey = "wallet_id"
+	CallBackKey         contextKey = "callback_url"
+	WorkerID            contextKey = "worker_id"
+	JobIDKey            contextKey = "job_id"
+	CommandIDKey        contextKey = "cmd_id"
+	SeqNumberKey        contextKey = "seq_num"
+	CredentialIDKey     contextKey = "seq_num"
+	SenderIDKey         contextKey = "sender_id"
+	CurrencyCodeKey     contextKey = "currency_code"
+	APIKeyIdentifierKey contextKey = "api_key_identifier"
 	// Add other keys as needed
 )
 
@@ -87,6 +91,10 @@ func ContextWithMSISDN(ctx context.Context, msisdn string) context.Context {
 	return context.WithValue(ctx, MSISDNKey, msisdn)
 }
 
+func ContextWithSenderID(ctx context.Context, senderID string) context.Context {
+	return context.WithValue(ctx, MSISDNKey, senderID)
+}
+
 func ContextWithWalletID(ctx context.Context, walletID int32) context.Context {
 	return context.WithValue(ctx, WalletIDKey, walletID)
 }
@@ -103,7 +111,19 @@ func ContextWithJobID(ctx context.Context, jobID int64) context.Context {
 	return context.WithValue(ctx, JobIDKey, jobID)
 }
 
+func ContextWithCredentialID(ctx context.Context, credentialID int32) context.Context {
+	return context.WithValue(ctx, CredentialIDKey, credentialID)
+}
+
 func ContextWithPDUInfo(ctx context.Context, commandID string, seqNumber int32) context.Context {
 	context.WithValue(ctx, CommandIDKey, commandID)
 	return context.WithValue(ctx, SeqNumberKey, seqNumber)
+}
+
+func ContextWithCurrency(ctx context.Context, currencyCode string) context.Context {
+	return context.WithValue(ctx, CurrencyCodeKey, currencyCode)
+}
+
+func ContextWithAPIKeyIdentifier(ctx context.Context, apiKeyIdentifier string) context.Context {
+	return context.WithValue(ctx, APIKeyIdentifierKey, apiKeyIdentifier)
 }

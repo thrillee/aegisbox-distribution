@@ -43,7 +43,8 @@ const (
 
 // MNO Submission Error Codes (Examples)
 const (
-	ErrorCodeMnoWindowFull = "MNO_WINDOW_FULL"
-	ErrorCodeMnoTimeout    = "MNO_TIMEOUT"
-	ErrorCodeSystemError   = "SYS_ERR"
+	ErrorCodeInsufficientFunds = "INSUFFICIENT_FUNDS"
+	ErrorCodeMnoWindowFull     = "MNO_WINDOW_FULL"
+	ErrorCodeMnoTimeout        = "MNO_TIMEOUT"
+	ErrorCodeSystemError       = "SYS_ERR"
 )

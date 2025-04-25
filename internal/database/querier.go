@@ -34,6 +34,10 @@ type Querier interface {
 	GetMessagesToPrice(ctx context.Context, limit int32) ([]GetMessagesToPriceRow, error)
 	// Selects pending DLR jobs and locks them for processing.
 	GetPendingDLRsToForward(ctx context.Context, arg GetPendingDLRsToForwardParams) ([]GetPendingDLRsToForwardRow, error)
+	// Gets SP credential based on a hashed API key for HTTP auth.
+	GetSPCredentialByAPIKey(ctx context.Context, apiKeyHash *string) (GetSPCredentialByAPIKeyRow, error)
+	// Gets SP credential based on a unique API key identifier for HTTP auth.
+	GetSPCredentialByKeyIdentifier(ctx context.Context, apiKeyIdentifier *string) (GetSPCredentialByKeyIdentifierRow, error)
 	GetSPCredentialBySystemID(ctx context.Context, systemID *string) (GetSPCredentialBySystemIDRow, error)
 	// Optional: Prevent redundant updates
 	// Select fields needed for DLR forwarding

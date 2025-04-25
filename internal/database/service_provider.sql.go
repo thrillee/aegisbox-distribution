@@ -23,7 +23,7 @@ INSERT INTO sp_credentials (
     http_config
 ) VALUES (
     $1, $2, $3, $4, $5, $6, $7
-) RETURNING id, service_provider_id, protocol, status, system_id, password_hash, bind_type, http_config, created_at, updated_at
+) RETURNING id, service_provider_id, protocol, status, system_id, password_hash, bind_type, api_key_hash, api_key_identifier, http_config, created_at, updated_at
 `
 
 type CreateSMPPCredentialParams struct {
@@ -55,6 +55,8 @@ func (q *Queries) CreateSMPPCredential(ctx context.Context, arg CreateSMPPCreden
 		&i.SystemID,
 		&i.PasswordHash,
 		&i.BindType,
+		&i.ApiKeyHash,
+		&i.ApiKeyIdentifier,
 		&i.HttpConfig,
 		&i.CreatedAt,
 		&i.UpdatedAt,

@@ -27,11 +27,7 @@ type HTTPSPForwarder struct {
 }
 
 // NewHTTPSPForwarder creates a new HTTP DLR forwarder.
-func NewHTTPSPForwarder(cfg HTTPForwarderConfig) *HTTPSPForwarder {
-	// Consider allowing injection of http.Client for testing/customization
-	httpClient := &http.Client{
-		Timeout: cfg.Timeout,
-	}
+func NewHTTPSPForwarder(cfg HTTPForwarderConfig, httpClient *http.Client) *HTTPSPForwarder {
 	return &HTTPSPForwarder{
 		config: cfg,
 		client: httpClient,

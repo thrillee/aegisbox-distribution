@@ -35,13 +35,14 @@ type Manager struct {
 	workerConfig       Config
 }
 
-func NewManager(pool *pgxpool.Pool, queries database.Querier, processor *sms.Processor, notifier notification.Notifier, cfg Config) *Manager {
+func NewManager(pool *pgxpool.Pool, queries database.Querier, processor *sms.Processor, dlrForwarderWorker *sms.DLRWorker, notifier notification.Notifier, cfg Config) *Manager {
 	return &Manager{
-		dbpool:       pool,
-		dbQueries:    queries, // Keep queries for low balance check for now
-		smsProcessor: processor,
-		notifier:     notifier,
-		workerConfig: cfg,
+		dbpool:             pool,
+		dbQueries:          queries, // Keep queries for low balance check for now
+		smsProcessor:       processor,
+		notifier:           notifier,
+		workerConfig:       cfg,
+		dlrForwarderWorker: dlrForwarderWorker,
 	}
 }
 
@@ -51,7 +52,10 @@ func (m *Manager) StartSMSProcessing(ctx context.Context) {
 	go runWorkerLoop(ctx, "SMS-Routing", m.workerConfig.RoutingInterval, m.workerConfig.RoutingBatchSize, m.smsProcessor.ProcessRoutingStep)
 	go runWorkerLoop(ctx, "SMS-Pricing", m.workerConfig.PricingInterval, m.workerConfig.PricingBatchSize, m.smsProcessor.ProcessPricingStep)
 	go runWorkerLoop(ctx, "SMS-Sending", m.workerConfig.SendingInterval, m.workerConfig.SendingBatchSize, m.smsProcessor.ProcessSendingStep)
-	go runWorkerLoop(ctx, "SMS-DLR-FORWARDER", m.workerConfig.DLRForwarderInterval, m.workerConfig.DLRForwardingBatchSize, m.dlrForwarderWorker.ProcessDLRForwardingBatch)
+	go runWorkerLoop(ctx, "SMS-DLR-FORWARDER",
+		m.workerConfig.DLRForwarderInterval,
+		m.workerConfig.DLRForwardingBatchSize,
+		m.dlrForwarderWorker.ProcessDLRForwardingBatch)
 }
 
 // StartLowBalanceNotifier launches the worker loop for checking low balances.
