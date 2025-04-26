@@ -152,6 +152,8 @@ CREATE TABLE messages (
     routed_mno_id INT REFERENCES mnos(id) ON DELETE SET NULL,
     -- Billing
     currency_code VARCHAR(3) NOT NULL, -- Currency used for pricing/debiting this message
+    cost NUMERIC(19, 6) DEFAULT 0.000000,
+
     -- Status Tracking
     processing_status VARCHAR(50) NOT NULL DEFAULT 'received', -- Stage: received -> validated -> routed -> pricing_checked -> queued_for_send -> send_attempted -> (failed states)
     final_status VARCHAR(50) NOT NULL DEFAULT 'pending', -- Aggregate: pending -> delivered / failed / rejected / unknown / expired

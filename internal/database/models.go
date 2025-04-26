@@ -49,6 +49,7 @@ type Message struct {
 	TemplateID              *int32             `json:"templateId"`
 	RoutedMnoID             *int32             `json:"routedMnoId"`
 	CurrencyCode            string             `json:"currencyCode"`
+	Cost                    pgtype.Numeric     `json:"cost"`
 	ProcessingStatus        string             `json:"processingStatus"`
 	FinalStatus             string             `json:"finalStatus"`
 	ErrorCode               *string            `json:"errorCode"`

@@ -8,6 +8,14 @@ import (
 	"github.com/kelseyhightower/envconfig"
 )
 
+type ManagerAPIConfig struct {
+	Addr         string        `envconfig:"API_ADDR" default:":8081"`
+	ReadTimeout  time.Duration `envconfig:"API_READ_TIMEOUT" default:"10s"`
+	WriteTimeout time.Duration `envconfig:"API_WRITE_TIMEOUT" default:"10s"`
+	IdleTimeout  time.Duration `envconfig:"API_IDLE_TIMEOUT" default:"60s"`
+	// Add Auth related config? JWT secrets?
+}
+
 // Config holds the overall application configuration.
 type Config struct {
 	DatabaseURL         string          `envconfig:"DATABASE_URL" required:"true"`
@@ -18,6 +26,7 @@ type Config struct {
 	HttpConfig          HttpConfig
 	DLRForwardInterval  time.Duration `envconfig:"WORKER_DLR_INTERVAL" default:"2s"`
 	DLRForwardBatchSize int           `envconfig:"WORKER_DLR_BATCH_SIZE" default:"100"`
+	ManagerAPI          ManagerAPIConfig
 }
 
 // ServerConfig holds SMPP Server specific configuration.

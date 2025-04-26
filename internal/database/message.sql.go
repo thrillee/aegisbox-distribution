@@ -424,22 +424,25 @@ const updateMessagePriced = `-- name: UpdateMessagePriced :exec
 UPDATE messages
 SET
     processing_status = $1, -- 'queued_for_send' or 'failed_pricing'
-    error_code = $2,    
-    error_description = $3, 
+    cost=$2,
+    error_code = $3,    
+    error_description = $4, 
     processed_for_queue_at = CASE WHEN $1 = 'queued_for_send' THEN NOW() ELSE processed_for_queue_at END
-WHERE id = $4
+WHERE id = $5
 `
 
 type UpdateMessagePricedParams struct {
-	ProcessingStatus string  `json:"processingStatus"`
-	ErrorCode        *string `json:"errorCode"`
-	ErrorDescription *string `json:"errorDescription"`
-	ID               int64   `json:"id"`
+	ProcessingStatus string         `json:"processingStatus"`
+	Cost             pgtype.Numeric `json:"cost"`
+	ErrorCode        *string        `json:"errorCode"`
+	ErrorDescription *string        `json:"errorDescription"`
+	ID               int64          `json:"id"`
 }
 
 func (q *Queries) UpdateMessagePriced(ctx context.Context, arg UpdateMessagePricedParams) error {
 	_, err := q.db.Exec(ctx, updateMessagePriced,
 		arg.ProcessingStatus,
+		arg.Cost,
 		arg.ErrorCode,
 		arg.ErrorDescription,
 		arg.ID,

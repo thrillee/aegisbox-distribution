@@ -27,6 +27,8 @@ const (
 	CurrencyCodeKey     contextKey = "currency_code"
 	APIKeyIdentifierKey contextKey = "api_key_identifier"
 	RemoteAddrKey       contextKey = "remote_addr"
+	MangerAPIHandlerKey contextKey = "manager_api_handler"
+	SpEMailKey          contextKey = "sp_email"
 	// Add other keys as needed
 )
 
@@ -117,7 +119,7 @@ func ContextWithCredentialID(ctx context.Context, credentialID int32) context.Co
 }
 
 func ContextWithPDUInfo(ctx context.Context, commandID string, seqNumber int32) context.Context {
-	context.WithValue(ctx, CommandIDKey, commandID)
+	ctx = context.WithValue(ctx, CommandIDKey, commandID)
 	return context.WithValue(ctx, SeqNumberKey, seqNumber)
 }
 
@@ -131,4 +133,12 @@ func ContextWithAPIKeyIdentifier(ctx context.Context, apiKeyIdentifier string) c
 
 func ContextWithRemoteAddr(ctx context.Context, addr string) context.Context {
 	return context.WithValue(ctx, RemoteAddrKey, addr)
+}
+
+func ContextWithHandler(ctx context.Context, handler string) context.Context {
+	return context.WithValue(ctx, MangerAPIHandlerKey, handler)
+}
+
+func ContextWithSPEmail(ctx context.Context, email string) context.Context {
+	return context.WithValue(ctx, SpEMailKey, email)
 }

@@ -7,6 +7,7 @@ import (
 	"log/slog"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/shopspring/decimal"
 
@@ -33,6 +34,7 @@ func (p *DefaultPricer) PriceAndDebit(ctx context.Context, msgID int64) (result 
 	logCtx := logging.ContextWithMessageID(ctx, msgID)
 	slog.DebugContext(logCtx, "Starting price and debit process")
 
+	var totalCost decimal.Decimal
 	result = &PricingResult{Debited: false}
 	finalStatus := "failed_pricing" // Pessimistic default
 	var logMsg string               // Message for critical status update log
@@ -101,6 +103,7 @@ func (p *DefaultPricer) PriceAndDebit(ctx context.Context, msgID int64) (result 
 		}
 
 		statusUpdateErr := dbQueriesFromPool.UpdateMessagePriced(logCtx, database.UpdateMessagePricedParams{
+			Cost:             pgtype.Numeric{Int: totalCost.BigInt(), Valid: true},
 			ProcessingStatus: finalStatus,
 			ErrorDescription: &errMsgForDB,
 			ID:               msgID,
@@ -197,7 +200,7 @@ func (p *DefaultPricer) PriceAndDebit(ctx context.Context, msgID int64) (result 
 	balance := wallet.Balance
 
 	// 3. Calculate Total Cost & Check Balance
-	totalCost := pricePerSegment.Mul(decimal.NewFromInt32(totalSegments))
+	totalCost = pricePerSegment.Mul(decimal.NewFromInt32(totalSegments))
 
 	slog.DebugContext(logCtx, "Pricing check",
 		slog.String("balance", fmt.Sprintf("%v", balance)),

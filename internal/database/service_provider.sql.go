@@ -12,6 +12,17 @@ import (
 	"github.com/shopspring/decimal"
 )
 
+const countServiceProviders = `-- name: CountServiceProviders :one
+SELECT count(*) FROM service_providers
+`
+
+func (q *Queries) CountServiceProviders(ctx context.Context) (int64, error) {
+	row := q.db.QueryRow(ctx, countServiceProviders)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const createSMPPCredential = `-- name: CreateSMPPCredential :one
 INSERT INTO sp_credentials (
     service_provider_id,
@@ -205,4 +216,43 @@ func (q *Queries) GetServiceProviderByID(ctx context.Context, id int32) (Service
 		&i.UpdatedAt,
 	)
 	return i, err
+}
+
+const listServiceProviders = `-- name: ListServiceProviders :many
+SELECT id, name, email, status, default_currency_code, created_at, updated_at FROM service_providers
+ORDER BY name -- Or created_at
+LIMIT $1 OFFSET $2
+`
+
+type ListServiceProvidersParams struct {
+	Limit  int32 `json:"limit"`
+	Offset int32 `json:"offset"`
+}
+
+func (q *Queries) ListServiceProviders(ctx context.Context, arg ListServiceProvidersParams) ([]ServiceProvider, error) {
+	rows, err := q.db.Query(ctx, listServiceProviders, arg.Limit, arg.Offset)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ServiceProvider
+	for rows.Next() {
+		var i ServiceProvider
+		if err := rows.Scan(
+			&i.ID,
+			&i.Name,
+			&i.Email,
+			&i.Status,
+			&i.DefaultCurrencyCode,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }

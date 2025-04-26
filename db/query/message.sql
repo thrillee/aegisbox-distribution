@@ -77,10 +77,11 @@ WHERE id = $7;
 UPDATE messages
 SET
     processing_status = $1, -- 'queued_for_send' or 'failed_pricing'
-    error_code = $2,    
-    error_description = $3, 
+    cost=$2,
+    error_code = $3,    
+    error_description = $4, 
     processed_for_queue_at = CASE WHEN $1 = 'queued_for_send' THEN NOW() ELSE processed_for_queue_at END
-WHERE id = $4;
+WHERE id = $5;
 
 -- name: GetMessagesToPrice :many
 SELECT id, service_provider_id, routed_mno_id

@@ -9,6 +9,7 @@ import (
 )
 
 type Querier interface {
+	CountServiceProviders(ctx context.Context) (int64, error)
 	// Creates initial segment record before sending attempt
 	CreateMessageSegment(ctx context.Context, arg CreateMessageSegmentParams) (int64, error)
 	CreateSMPPCredential(ctx context.Context, arg CreateSMPPCredentialParams) (SpCredential, error)
@@ -25,6 +26,8 @@ type Querier interface {
 	GetActiveMNOConnections(ctx context.Context) ([]MnoConnection, error)
 	GetApplicablePrice(ctx context.Context, arg GetApplicablePriceParams) (GetApplicablePriceRow, error)
 	GetApplicableRoutingRule(ctx context.Context, prefix string) (int32, error)
+	// Filter by date range (inclusive)
+	GetDailyReport(ctx context.Context, arg GetDailyReportParams) ([]GetDailyReportRow, error)
 	// Select fields needed by the Pricer
 	GetMessageDetailsForPricing(ctx context.Context, id int64) (GetMessageDetailsForPricingRow, error)
 	GetMessageDetailsForSending(ctx context.Context, id int64) (GetMessageDetailsForSendingRow, error)
@@ -50,6 +53,7 @@ type Querier interface {
 	GetWalletForUpdateByID(ctx context.Context, id int32) (Wallet, error)
 	GetWalletsBelowThreshold(ctx context.Context) ([]GetWalletsBelowThresholdRow, error)
 	InsertMessageIn(ctx context.Context, arg InsertMessageInParams) (int64, error)
+	ListServiceProviders(ctx context.Context, arg ListServiceProvidersParams) ([]ServiceProvider, error)
 	// Marks a job as failed for this attempt, increments attempts, and potentially sets to permanent failure.
 	MarkDLRForwardingAttemptFailed(ctx context.Context, arg MarkDLRForwardingAttemptFailedParams) error
 	// Marks a job as successfully completed.

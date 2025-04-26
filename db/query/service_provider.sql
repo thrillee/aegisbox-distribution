@@ -45,6 +45,14 @@ INSERT INTO wallets (service_provider_id, currency_code, balance, low_balance_th
 VALUES ($1, $2, $3, $4)
 RETURNING *;
 
+-- name: ListServiceProviders :many
+SELECT * FROM service_providers
+ORDER BY name -- Or created_at
+LIMIT $1 OFFSET $2;
+
+-- name: CountServiceProviders :one
+SELECT count(*) FROM service_providers;
+
 -- name: GetSPCredentialForHTTPAuth :one
 -- SELECT ... FROM sp_credentials WHERE protocol = 'http' AND http_config->>'api_key' = $1 ...
 
