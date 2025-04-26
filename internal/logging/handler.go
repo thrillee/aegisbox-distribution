@@ -26,6 +26,7 @@ const (
 	SenderIDKey         contextKey = "sender_id"
 	CurrencyCodeKey     contextKey = "currency_code"
 	APIKeyIdentifierKey contextKey = "api_key_identifier"
+	RemoteAddrKey       contextKey = "remote_addr"
 	// Add other keys as needed
 )
 
@@ -126,4 +127,8 @@ func ContextWithCurrency(ctx context.Context, currencyCode string) context.Conte
 
 func ContextWithAPIKeyIdentifier(ctx context.Context, apiKeyIdentifier string) context.Context {
 	return context.WithValue(ctx, APIKeyIdentifierKey, apiKeyIdentifier)
+}
+
+func ContextWithRemoteAddr(ctx context.Context, addr string) context.Context {
+	return context.WithValue(ctx, RemoteAddrKey, addr)
 }

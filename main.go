@@ -13,7 +13,6 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/linxGnu/gosmpp"
 	"github.com/thrillee/aegisbox/internal/config"
 	"github.com/thrillee/aegisbox/internal/database"
 	"github.com/thrillee/aegisbox/internal/httpserver"
@@ -24,7 +23,6 @@ import (
 	"github.com/thrillee/aegisbox/internal/sms"
 	"github.com/thrillee/aegisbox/internal/sp"
 	"github.com/thrillee/aegisbox/internal/wallet"
-	"github.com/thrillee/aegisbox/internal/workers"
 	"github.com/thrillee/aegisbox/pkg/segmenter"
 )
 
@@ -86,9 +84,6 @@ func main() {
 		// QueueClient: // Not using queue client in this version
 	}
 	smsProcessor := sms.NewProcessor(processorDeps) // smsProcessor now holds core logic
-	// The SMPP Server will provide the Session Manager needed by SMPSPForwarder
-	// We need to initialize it first, but start it later.
-	var smppSessionMgr sp.ServerSessionManager // Declare ahead
 
 	httpClient := &http.Client{Timeout: 20 * time.Second}
 	httpForwarder := sp.NewHTTPSPForwarder(sp.HTTPForwarderConfig{Timeout: 15 * time.Second}, httpClient)
@@ -109,11 +104,10 @@ func main() {
 	processorDeps.Sender = sms.NewDefaultSender(dbQueries, mnoManager, mainSegmenter)
 
 	// --- Initialize SMPP Server (Implements Session Manager) ---
-	smppServer := smppserver.NewServer(cfg.ServerConfig, dbQueries, incomingMessageHandler) // Pass core msg handler
-	smppSessionMgr = smppServer                                                             // Assign the server instance to the interface variable
+	smppServer := smppserver.NewServer(appCtx, cfg.ServerConfig, dbQueries, incomingMessageHandler) // Pass core msg handler
 
 	// --- Initialize DLR Forwarders & Factory (Now that Session Manager exists) ---
-	smppForwarder := sp.NewSMPSPForwarder(smppSessionMgr)
+	smppForwarder := smppserver.NewSMPSPForwarder(smppServer)
 	forwarderFactoryImpl, err := sms.NewMapDLRForwarderFactory(smppForwarder, httpForwarder)
 	if err != nil {
 		slog.Error("Failed to create DLR Forwarder Factory", slog.Any("error", err))
@@ -124,7 +118,7 @@ func main() {
 
 	// --- Initialize Worker Manager ---
 	// Pass the *factory* to the worker manager, which passes it to the DLR worker
-	workerManager := workers.NewManager(
+	workerManager := sms.NewManager(
 		dbpool,
 		dbQueries,
 		smsProcessor, // Processor reference may not be needed if workers use DB queue/services
@@ -161,7 +155,7 @@ func main() {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		if err := smppServer.ListenAndServe(); err != nil && !errors.Is(err, gosmpp.ErrServerClosed) {
+		if err := smppServer.ListenAndServe(); err != nil {
 			slog.Error("SMPP Server failed", slog.Any("error", err))
 			rootCancel() // Signal other components to stop
 		}

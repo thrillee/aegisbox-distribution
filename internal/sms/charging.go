@@ -207,7 +207,7 @@ func (p *DefaultPricer) PriceAndDebit(ctx context.Context, msgID int64) (result 
 	)
 
 	if balance.LessThan(totalCost) {
-		err = fmt.Errorf("insufficient balance for %d segments (%.4f < %.4f)", totalSegments, balance, totalCost)
+		err = fmt.Errorf("insufficient balance for %d segments (%d < %d)", totalSegments, balance, totalCost)
 		result.Error = err
 		return result, nil // Logical failure, defer handles rollback
 	}

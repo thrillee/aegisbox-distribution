@@ -692,7 +692,7 @@ func (p *Processor) generateAndEnqueueSuccessDLR(ctx context.Context, messageID 
 // generateAndEnqueueFailureDLR: Enqueue to DB
 func (p *Processor) generateAndEnqueueFailureDLR(ctx context.Context, messageID int64, failureStatus string, failureReason error, errorCode *string) {
 	logCtx := logging.ContextWithMessageID(ctx, messageID)
-	slog.DebugContext(logCtx, "Attempting to enqueue internal failure DLR", slog.String("failure_status", failureStatus))
+	slog.DebugContext(logCtx, "Attempting to enqueue internal failure DLR", slog.String("failure_status", failureStatus), slog.String("failure_reason", failureReason.Error()))
 
 	spMsgInfo, err := p.dbQueries.GetSPMessageInfoForDLR(logCtx, messageID)
 	if err != nil {

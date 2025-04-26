@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"strings"
 
+	"github.com/thrillee/aegisbox/internal/smppserver"
 	"github.com/thrillee/aegisbox/internal/sp"
 )
 
@@ -13,14 +14,14 @@ var _ DLRForwarderFactory = (*mapDLRForwarderFactory)(nil)
 
 // mapDLRForwarderFactory holds instances of concrete DLRForwarder implementations.
 type mapDLRForwarderFactory struct {
-	smppForwarder *sp.SMPSPForwarder  // Instance of the SMPP forwarder
-	httpForwarder *sp.HTTPSPForwarder // Instance of the HTTP forwarder
+	smppForwarder *smppserver.SMPSPForwarder // Instance of the SMPP forwarder
+	httpForwarder *sp.HTTPSPForwarder        // Instance of the HTTP forwarder
 	// Add other forwarders here if supporting more protocols (e.g., SMTP)
 }
 
 // NewMapDLRForwarderFactory creates a new factory instance.
 // It requires pre-initialized instances of the concrete forwarders.
-func NewMapDLRForwarderFactory(smppFwd *sp.SMPSPForwarder, httpFwd *sp.HTTPSPForwarder) (DLRForwarderFactory, error) {
+func NewMapDLRForwarderFactory(smppFwd *smppserver.SMPSPForwarder, httpFwd *sp.HTTPSPForwarder) (DLRForwarderFactory, error) {
 	if smppFwd == nil {
 		slog.Warn("SMPP DLR Forwarder instance is nil during factory creation. SMPP forwarding will not work.")
 		// Depending on requirements, you might return an error here:

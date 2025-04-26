@@ -74,7 +74,7 @@ func (s *DefaultSender) Send(ctx context.Context, msg database.GetMessageDetails
 	// The connector will update these with MNO Msg IDs / errors.
 	// We store the segment IDs to link back the results.
 	segmentIDs := make([]int64, msg.TotalSegments)
-	for i := 0; i < int(msg.TotalSegments); i++ {
+	for i := range msg.TotalSegments {
 		segID, dbErr := s.dbQueries.CreateMessageSegment(logCtx, database.CreateMessageSegmentParams{
 			MessageID:   msg.ID,
 			SegmentSeqn: int32(i + 1),

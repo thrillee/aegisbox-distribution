@@ -1,4 +1,4 @@
-package workers
+package sms
 
 import (
 	"context"
@@ -7,35 +7,36 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/thrillee/aegisbox/internal/config"
 	"github.com/thrillee/aegisbox/internal/database"
 	"github.com/thrillee/aegisbox/internal/notification"
-	"github.com/thrillee/aegisbox/internal/sms"
+	"github.com/thrillee/aegisbox/internal/workers"
 )
 
-// Config holds configuration for worker intervals and batch sizes.
-type Config struct {
+// WorkerConfig holds configuration for worker intervals and batch sizes.
+type WorkerConfig struct {
 	RoutingInterval        time.Duration
 	PricingInterval        time.Duration
 	SendingInterval        time.Duration
 	LowBalanceInterval     time.Duration
-	DLRForwarderInterval   time.Duration
 	RoutingBatchSize       int
 	PricingBatchSize       int
 	SendingBatchSize       int
 	DLRForwardingBatchSize int
+	DLRForwarderInterval   time.Duration
 }
 
 // Manager orchestrates the background worker loops.
 type Manager struct {
 	dbpool             *pgxpool.Pool
 	dbQueries          database.Querier
-	smsProcessor       *sms.Processor        // Holds the SMS processing logic
-	dlrForwarderWorker *sms.DLRWorker        // For forwarding DLRs
+	smsProcessor       *Processor            // Holds the SMS processing logic
+	dlrForwarderWorker *DLRWorker            // For forwarding DLRs
 	notifier           notification.Notifier // For low balance notifications
-	workerConfig       Config
+	workerConfig       config.WorkerConfig
 }
 
-func NewManager(pool *pgxpool.Pool, queries database.Querier, processor *sms.Processor, dlrForwarderWorker *sms.DLRWorker, notifier notification.Notifier, cfg Config) *Manager {
+func NewManager(pool *pgxpool.Pool, queries database.Querier, processor *Processor, dlrForwarderWorker *DLRWorker, notifier notification.Notifier, cfg config.WorkerConfig) *Manager {
 	return &Manager{
 		dbpool:             pool,
 		dbQueries:          queries, // Keep queries for low balance check for now
@@ -49,10 +50,10 @@ func NewManager(pool *pgxpool.Pool, queries database.Querier, processor *sms.Pro
 // StartSMSProcessing launches worker loops for different SMS processing stages.
 func (m *Manager) StartSMSProcessing(ctx context.Context) {
 	log.Println("Starting SMS processing workers...")
-	go runWorkerLoop(ctx, "SMS-Routing", m.workerConfig.RoutingInterval, m.workerConfig.RoutingBatchSize, m.smsProcessor.ProcessRoutingStep)
-	go runWorkerLoop(ctx, "SMS-Pricing", m.workerConfig.PricingInterval, m.workerConfig.PricingBatchSize, m.smsProcessor.ProcessPricingStep)
-	go runWorkerLoop(ctx, "SMS-Sending", m.workerConfig.SendingInterval, m.workerConfig.SendingBatchSize, m.smsProcessor.ProcessSendingStep)
-	go runWorkerLoop(ctx, "SMS-DLR-FORWARDER",
+	go workers.RunWorkerLoop(ctx, "SMS-Routing", m.workerConfig.RoutingInterval, m.workerConfig.RoutingBatchSize, m.smsProcessor.ProcessRoutingStep)
+	go workers.RunWorkerLoop(ctx, "SMS-Pricing", m.workerConfig.PricingInterval, m.workerConfig.PricingBatchSize, m.smsProcessor.ProcessPricingStep)
+	go workers.RunWorkerLoop(ctx, "SMS-Sending", m.workerConfig.SendingInterval, m.workerConfig.SendingBatchSize, m.smsProcessor.ProcessSendingStep)
+	go workers.RunWorkerLoop(ctx, "SMS-DLR-FORWARDER",
 		m.workerConfig.DLRForwarderInterval,
 		m.workerConfig.DLRForwardingBatchSize,
 		m.dlrForwarderWorker.ProcessDLRForwardingBatch)
@@ -61,7 +62,7 @@ func (m *Manager) StartSMSProcessing(ctx context.Context) {
 // StartLowBalanceNotifier launches the worker loop for checking low balances.
 func (m *Manager) StartLowBalanceNotifier(ctx context.Context) {
 	log.Println("Starting Low Balance Notifier worker...")
-	go runWorkerLoop(ctx, "LowBalanceNotifier", m.workerConfig.LowBalanceInterval, 100, m.checkLowBalances) // Batch size not really applicable here
+	go workers.RunWorkerLoop(ctx, "LowBalanceNotifier", m.workerConfig.LowBalanceInterval, 100, m.checkLowBalances) // Batch size not really applicable here
 }
 
 // checkLowBalances is the WorkerFunc for the low balance notifier.

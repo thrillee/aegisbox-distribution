@@ -14,7 +14,7 @@ import (
 type WorkerFunc func(ctx context.Context, batchSize int) (int, error)
 
 // runWorkerLoop runs a generic worker function periodically.
-func runWorkerLoop(ctx context.Context, name string, interval time.Duration, batchSize int, workerFunc WorkerFunc) {
+func RunWorkerLoop(ctx context.Context, name string, interval time.Duration, batchSize int, workerFunc WorkerFunc) {
 	log.Printf("%s worker starting with interval %v, batch size %d", name, interval, batchSize)
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
