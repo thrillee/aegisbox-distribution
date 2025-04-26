@@ -2,16 +2,16 @@ package smppserver
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"log/slog"
-	"strings"
+	"net"
 	"sync"
 	"time"
 
-	"github.com/jackc/pgx/v5" // For pgx.ErrNoRows
 	"github.com/linxGnu/gosmpp"
+	"github.com/linxGnu/gosmpp/data"
 	"github.com/linxGnu/gosmpp/pdu"
+	"github.com/thrillee/aegisbox/internal/auth"
 	"github.com/thrillee/aegisbox/internal/config"
 	"github.com/thrillee/aegisbox/internal/database"
 	"github.com/thrillee/aegisbox/internal/logging"
@@ -22,7 +22,7 @@ import (
 var _ sp.ServerSessionManager = (*Server)(nil)
 
 // sessionState holds information about a currently bound client connection.
-type sessionState struct {
+type sessionState1 struct {
 	credentialID      int32
 	serviceProviderID int32
 	systemID          string
@@ -32,18 +32,19 @@ type sessionState struct {
 }
 
 // Server implements the SMPP server logic.
-type Server struct {
+type Server1 struct {
 	config         config.ServerConfig
 	dbQueries      database.Querier
 	messageHandler sp.IncomingMessageHandler // Core logic handler
-	gosmppServer   *gosmpp.Server
+	gosmppServer   net.Listener
 	sessions       sync.Map // map[string]*sessionState - Key: SystemID
 	stopOnce       sync.Once
 	wg             sync.WaitGroup
+	ctx            context.Context
 }
 
 // NewServer creates a new SMPP server instance.
-func NewServer(cfg config.ServerConfig, q database.Querier, handler sp.IncomingMessageHandler) *Server {
+func NewServer1(cfg config.ServerConfig, q database.Querier, handler sp.IncomingMessageHandler) *Server {
 	if handler == nil {
 		panic("Message handler cannot be nil for SMPP Server")
 	}
@@ -54,260 +55,400 @@ func NewServer(cfg config.ServerConfig, q database.Querier, handler sp.IncomingM
 	}
 }
 
-// ListenAndServe starts the SMPP server and blocks until shutdown.
-func (s *Server) ListenAndServe() error {
-	if s.gosmppServer != nil {
-		return errors.New("server already started")
+// Implement SMPP server
+func (s *Server) Start() error {
+	addr := fmt.Sprintf("%s:%d", s.config.Host, s.config.Port)
+	ln, err := net.Listen("tcp", addr)
+	if err != nil {
+		return fmt.Errorf("failed to listen: %w", err)
 	}
 
-	bindAuthHandler := func(ctx context.Context, systemID, password string, conn gosmpp.Connection) (pdu.Status, error) {
-		logCtx := logging.ContextWithSystemID(ctx, systemID)
-		slog.InfoContext(logCtx, "Received bind request")
-
-		// Use a timeout for the auth DB lookup
-		authCtx, cancel := context.WithTimeout(logCtx, 5*time.Second)
-		defer cancel()
-
-		cred, err := s.dbQueries.GetSPCredentialBySystemID(authCtx, &systemID) // Use updated query
-		if err != nil {
-			if errors.Is(err, pgx.ErrNoRows) {
-				slog.WarnContext(logCtx, "Bind failed: SystemID not found")
-				return pdu.StatusInvSysID, nil // Invalid System ID
-			}
-			slog.ErrorContext(logCtx, "Bind auth DB error", slog.Any("error", err))
-			return pdu.StatusSystemError, err // Indicate temporary failure
-		}
-
-		// Check if it's an SMPP credential
-		if cred.Protocol != "smpp" {
-			slog.WarnContext(logCtx, "Bind failed: Credential found but not for SMPP protocol", slog.String("protocol", cred.Protocol))
-			return pdu.StatusBindFailed, nil
-		}
-
-		// Check password hash
-		if cred.PasswordHash != nil || !auth.CheckPasswordHash(password, cred.PasswordHash) {
-			slog.WarnContext(logCtx, "Bind failed: Invalid password")
-			return pdu.StatusInvPasswd, nil // Invalid Password
-		}
-
-		// --- Authentication Successful ---
-
-		// Store session state - This needs access to the underlying writer.
-		// gosmpp.Connection likely provides access.
-		session := &sessionState{
-			credentialID:      cred.ID,
-			serviceProviderID: cred.ServiceProviderID,
-			systemID:          systemID,
-			connection:        &conn, // Store the connection itself as the writer
-			bindType:          *cred.BindType,
-			boundAt:           time.Now(),
-		}
-		s.sessions.Store(systemID, session) // Store session keyed by SystemID
-
-		slog.InfoContext(logCtx, "Bind successful", slog.Int("sp_id", int(session.serviceProviderID)))
-
-		// Associate SystemID with context logger for subsequent PDU handlers for this conn? Complex.
-
-		return pdu.StatusOk, nil
-	}
-
-	// Define handler for SubmitSM within the generic request handler
-	genericHandler := gosmpp.DefaultGenericRequestHandler{
-		HandlerFunc: func(ctx context.Context, req pdu.PDU, resp pdu.Responsable, conn gosmpp.Connection) (pdu.Status, error) {
-			logCtx := ctx                   // Start with base context
-			systemID, ok := conn.SystemID() // Attempt to get bound system ID
-			if ok {
-				logCtx = logging.ContextWithSystemID(logCtx, systemID)
-			}
-			logCtx = logging.ContextWithPDUInfo(logCtx, req.CommandID().String(), req.GetSequenceNumber())
-
-			switch p := req.(type) {
-			case *pdu.SubmitSM:
-				return s.handleSubmitSM(logCtx, p, resp, systemID) // Pass systemID if available
-			case *pdu.EnquireLink:
-				slog.DebugContext(logCtx, "Received EnquireLink")
-				return pdu.StatusOk, nil // Default handler sends response
-			case *pdu.Unbind:
-				slog.InfoContext(logCtx, "Received Unbind request")
-				// Remove session on unbind request
-				if sysID, ok := conn.SystemID(); ok {
-					slog.InfoContext(logCtx, "Closing session due to unbind request")
-					s.removeSession(sysID) // Clean up session map
-				}
-				// Default handler sends UnbindResp and closes connection
-				return pdu.StatusOk, nil
-			// Add other PDU types if needed
-			default:
-				slog.DebugContext(logCtx, "Passing PDU to default handler")
-				// Use default for others (like DataSM, responses to server requests if any)
-				return gosmpp.DefaultPDUHandlerFunc(ctx, req, resp, conn)
-			}
-		},
-	}.HandlerFunc // Get the handler function
-
-	s.gosmppServer = &gosmpp.Server{
-		Addr:           s.config.Addr,
-		ReadTimeout:    s.config.ReadTimeout,
-		WriteTimeout:   s.config.WriteTimeout,
-		BindTimeout:    s.config.BindTimeout,
-		EnquireLink:    s.config.EnquireLink,
-		MaxConnections: s.config.MaxConnections,
-		TLS:            nil, // Add TLS config later if needed
-
-		// Use BindAuthController for more control over bind and session storage
-		BindAuthController: bindAuthHandler,
-
-		// Use our customized generic handler
-		GenericRequestHandler: genericHandler,
-
-		OnClosed: func(conn gosmpp.Connection, state gosmpp.State) {
-			systemID, ok := conn.SystemID()
-			if ok {
-				logCtx := logging.ContextWithSystemID(context.Background(), systemID)
-				slog.InfoContext(logCtx, "SMPP client connection closed", slog.String("state", state.String()))
-				s.removeSession(systemID) // Clean up session on close
-			} else {
-				slog.InfoContext(context.Background(), "Unauthenticated SMPP client connection closed", slog.String("state", state.String()), slog.String("remote_addr", conn.RemoteAddr().String()))
-			}
-		},
-		// Add other event handlers like OnError if needed
-	}
-
-	slog.Info("Starting SMPP Server", slog.String("address", s.config.Addr))
-	err := s.gosmppServer.ListenAndServe() // This blocks
-	if err != nil && !errors.Is(err, gosmpp.ErrServerClosed) {
-		slog.Error("SMPP server ListenAndServe error", slog.Any("error", err))
-		return err
-	}
-	slog.Info("SMPP Server stopped.")
+	s.gosmppServer = ln
+	s.wg.Add(1)
+	go s.serve()
 	return nil
 }
 
-// handleSubmitSM handles incoming SubmitSM requests.
-func (s *Server) handleSubmitSM(ctx context.Context, p *pdu.SubmitSM, resp pdu.Responsable, systemID string) (pdu.Status, error) {
-	slog.InfoContext(ctx, "Received SubmitSM request")
+func (s *Server) serve() {
+	defer s.wg.Done()
 
-	// 1. Get Session State (Authentication happened during bind)
-	session, ok := s.getSession(systemID)
-	if !ok {
-		slog.WarnContext(ctx, "SubmitSM rejected: Client session not found or not bound", slog.String("system_id", systemID))
-		// Can't proceed without valid session
-		// ESME_RINVBNDSTS (Invalid Bind Status) might be appropriate
-		return pdu.StatusBindFailed, errors.New("client session not bound")
+	for {
+		conn, err := s.gosmppServer.Accept()
+		if err != nil {
+			select {
+			case <-s.ctx.Done():
+				return
+			default:
+				slog.Error("Accept failed", "error", err)
+				continue
+			}
+		}
+
+		s.wg.Add(1)
+		go s.handleConnection(conn)
 	}
-	logCtx := logging.ContextWithSPID(ctx, session.serviceProviderID) // Add SP ID
+}
 
-	// 2. Extract Data & Prepare Internal Message
-	// TODO: Detect incoming UDH and handle reassembly if required before calling handler.
-	// This example assumes single part messages or pre-reassembled content.
-	shortMessage, err := p.Message.GetMessage() // Get message content
+func (s *Server) handleConnection(conn net.Conn) {
+	defer s.wg.Done()
+	defer conn.Close()
+
+	// Create gosmpp connection with settings
+	connection := gosmpp.NewConnection(
+		conn,
+	)
+	defer connection.Close()
+
+	for {
+		pdu, err := s.connection.Read()
+		if err != nil {
+			return
+		}
+		switch pdu.Header().CommandID {
+		case data.BIND_TRANSCEIVER:
+			s.handleBind(s, pdu)
+		case *pdu.SubmitSM:
+			s.handleSubmitSM(ss, pdu)
+		case pdu.BindingType:
+			s.handleUnbind2(ss, pdu)
+		case gosmpp.CmdEnquireLink:
+			// respond immediately
+			s.connection.Write(pdu.Resp())
+		default:
+			ss.connection.Write(pdu.Resp().SetCommandStatus(gosmpp.ESME_RINVCMDID))
+		}
+	}
+
+	session := &sessionState{connection: connection}
+	ctx := context.Background()
+
+	for {
+		p, err := connection.ReadPDU()
+		if err != nil {
+			slog.InfoContext(ctx, "Connection closed", "error", err)
+			s.removeSession(session)
+			return
+		}
+
+		switch pd := p.(type) {
+		case *pdu.BindTransmitter:
+			s.handleBindTransmitter(ctx, pd, session)
+		case *pdu.BindReceiver:
+			s.handleBindReceiver(ctx, pd, session)
+		case *pdu.BindTransceiver:
+			s.handleBindTransceiver(ctx, pd, session)
+		case *pdu.SubmitSM:
+			s.handleSubmitSM(ctx, pd, session)
+		case *pdu.EnquireLink:
+			s.handleEnquireLink(ctx, pd, session)
+		case *pdu.Unbind:
+			s.handleUnbind(ctx, pd, session)
+		default:
+			slog.WarnContext(ctx, "Unhandled PDU type", "type", p.GetHeader().ID)
+		}
+	}
+}
+
+// Separate handlers for each bind type
+func (s *Server) handleBindTransmitter(ctx context.Context, p *pdu.BindTransmitter, session *sessionState) {
+	s.handleBind(ctx, p, session, "transmitter")
+}
+
+func (s *Server) handleBindReceiver(ctx context.Context, p *pdu.BindReceiver, session *sessionState) {
+	s.handleBind(ctx, p, session, "receiver")
+}
+
+func (s *Server) handleBindTransceiver(ctx context.Context, p *pdu.BindTransceiver, session *sessionState) {
+	s.handleBind(ctx, p, session, "transceiver")
+}
+
+// Unified bind handler
+func (s *Server) handleBind2(ctx context.Context, bindPdu interface{}, session *sessionState, bindType string) {
+	var systemID, password string
+
+	switch p := bindPdu.(type) {
+	case *data.BindTransmitter:
+		systemID = p.SystemID
+		password = p.Password
+	case *pdu.BindReceiver:
+		systemID = p.SystemID
+		password = p.Password
+	case *pdu.BindTransceiver:
+		systemID = p.SystemID
+		password = p.Password
+	default:
+		return
+	}
+
+	logCtx := logging.ContextWithSystemID(ctx, systemID)
+	slog.InfoContext(logCtx, "Bind request received")
+
+	cred, err := s.dbQueries.GetSPCredentialBySystemID(ctx, &systemID)
 	if err != nil {
-		slog.WarnContext(logCtx, "Failed to get message content from SubmitSM", slog.Any("error", err))
-		return pdu.StatusInvMsgLen, err // Invalid message length? Or system error?
+		slog.ErrorContext(logCtx, "Database error", "error", err)
+		s.sendBindResponse(session, data.ESME_RBINDFAIL, systemID, bindType)
+		return
 	}
 
-	// Get client message reference if provided (e.g., message_payload TLV or other means)
-	clientRef := ""
-	// Example: Check for message_payload TLV (0x0424)
-	if tlv := p.GetTLV(pdutlv.TagMessagePayload); tlv != nil {
-		// Use payload as message content? Check spec/use case.
-		// Or maybe another TLV for client ref? For now, leave clientRef empty.
+	if cred.Protocol != "smpp" {
+		slog.WarnContext(logCtx, "Invalid protocol", "expected", "smpp", "got", cred.Protocol)
+		s.sendBindResponse(session, data.ESME_RINVSYSID, systemID, bindType)
+		return
 	}
 
-	incomingMsg := sp.IncomingSPMessage{
-		ServiceProviderID: session.serviceProviderID,
-		CredentialID:      session.credentialID,
+	if !auth.CheckPasswordHash(password, *cred.PasswordHash) {
+		slog.WarnContext(logCtx, "Invalid password")
+		s.sendBindResponse(session, data.ESME_RINVPASWD, systemID, bindType)
+		return
+	}
+
+	session.systemID = systemID
+	session.serviceProviderID = cred.ServiceProviderID
+	session.credentialID = cred.ID
+	session.bindType = bindType
+	session.boundAt = time.Now()
+
+	s.sessions.Store(systemID, session)
+	slog.InfoContext(logCtx, "Bind successful", "sp_id", cred.ServiceProviderID)
+
+	s.sendBindResponse(session, data.ESME_ROK, systemID, bindType)
+}
+
+func (s *Server) handleSubmitSM(ss *sessionState, pdu *pdu.PDU) {
+	body := pdu.Body()
+	dest := body.DestinationAddr()
+	src := body.SourceAddr()
+	ext := body.ShortMessageBytes()
+	esm := body.ESMClass()
+	dc := body.DataCoding()
+	dlr := body.RegisteredDelivery()
+
+	msg := sp.IncomingSPMessage{
+		ServiceProviderID: ss.serviceProviderID,
+		CredentialID:      ss.credentialID,
 		Protocol:          "smpp",
-		ClientMessageRef:  clientRef, // Populate if client sends a reference
-		SenderID:          p.SourceAddr.Address(),
-		DestinationMSISDN: p.DestAddr.Address(),
-		MessageContent:    shortMessage,
-		TotalSegments:     1, // Assume 1 unless UDH detected and handled
+		SenderID:          src.Address,
+		DestinationMSISDN: dest.Address,
+		MessageContent:    string(ext),
+		TotalSegments:     1,
 		SegmentSeqn:       1,
-		IsFlash:           false, // TODO: Detect flash indication (e.g., DataCoding)
-		RequestDLR:        p.RegisteredDelivery == 1,
+		ConcatRef:         0,
+		IsFlash:           esm&0x10 != 0,
+		RequestDLR:        dlr.Flags() != 0,
 		ReceivedAt:        time.Now(),
 	}
 
-	// 3. Call Core Message Handler
-	ack, err := s.messageHandler.HandleIncomingMessage(logCtx, incomingMsg)
+	// Delegate to core logic
+	ack, err := s.messageHandler.HandleIncomingMessage(s.ctx, msg)
+	resp := pdu.Resp()
+	if err != nil || ack.Status != "accepted" {
+		reason := data.ESME_RSUBMITFAIL
+		if err != nil {
+			// map custom errors here
+		}
+		resp.SetCommandStatus(reason)
+		ss.connection.Write(resp)
+		return
+	}
+
+	// success: set message ID
+	resp.Body().SetMessageID(fmt.Sprintf("%d", ack.InternalMessageID))
+	ss.connection.Write(resp)
+
+	// schedule DLR if requested
+	if msg.RequestDLR {
+		go s.generateReceipt(ss, ack.InternalMessageID, msg)
+	}
+}
+
+func (s *Server) sendBindResponse(session *sessionState, status pdu.CommandStatus, systemID, bindType string) {
+	var resp pdu.Respondable
+
+	switch bindType {
+	case "transmitter":
+		resp = pdu.NewBindTransmitterResp()
+	case "receiver":
+		resp = pdu.NewBindReceiverResp()
+	case "transceiver":
+		resp = pdu.NewBindTransceiverResp()
+	default:
+		return
+	}
+
+	resp.SetSequenceNumber(session.connection.SequenceNumber())
+	resp.SetStatus(status)
+	if r, ok := resp.(interface{ SetSystemID(string) }); ok {
+		r.SetSystemID(systemID)
+	}
+
+	if _, err := session.connection.WritePDU(resp); err != nil {
+		slog.Error("Failed to send bind response", "error", err)
+	}
+}
+
+// SubmitSM handler
+func (s *Server) handleSubmitSM(ctx context.Context, p *pdu.SubmitSM, session *sessionState) {
+	logCtx := logging.ContextWithSystemID(ctx, session.systemID)
+	logCtx = logging.ContextWithSPID(logCtx, session.serviceProviderID)
+
+	// Create response
+	resp := pdu.NewSubmitSMResp()
+	resp.SetSequenceNumber(p.GetSequenceNumber())
+	// resp.MessageID = generateMessageID() // Implement your message ID generation
+
+	if _, err := session.connection.WritePDU(resp); err != nil {
+		slog.ErrorContext(logCtx, "Failed to send SubmitSM response", "error", err)
+		return
+	}
+
+	// Process message
+	message := sp.IncomingMessage{
+		SourceAddr:      p.SourceAddr.Address(),
+		DestinationAddr: p.DestAddr.Address(),
+		Text:            p.Message.GetMessage(),
+		ClientRef:       p.EsmClass,
+		// ... map other fields
+	}
+
+	if err := s.messageHandler.HandleIncomingMessage(logCtx, message); err != nil {
+		slog.ErrorContext(logCtx, "Failed to process message", "error", err)
+	}
+}
+
+// Implement DLR forwarding
+func (f *SMPSPForwarder) ForwardDLR(ctx context.Context, spDetails SPDetails, dlr ForwardedDLRInfo) error {
+	conn, err := f.sessionMgr.GetBoundClientConnection(spDetails.SMPPSystemID)
 	if err != nil {
-		// Core handler failed (e.g., DB insert error)
-		slog.ErrorContext(logCtx, "Incoming message handler failed", slog.Any("error", err))
-		// Map internal error to SMPP status code?
-		return pdu.StatusSystemError, err // Return temporary system error
+		return fmt.Errorf("no active connection for systemID %s: %w", spDetails.SMPPSystemID, err)
 	}
 
-	// 4. Process Acknowledgement
-	if ack.Status != "accepted" || !ack.InternalMessageID.Valid {
-		slog.WarnContext(logCtx, "Message rejected by core handler", slog.String("reason", ack.Error))
-		// Map rejection reason to SMPP status code?
-		// Example mapping:
-		status := pdu.StatusMessageQFull // Default rejection
-		if strings.Contains(ack.Error, "invalid sender") {
-			status = pdu.StatusInvSrcAddr
-		}
-		if strings.Contains(ack.Error, "insufficient funds") {
-			status = pdu.StatusEsmeRThrottled
-		} // Abuse slightly
-		// ... more mappings ...
-		return status, errors.New(ack.Error)
+	dlrPDU := buildDLRPDU(dlr)
+	if err := conn.WritePDU(dlrPDU); err != nil {
+		return fmt.Errorf("failed to send DLR: %w", err)
 	}
 
-	// 5. Send SubmitSMResp (Success)
-	// Set the message ID in the response PDU - SMPP expects string
-	resp.SetField(pdufield.MessageID, fmt.Sprintf("%d", ack.InternalMessageID))
-	slog.InfoContext(logCtx, "Message accepted by core handler", slog.Int64("internal_msg_id", ack.InternalMessageID))
-
-	return pdu.StatusOk, nil // Success
+	return nil
 }
 
-// getSession retrieves the session state for a given systemID.
-func (s *Server) getSession(systemID string) (*sessionState, bool) {
-	val, ok := s.sessions.Load(systemID)
-	if !ok {
-		return nil, false
-	}
-	session, ok := val.(*sessionState)
-	return session, ok
+func buildDLRPDU(dlr ForwardedDLRInfo) pdu.PDU {
+	d := pdu.NewDeliverSM()
+
+	// Source address (original sender)
+	srcAddr := pdu.NewAddress()
+	srcAddr.SetAddress(dlr.DestAddr)
+	d.SourceAddr = srcAddr
+
+	// Destination address (original receiver)
+	destAddr := pdu.NewAddress()
+	destAddr.SetAddress(dlr.SourceAddr)
+	d.DestAddr = destAddr
+
+	// Message text - format according to SMPP spec
+	message := buildDLRMessage(dlr)
+	_ = d.Message.SetMessage(message)
+
+	// Set DLR specific parameters
+	d.RegisteredDelivery = 1
+	d.ReceiptedMessageID = dlr.ClientMessageRef
+	d.MessageState = dlrStatusToMessageState(dlr.Status)
+	d.ErrorCode = dlrErrorCode(dlr.ErrorCode)
+
+	return d
 }
 
-// removeSession removes a session from the map.
-func (s *Server) removeSession(systemID string) {
-	if _, ok := s.sessions.LoadAndDelete(systemID); ok {
-		logCtx := logging.ContextWithSystemID(context.Background(), systemID)
-		slog.InfoContext(logCtx, "Removed client session from map")
+func buildDLRMessage(dlr ForwardedDLRInfo) string {
+	// Format according to SMPP Appendix B
+	return fmt.Sprintf("id:%s submit date:%s done date:%s stat:%s err:%s",
+		dlr.ClientMessageRef,
+		dlr.SubmitDate.Format("0601021504"),
+		dlr.DoneDate.Format("0601021504"),
+		dlr.Status,
+		dlr.ErrorCode,
+	)
+}
+
+// Helper functions for DLR conversion
+func dlrStatusToMessageState(status string) pdu.MessageState {
+	switch status {
+	case "DELIVRD":
+		return data.DELI
+	case "UNDELIV":
+		return pdu.UNDELIVERABLE
+	case "REJECTD":
+		return pdu.REJECTED
+	default:
+		return pdu.UNKNOWN
 	}
 }
 
+func (s *Server) generateReceipt(ss *sessionState, internalID int64, msg IncomingSPMessage) {
+	delay := time.Duration(rand.Intn(5)+1) * time.Second
+	time.Sleep(delay)
+
+	// build DeliverSM receipt
+	dlr := pdu.NewDeliverSM()
+	dlr.SetSourceAddr(msg.DestinationMSISDN)
+	dlr.Body().SetDestinationAddr(msg.SenderID)
+	text := fmt.Sprintf("id:%d sub:001 dlvrd:001 submit date:%s done date:%s stat:DELIVRD err:000 text:%s",
+		internalID,
+		msg.ReceivedAt.Format("0601021504"),
+		time.Now().Format("0601021504"),
+		msg.MessageContent,
+	)
+	dlr.Body().SetShortMessage([]byte(text))
+
+	ss.connection.Write(dlr)
+}
+
+func dlrErrorCode(err *string) byte {
+	if err == nil {
+		return 0
+	}
+	// Implement your error code mapping logic
+	return 0
+}
+
+// Session management
 func (s *Server) GetBoundClientConnection(systemID string) (*gosmpp.Connection, error) {
-	session, ok := s.getSession(systemID) // getSession remains the same
-	if !ok {
-		return nil, fmt.Errorf("no active session found for systemID: %s", systemID)
+	if sess, ok := s.sessions.Load(systemID); ok {
+		return sess.(*sessionState).connection, nil
 	}
-	if session.connection == nil {
-		s.removeSession(systemID) // Clean up broken session state
-		return nil, fmt.Errorf("session found for systemID %s but connection is nil", systemID)
-	}
-
-	// TODO: Check if connection is still valid? gosmpp might handle this internally.
-	// If not, remove session and return error.
-
-	return session.connection, nil
+	return nil, fmt.Errorf("no active session for %s", systemID)
 }
 
-// Shutdown gracefully stops the SMPP server.
-func (s *Server) Shutdown(ctx context.Context) error {
-	slog.InfoContext(ctx, "Shutdown requested for SMPP server...")
-	var err error
-	s.stopOnce.Do(func() { // Ensure shutdown logic runs only once
+func (s *Server) removeSession(sess *sessionState) {
+	if sess.systemID != "" {
+		s.sessions.Delete(sess.systemID)
+	}
+}
+
+// Handle other PDU types
+func (s *Server) handleEnquireLink(ctx context.Context, p *pdu.EnquireLink, session *sessionState) {
+	resp := pdu.NewEnquireLinkResp()
+	resp.SetSequenceNumber(p.SequenceNumber)
+	_, err := session.connection.WritePDU(resp)
+	if err != nil {
+		slog.ErrorContext(ctx, "Enquire Link Failed", "error", err)
+	}
+}
+
+func (s *Server) handleUnbind(ctx context.Context, p *pdu.Unbind, session *sessionState) {
+	resp := pdu.NewUnbindResp()
+	resp.SetSequenceNumber(p.SequenceNumber)
+	_, err := session.connection.WritePDU(resp)
+	s.removeSession(session)
+
+	if err != nil {
+		slog.ErrorContext(ctx, "Unbind Failed", "error", err)
+	}
+}
+
+// Shutdown implementation
+func (s *Server) Stop() {
+	s.stopOnce.Do(func() {
 		if s.gosmppServer != nil {
-			err = s.gosmppServer.Close() // Close the listener, should unblock ListenAndServe
-			s.gosmppServer = nil
+			_ = s.gosmppServer.Close()
 		}
-		// Close all active client connections? gosmppServer.Close() should trigger OnClosed callbacks.
-		slog.InfoContext(ctx, "SMPP Server Close() called.")
+		s.wg.Wait()
 	})
-	// Wait for active requests? gosmpp doesn't expose http.Server style shutdown yet.
-	return err
 }
