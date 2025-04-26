@@ -4,6 +4,7 @@ import (
 	"log"
 	"time"
 
+	"github.com/joho/godotenv"
 	"github.com/kelseyhightower/envconfig"
 )
 
@@ -61,6 +62,13 @@ type HttpConfig struct {
 func Load() (*Config, error) {
 	var cfg Config
 	log.Println("Loading configuration from environment variables...")
+
+	if err := godotenv.Load(); err != nil {
+		log.Printf("no .env file found, skipping: %v", err)
+	} else {
+		log.Println(".env loaded")
+	}
+
 	err := envconfig.Process("", &cfg) // Use "" prefix for env vars
 	if err != nil {
 		return nil, err

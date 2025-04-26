@@ -100,17 +100,47 @@ type ProcessorDependencies struct {
 
 // NewProcessor creates a new SMS Processor with explicit dependencies.
 func NewProcessor(deps ProcessorDependencies) *Processor {
-	if deps.DBPool == nil || deps.DBQueries == nil || deps.Router == nil || deps.Validator == nil || deps.Pricer == nil || deps.Sender == nil || deps.WalletService == nil || deps.DLRForwarder == nil {
-		// Or return an error
-		panic("Missing required dependencies for SMS Processor")
+	var missing []string
+
+	if deps.DBPool == nil {
+		missing = append(missing, "DBPool")
+	}
+	if deps.DBQueries == nil {
+		missing = append(missing, "DBQueries")
+	}
+	if deps.Router == nil {
+		missing = append(missing, "Router")
+	}
+	if deps.Validator == nil {
+		missing = append(missing, "Validator")
+	}
+	if deps.Pricer == nil {
+		missing = append(missing, "Pricer")
+	}
+	// if deps.Sender == nil {
+	// 	missing = append(missing, "Sender")
+	// }
+	if deps.WalletService == nil {
+		missing = append(missing, "WalletService")
+	}
+	// if deps.DLRForwarder == nil {
+	// 	missing = append(missing, "DLRForwarder")
+	// }
+
+	if len(missing) > 0 {
+		// you can panic or return an error here
+		panic(fmt.Sprintf(
+			"Missing required dependencies for SMS Processor: %s",
+			strings.Join(missing, ", "),
+		))
 	}
 
 	if deps.WalletService == nil {
 		panic("Missing WalletService dependency")
 	}
-	if deps.DLRForwarder == nil {
-		panic("Missing DLRForwarder dependency")
-	}
+	// if deps.DLRForwarder == nil {
+	// 	panic("Missing DLRForwarder dependency")
+	// }
 
 	return &Processor{
 		dbPool:        deps.DBPool,
