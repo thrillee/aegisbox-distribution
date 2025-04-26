@@ -65,6 +65,6 @@ func Load() (*Config, error) {
 	if err != nil {
 		return nil, err
 	}
-	log.Printf("Configuration loaded successfully (Server Addr: %s:%d)", cfg.ServerConfig.Addr)
+	log.Printf("Configuration loaded successfully (Server Addr: %s)", cfg.ServerConfig.Addr)
 	return &cfg, nil
 }

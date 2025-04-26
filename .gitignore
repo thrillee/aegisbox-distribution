@@ -5,6 +5,7 @@
 
 ### dotenv ###
 .env
+aegisbox
 
 #!! ERROR: env is undefined. Use list command to see defined gitignore types !!#
 
