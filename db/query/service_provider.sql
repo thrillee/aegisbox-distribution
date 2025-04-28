@@ -53,6 +53,22 @@ LIMIT $1 OFFSET $2;
 -- name: CountServiceProviders :one
 SELECT count(*) FROM service_providers;
 
+-- New Queries:
+-- name: UpdateServiceProvider :one
+UPDATE service_providers
+SET
+    name = COALESCE(sqlc.narg(name), name), -- Use COALESCE + sqlc.narg for optional updates
+    email = COALESCE(sqlc.narg(email), email),
+    status = COALESCE(sqlc.narg(status), status),
+    default_currency_code = COALESCE(sqlc.narg(default_currency_code), default_currency_code),
+    updated_at = NOW()
+WHERE id = sqlc.arg(id)
+RETURNING *;
+
+-- name: DeleteServiceProvider :exec
+DELETE FROM service_providers
+WHERE id = $1;
+
 -- name: GetSPCredentialForHTTPAuth :one
 -- SELECT ... FROM sp_credentials WHERE protocol = 'http' AND http_config->>'api_key' = $1 ...
 

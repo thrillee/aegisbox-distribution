@@ -7,6 +7,7 @@ GOGET=$(GOCMD) get
 GOMOD=$(GOCMD) mod
 GOFMT=$(GOCMD) fmt
 GOVET=$(GOCMD) vet
+AIRCMD=$(GOCMD) run github.com/cosmtrek/air@v1.43.0
 
 # Change these variables as necessary.
 MAIN_PACKAGE_PATH := ./

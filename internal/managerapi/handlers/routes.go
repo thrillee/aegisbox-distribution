@@ -10,9 +10,12 @@ import (
 func SetupRoutes(router gin.IRouter, q database.Querier, pool *pgxpool.Pool) {
 	// Initialize handlers
 	spHandler := NewServiceProviderHandler(q, pool)
+	credHandler := NewSPCredentialHandler(q, pool)
 	reportHandler := NewReportHandler(q)
 
-	// mnoHandler := NewMNOHandler(q, pool)
+	mnoHandler := NewMNOHandler(q, pool)
+	connHandler := NewMNOConnectionHandler(q, pool)
+
 	// ... other handlers ...
 
 	// --- Middleware (Example Placeholder) ---
@@ -25,8 +28,8 @@ func SetupRoutes(router gin.IRouter, q database.Querier, pool *pgxpool.Pool) {
 		spGroup.POST("", spHandler.CreateServiceProvider)
 		spGroup.GET("", spHandler.ListServiceProviders)
 		spGroup.GET("/:id", spHandler.GetServiceProvider)
-		// spGroup.PUT("/:id", spHandler.UpdateServiceProvider)
-		// spGroup.DELETE("/:id", spHandler.DeleteServiceProvider)
+		spGroup.PUT("/:id", spHandler.UpdateServiceProvider)
+		spGroup.DELETE("/:id", spHandler.DeleteServiceProvider)
 	}
 
 	// --- Reporting Routes ---
@@ -36,20 +39,31 @@ func SetupRoutes(router gin.IRouter, q database.Querier, pool *pgxpool.Pool) {
 	}
 
 	// --- SP Credential Routes ---
-	// POST /sp-credentials
-	// GET /sp-credentials?sp_id={id}
-	// PUT /sp-credentials/{id}
-	// ...
+	credGroup := router.Group("/sp-credentials")
+	{
+		credGroup.POST("", credHandler.CreateSPCredential)
+		credGroup.GET("", credHandler.ListSPCredentials) // Filter with ?sp_id=...
+		credGroup.GET("/:id", credHandler.GetSPCredential)
+		credGroup.PUT("/:id", credHandler.UpdateSPCredential)
+		credGroup.DELETE("/:id", credHandler.DeleteSPCredential)
+	}
 
 	// --- MNO Routes ---
-	// POST /mnos
-	// GET /mnos
-	// ...
+	mnoGroup := router.Group("/mnos")
+	{
+		mnoGroup.POST("", mnoHandler.CreateMNO)
+		mnoGroup.GET("", mnoHandler.ListMNOs) // Paginated
+		mnoGroup.GET("/:id", mnoHandler.GetMNO)
+		mnoGroup.PUT("/:id", mnoHandler.UpdateMNO)
+		mnoGroup.DELETE("/:id", mnoHandler.DeleteMNO)
 
-	// --- MNO Connection Routes ---
-	// POST /mno-connections
-	// GET /mno-connections?mno_id={id}
-	// ...
+		connNestedGroup := mnoGroup.Group("/:mno_id/connections")
+		{
+			connNestedGroup.POST("", connHandler.CreateMNOConnection) // Handler needs to get mno_id from path
+			connNestedGroup.GET("", connHandler.ListMNOConnections)   // Handler needs to get mno_id from path
+		}
+
+	}
 
 	// --- Routing Rule Routes ---
 	// POST /routing-rules

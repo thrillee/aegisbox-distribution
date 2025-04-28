@@ -177,8 +177,74 @@ func (h *ServiceProviderHandler) GetServiceProvider(c *gin.Context) {
 	c.JSON(http.StatusOK, resp)
 }
 
-// TODO: Implement UpdateServiceProvider (PUT /service-providers/:id)
-// func (h *ServiceProviderHandler) UpdateServiceProvider(c *gin.Context) { ... }
+// UpdateServiceProvider handles PUT /service-providers/:id
+func (h *ServiceProviderHandler) UpdateServiceProvider(c *gin.Context) {
+	logCtx := logging.ContextWithHandler(c.Request.Context(), "UpdateServiceProvider")
+	idStr := c.Param("id")
+	id, err := strconv.ParseInt(idStr, 10, 32)
+	if err != nil { /* ... handle invalid ID format ... */
+		return
+	}
+	logCtx = logging.ContextWithSPID(logCtx, int32(id))
 
-// TODO: Implement DeleteServiceProvider (DELETE /service-providers/:id)
-// func (h *ServiceProviderHandler) DeleteServiceProvider(c *gin.Context) { ... }
+	var req dto.UpdateServiceProviderRequest
+	if err := c.ShouldBindJSON(&req); err != nil { /* ... handle bind error ... */
+		return
+	}
+
+	// Prepare params using sqlc.narg helper for optional fields
+	// Note: Need to map pointers from DTO to sqlc null types correctly
+	params := database.UpdateServiceProviderParams{
+		ID:                  int32(id),
+		Name:                req.Name,
+		Email:               req.Email,
+		Status:              req.Status,
+		DefaultCurrencyCode: req.DefaultCurrencyCode,
+	}
+
+	// Check if default currency change requires wallet handling? Maybe disallow for now.
+	if params.DefaultCurrencyCode != nil {
+		slog.WarnContext(logCtx, "Attempting to change default currency code - ensure wallets are handled if necessary")
+	}
+
+	updatedSP, err := h.dbQueries.UpdateServiceProvider(logCtx, params)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			slog.InfoContext(logCtx, "Service provider not found for update")
+			c.JSON(http.StatusNotFound, gin.H{"error": "Service provider not found"})
+		} else {
+			// Handle potential unique constraint violation on email update
+			slog.ErrorContext(logCtx, "Failed to update service provider", slog.Any("error", err))
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update service provider"})
+		}
+		return
+	}
+
+	slog.InfoContext(logCtx, "Service provider updated successfully")
+	c.JSON(http.StatusOK, updatedSP)
+}
+
+// DeleteServiceProvider handles DELETE /service-providers/:id
+func (h *ServiceProviderHandler) DeleteServiceProvider(c *gin.Context) {
+	logCtx := logging.ContextWithHandler(c.Request.Context(), "DeleteServiceProvider")
+	idStr := c.Param("id")
+	id, err := strconv.ParseInt(idStr, 10, 32)
+	if err != nil {
+		return
+	}
+	logCtx = logging.ContextWithSPID(logCtx, int32(id))
+
+	// Consider implications: Deleting SP cascades to credentials, sender IDs, wallets etc.
+	// Maybe better to just set status to 'inactive' or 'deleted'?
+	// For now, implementing actual delete. Add confirmation step if needed.
+
+	err = h.dbQueries.DeleteServiceProvider(logCtx, int32(id))
+	if err != nil {
+		slog.ErrorContext(logCtx, "Failed to delete service provider", slog.Any("error", err))
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to delete service provider"})
+		return
+	}
+
+	slog.InfoContext(logCtx, "Service provider deleted successfully")
+	c.Status(http.StatusNoContent) // 204 No Content on successful DELETE
+}

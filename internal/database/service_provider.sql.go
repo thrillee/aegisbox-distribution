@@ -142,6 +142,16 @@ func (q *Queries) CreateWallet(ctx context.Context, arg CreateWalletParams) (Wal
 	return i, err
 }
 
+const deleteServiceProvider = `-- name: DeleteServiceProvider :exec
+DELETE FROM service_providers
+WHERE id = $1
+`
+
+func (q *Queries) DeleteServiceProvider(ctx context.Context, id int32) error {
+	_, err := q.db.Exec(ctx, deleteServiceProvider, id)
+	return err
+}
+
 const getSPCredentialBySystemID = `-- name: GetSPCredentialBySystemID :one
 SELECT
     spc.id,
@@ -255,4 +265,46 @@ func (q *Queries) ListServiceProviders(ctx context.Context, arg ListServiceProvi
 		return nil, err
 	}
 	return items, nil
+}
+
+const updateServiceProvider = `-- name: UpdateServiceProvider :one
+UPDATE service_providers
+SET
+    name = COALESCE($1, name), -- Use COALESCE + sqlc.narg for optional updates
+    email = COALESCE($2, email),
+    status = COALESCE($3, status),
+    default_currency_code = COALESCE($4, default_currency_code),
+    updated_at = NOW()
+WHERE id = $5
+RETURNING id, name, email, status, default_currency_code, created_at, updated_at
+`
+
+type UpdateServiceProviderParams struct {
+	Name                *string `json:"name"`
+	Email               *string `json:"email"`
+	Status              *string `json:"status"`
+	DefaultCurrencyCode *string `json:"defaultCurrencyCode"`
+	ID                  int32   `json:"id"`
+}
+
+// New Queries:
+func (q *Queries) UpdateServiceProvider(ctx context.Context, arg UpdateServiceProviderParams) (ServiceProvider, error) {
+	row := q.db.QueryRow(ctx, updateServiceProvider,
+		arg.Name,
+		arg.Email,
+		arg.Status,
+		arg.DefaultCurrencyCode,
+		arg.ID,
+	)
+	var i ServiceProvider
+	err := row.Scan(
+		&i.ID,
+		&i.Name,
+		&i.Email,
+		&i.Status,
+		&i.DefaultCurrencyCode,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
 }

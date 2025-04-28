@@ -9,6 +9,120 @@ import (
 	"context"
 )
 
+const countMNOConnectionsByMNO = `-- name: CountMNOConnectionsByMNO :one
+SELECT count(*) FROM mno_connections
+WHERE mno_id = $1
+`
+
+func (q *Queries) CountMNOConnectionsByMNO(ctx context.Context, mnoID int32) (int64, error) {
+	row := q.db.QueryRow(ctx, countMNOConnectionsByMNO, mnoID)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
+const createMNOConnection = `-- name: CreateMNOConnection :one
+INSERT INTO mno_connections (
+    mno_id, protocol, status,
+    system_id, password, host, port, use_tls, bind_type, system_type,
+    enquire_link_interval_secs, request_timeout_secs, connect_retry_delay_secs,
+    max_window_size, default_data_coding, source_addr_ton, source_addr_npi,
+    dest_addr_ton, dest_addr_npi,
+    http_config
+) VALUES (
+    $1, $2, COALESCE($3, 'active'),
+    $4, $5, $6, $7, $8, $9, $10,
+    $11, $12, $13,
+    $14, $15, $16, $17,
+    $18, $19,
+    $20
+) RETURNING id, mno_id, protocol, status, system_id, password, host, port, use_tls, bind_type, system_type, enquire_link_interval_secs, request_timeout_secs, connect_retry_delay_secs, max_window_size, default_data_coding, source_addr_ton, source_addr_npi, dest_addr_ton, dest_addr_npi, http_config, created_at, updated_at
+`
+
+type CreateMNOConnectionParams struct {
+	MnoID                   int32       `json:"mnoId"`
+	Protocol                string      `json:"protocol"`
+	Column3                 interface{} `json:"column3"`
+	SystemID                *string     `json:"systemId"`
+	Password                *string     `json:"password"`
+	Host                    *string     `json:"host"`
+	Port                    *int32      `json:"port"`
+	UseTls                  *bool       `json:"useTls"`
+	BindType                *string     `json:"bindType"`
+	SystemType              *string     `json:"systemType"`
+	EnquireLinkIntervalSecs *int32      `json:"enquireLinkIntervalSecs"`
+	RequestTimeoutSecs      *int32      `json:"requestTimeoutSecs"`
+	ConnectRetryDelaySecs   *int32      `json:"connectRetryDelaySecs"`
+	MaxWindowSize           *int32      `json:"maxWindowSize"`
+	DefaultDataCoding       *int32      `json:"defaultDataCoding"`
+	SourceAddrTon           *int32      `json:"sourceAddrTon"`
+	SourceAddrNpi           *int32      `json:"sourceAddrNpi"`
+	DestAddrTon             *int32      `json:"destAddrTon"`
+	DestAddrNpi             *int32      `json:"destAddrNpi"`
+	HttpConfig              []byte      `json:"httpConfig"`
+}
+
+func (q *Queries) CreateMNOConnection(ctx context.Context, arg CreateMNOConnectionParams) (MnoConnection, error) {
+	row := q.db.QueryRow(ctx, createMNOConnection,
+		arg.MnoID,
+		arg.Protocol,
+		arg.Column3,
+		arg.SystemID,
+		arg.Password,
+		arg.Host,
+		arg.Port,
+		arg.UseTls,
+		arg.BindType,
+		arg.SystemType,
+		arg.EnquireLinkIntervalSecs,
+		arg.RequestTimeoutSecs,
+		arg.ConnectRetryDelaySecs,
+		arg.MaxWindowSize,
+		arg.DefaultDataCoding,
+		arg.SourceAddrTon,
+		arg.SourceAddrNpi,
+		arg.DestAddrTon,
+		arg.DestAddrNpi,
+		arg.HttpConfig,
+	)
+	var i MnoConnection
+	err := row.Scan(
+		&i.ID,
+		&i.MnoID,
+		&i.Protocol,
+		&i.Status,
+		&i.SystemID,
+		&i.Password,
+		&i.Host,
+		&i.Port,
+		&i.UseTls,
+		&i.BindType,
+		&i.SystemType,
+		&i.EnquireLinkIntervalSecs,
+		&i.RequestTimeoutSecs,
+		&i.ConnectRetryDelaySecs,
+		&i.MaxWindowSize,
+		&i.DefaultDataCoding,
+		&i.SourceAddrTon,
+		&i.SourceAddrNpi,
+		&i.DestAddrTon,
+		&i.DestAddrNpi,
+		&i.HttpConfig,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const deleteMNOConnection = `-- name: DeleteMNOConnection :exec
+DELETE FROM mno_connections WHERE id = $1
+`
+
+func (q *Queries) DeleteMNOConnection(ctx context.Context, id int32) error {
+	_, err := q.db.Exec(ctx, deleteMNOConnection, id)
+	return err
+}
+
 const getActiveMNOConnections = `-- name: GetActiveMNOConnections :many
 SELECT
     id,
@@ -83,4 +197,195 @@ func (q *Queries) GetActiveMNOConnections(ctx context.Context) ([]MnoConnection,
 		return nil, err
 	}
 	return items, nil
+}
+
+const getMNOConnectionByID = `-- name: GetMNOConnectionByID :one
+SELECT id, mno_id, protocol, status, system_id, password, host, port, use_tls, bind_type, system_type, enquire_link_interval_secs, request_timeout_secs, connect_retry_delay_secs, max_window_size, default_data_coding, source_addr_ton, source_addr_npi, dest_addr_ton, dest_addr_npi, http_config, created_at, updated_at FROM mno_connections WHERE id = $1 LIMIT 1
+`
+
+func (q *Queries) GetMNOConnectionByID(ctx context.Context, id int32) (MnoConnection, error) {
+	row := q.db.QueryRow(ctx, getMNOConnectionByID, id)
+	var i MnoConnection
+	err := row.Scan(
+		&i.ID,
+		&i.MnoID,
+		&i.Protocol,
+		&i.Status,
+		&i.SystemID,
+		&i.Password,
+		&i.Host,
+		&i.Port,
+		&i.UseTls,
+		&i.BindType,
+		&i.SystemType,
+		&i.EnquireLinkIntervalSecs,
+		&i.RequestTimeoutSecs,
+		&i.ConnectRetryDelaySecs,
+		&i.MaxWindowSize,
+		&i.DefaultDataCoding,
+		&i.SourceAddrTon,
+		&i.SourceAddrNpi,
+		&i.DestAddrTon,
+		&i.DestAddrNpi,
+		&i.HttpConfig,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const listMNOConnectionsByMNO = `-- name: ListMNOConnectionsByMNO :many
+SELECT id, mno_id, protocol, status, system_id, password, host, port, use_tls, bind_type, system_type, enquire_link_interval_secs, request_timeout_secs, connect_retry_delay_secs, max_window_size, default_data_coding, source_addr_ton, source_addr_npi, dest_addr_ton, dest_addr_npi, http_config, created_at, updated_at FROM mno_connections
+WHERE mno_id = $1
+ORDER BY created_at DESC
+LIMIT $2 OFFSET $3
+`
+
+type ListMNOConnectionsByMNOParams struct {
+	MnoID  int32 `json:"mnoId"`
+	Limit  int32 `json:"limit"`
+	Offset int32 `json:"offset"`
+}
+
+func (q *Queries) ListMNOConnectionsByMNO(ctx context.Context, arg ListMNOConnectionsByMNOParams) ([]MnoConnection, error) {
+	rows, err := q.db.Query(ctx, listMNOConnectionsByMNO, arg.MnoID, arg.Limit, arg.Offset)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []MnoConnection
+	for rows.Next() {
+		var i MnoConnection
+		if err := rows.Scan(
+			&i.ID,
+			&i.MnoID,
+			&i.Protocol,
+			&i.Status,
+			&i.SystemID,
+			&i.Password,
+			&i.Host,
+			&i.Port,
+			&i.UseTls,
+			&i.BindType,
+			&i.SystemType,
+			&i.EnquireLinkIntervalSecs,
+			&i.RequestTimeoutSecs,
+			&i.ConnectRetryDelaySecs,
+			&i.MaxWindowSize,
+			&i.DefaultDataCoding,
+			&i.SourceAddrTon,
+			&i.SourceAddrNpi,
+			&i.DestAddrTon,
+			&i.DestAddrNpi,
+			&i.HttpConfig,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const updateMNOConnection = `-- name: UpdateMNOConnection :one
+UPDATE mno_connections
+SET
+    status = COALESCE($1, status),
+    system_id = COALESCE($2, system_id),
+    password = COALESCE($3, password), -- Update password directly if provided
+    host = COALESCE($4, host),
+    port = COALESCE($5, port),
+    use_tls = COALESCE($6, use_tls),
+    bind_type = COALESCE($7, bind_type),
+    system_type = COALESCE($8, system_type),
+    enquire_link_interval_secs = COALESCE($9, enquire_link_interval_secs),
+    request_timeout_secs = COALESCE($10, request_timeout_secs),
+    connect_retry_delay_secs = COALESCE($11, connect_retry_delay_secs),
+    max_window_size = COALESCE($12, max_window_size),
+    default_data_coding = COALESCE($13, default_data_coding),
+    source_addr_ton = COALESCE($14, source_addr_ton),
+    source_addr_npi = COALESCE($15, source_addr_npi),
+    dest_addr_ton = COALESCE($16, dest_addr_ton),
+    dest_addr_npi = COALESCE($17, dest_addr_npi),
+    http_config = COALESCE($18, http_config),
+    updated_at = NOW()
+WHERE id = $19
+RETURNING id, mno_id, protocol, status, system_id, password, host, port, use_tls, bind_type, system_type, enquire_link_interval_secs, request_timeout_secs, connect_retry_delay_secs, max_window_size, default_data_coding, source_addr_ton, source_addr_npi, dest_addr_ton, dest_addr_npi, http_config, created_at, updated_at
+`
+
+type UpdateMNOConnectionParams struct {
+	Status                  *string `json:"status"`
+	SystemID                *string `json:"systemId"`
+	Password                *string `json:"password"`
+	Host                    *string `json:"host"`
+	Port                    *int32  `json:"port"`
+	UseTls                  *bool   `json:"useTls"`
+	BindType                *string `json:"bindType"`
+	SystemType              *string `json:"systemType"`
+	EnquireLinkIntervalSecs *int32  `json:"enquireLinkIntervalSecs"`
+	RequestTimeoutSecs      *int32  `json:"requestTimeoutSecs"`
+	ConnectRetryDelaySecs   *int32  `json:"connectRetryDelaySecs"`
+	MaxWindowSize           *int32  `json:"maxWindowSize"`
+	DefaultDataCoding       *int32  `json:"defaultDataCoding"`
+	SourceAddrTon           *int32  `json:"sourceAddrTon"`
+	SourceAddrNpi           *int32  `json:"sourceAddrNpi"`
+	DestAddrTon             *int32  `json:"destAddrTon"`
+	DestAddrNpi             *int32  `json:"destAddrNpi"`
+	HttpConfig              []byte  `json:"httpConfig"`
+	ID                      int32   `json:"id"`
+}
+
+func (q *Queries) UpdateMNOConnection(ctx context.Context, arg UpdateMNOConnectionParams) (MnoConnection, error) {
+	row := q.db.QueryRow(ctx, updateMNOConnection,
+		arg.Status,
+		arg.SystemID,
+		arg.Password,
+		arg.Host,
+		arg.Port,
+		arg.UseTls,
+		arg.BindType,
+		arg.SystemType,
+		arg.EnquireLinkIntervalSecs,
+		arg.RequestTimeoutSecs,
+		arg.ConnectRetryDelaySecs,
+		arg.MaxWindowSize,
+		arg.DefaultDataCoding,
+		arg.SourceAddrTon,
+		arg.SourceAddrNpi,
+		arg.DestAddrTon,
+		arg.DestAddrNpi,
+		arg.HttpConfig,
+		arg.ID,
+	)
+	var i MnoConnection
+	err := row.Scan(
+		&i.ID,
+		&i.MnoID,
+		&i.Protocol,
+		&i.Status,
+		&i.SystemID,
+		&i.Password,
+		&i.Host,
+		&i.Port,
+		&i.UseTls,
+		&i.BindType,
+		&i.SystemType,
+		&i.EnquireLinkIntervalSecs,
+		&i.RequestTimeoutSecs,
+		&i.ConnectRetryDelaySecs,
+		&i.MaxWindowSize,
+		&i.DefaultDataCoding,
+		&i.SourceAddrTon,
+		&i.SourceAddrNpi,
+		&i.DestAddrTon,
+		&i.DestAddrNpi,
+		&i.HttpConfig,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
 }

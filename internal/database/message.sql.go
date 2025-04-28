@@ -11,6 +11,66 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const countMessageDetails = `-- name: CountMessageDetails :one
+SELECT count(DISTINCT m.id)
+FROM messages m
+JOIN service_providers sp ON m.service_provider_id = sp.id
+JOIN sp_credentials spc ON m.sp_credential_id = spc.id
+LEFT JOIN mnos mn ON m.routed_mno_id = mn.id
+LEFT JOIN message_segments ms_filter ON m.id = ms_filter.message_id AND $1::TEXT IS NOT NULL
+WHERE
+  ($2::INT IS NULL OR m.service_provider_id = $2)
+  AND ($3::INT IS NULL OR m.sp_credential_id = $3)
+  AND ($4::INT IS NULL OR m.routed_mno_id = $4)
+  AND ($5::TEXT IS NULL OR m.original_source_addr = $5)
+  AND ($6::TEXT IS NULL OR m.original_destination_addr = $6)
+  AND ($7::TEXT IS NULL OR m.final_status = $7)
+  AND ($8::TEXT IS NULL OR m.client_message_id = $8)
+  AND ($9::TEXT IS NULL OR m.client_ref = $9)
+  -- Subquery EXISTS check for mno_message_id filter to avoid inflating count due to join
+  AND ($1::TEXT IS NULL OR EXISTS (
+        SELECT 1 FROM message_segments ms_exists
+        WHERE ms_exists.message_id = m.id AND ms_exists.mno_message_id = $1
+  ))
+  AND ($10::TIMESTAMPTZ IS NULL OR m.submitted_at >= $10)
+  AND ($11::TIMESTAMPTZ IS NULL OR m.submitted_at < $11::TIMESTAMPTZ + INTERVAL '1 day')
+`
+
+type CountMessageDetailsParams struct {
+	MnoMessageID    *string            `json:"mnoMessageId"`
+	SpID            *int32             `json:"spId"`
+	SpCredentialID  *int32             `json:"spCredentialId"`
+	MnoID           *int32             `json:"mnoId"`
+	SenderID        *string            `json:"senderId"`
+	Destination     *string            `json:"destination"`
+	FinalStatus     *string            `json:"finalStatus"`
+	ClientMessageID *string            `json:"clientMessageId"`
+	ClientRef       *string            `json:"clientRef"`
+	StartDate       pgtype.Timestamptz `json:"startDate"`
+	EndDate         pgtype.Timestamptz `json:"endDate"`
+}
+
+// Counts messages based on optional filters, joining necessary tables.
+// Only JOIN segments if filtering by mno_message_id
+func (q *Queries) CountMessageDetails(ctx context.Context, arg CountMessageDetailsParams) (int64, error) {
+	row := q.db.QueryRow(ctx, countMessageDetails,
+		arg.MnoMessageID,
+		arg.SpID,
+		arg.SpCredentialID,
+		arg.MnoID,
+		arg.SenderID,
+		arg.Destination,
+		arg.FinalStatus,
+		arg.ClientMessageID,
+		arg.ClientRef,
+		arg.StartDate,
+		arg.EndDate,
+	)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const findMessageByMnoMessageID = `-- name: FindMessageByMnoMessageID :one
 SELECT id, service_provider_id, routed_mno_id
 FROM messages
@@ -326,6 +386,160 @@ func (q *Queries) InsertMessageIn(ctx context.Context, arg InsertMessageInParams
 	var id int64
 	err := row.Scan(&id)
 	return id, err
+}
+
+const listMessageDetails = `-- name: ListMessageDetails :many
+SELECT DISTINCT ON (m.id) -- Ensures one row per message ID even with segment join
+    m.id,
+    m.service_provider_id,
+    sp.name as service_provider_name, -- Joined SP Name
+    m.sp_credential_id,
+    COALESCE(spc.system_id, spc.api_key_identifier) AS credential_identifier, -- Joined Credential Identifier
+    spc.protocol, -- Joined Protocol
+    m.client_message_id,
+    m.client_ref,
+    m.original_source_addr,
+    m.original_destination_addr,
+    m.total_segments,
+    m.submitted_at,
+    m.received_at,
+    m.routed_mno_id,
+    mn.name as mno_name, -- Joined MNO Name
+    m.currency_code,
+    m.cost,
+    m.processing_status,
+    m.final_status,
+    m.error_code,
+    m.error_description,
+    m.completed_at,
+    -- Aggregate MNO Message IDs from segments for display (can be NULL if no segments sent/recorded)
+    (SELECT string_agg(ms.mno_message_id, ', ') FROM message_segments ms WHERE ms.message_id = m.id) AS mno_message_ids
+FROM messages m
+JOIN service_providers sp ON m.service_provider_id = sp.id
+JOIN sp_credentials spc ON m.sp_credential_id = spc.id
+LEFT JOIN mnos mn ON m.routed_mno_id = mn.id
+LEFT JOIN message_segments ms_filter ON m.id = ms_filter.message_id AND $1::TEXT IS NOT NULL
+WHERE
+  ($2::INT IS NULL OR m.service_provider_id = $2)                     -- $1
+  AND ($3::INT IS NULL OR m.sp_credential_id = $3) -- $2
+  AND ($4::INT IS NULL OR m.routed_mno_id = $4)                     -- $3
+  AND ($5::TEXT IS NULL OR m.original_source_addr = $5)       -- $4
+  AND ($6::TEXT IS NULL OR m.original_destination_addr = $6) -- $5
+  AND ($7::TEXT IS NULL OR m.final_status = $7)         -- $6
+  AND ($8::TEXT IS NULL OR m.client_message_id = $8) -- $7
+  AND ($9::TEXT IS NULL OR m.client_ref = $9)             -- $8
+  AND ($1::TEXT IS NULL OR EXISTS (                                       -- $9 (mno_message_id filter)
+        SELECT 1 FROM message_segments ms_exists
+        WHERE ms_exists.message_id = m.id AND ms_exists.mno_message_id = $1
+  ))
+  AND ($10::TIMESTAMPTZ IS NULL OR m.submitted_at >= $10)        -- $10
+  AND ($11::TIMESTAMPTZ IS NULL OR m.submitted_at < $11::TIMESTAMPTZ + INTERVAL '1 day') -- $11 (end_date filter)
+ORDER BY
+    m.id DESC -- Order must match DISTINCT ON column first for predictable results
+    -- m.submitted_at DESC -- Cannot easily use submitted_at with DISTINCT ON (m.id) unless included
+LIMIT $13::INT OFFSET $12::INT
+`
+
+type ListMessageDetailsParams struct {
+	MnoMessageID    *string            `json:"mnoMessageId"`
+	SpID            *int32             `json:"spId"`
+	SpCredentialID  *int32             `json:"spCredentialId"`
+	MnoID           *int32             `json:"mnoId"`
+	SenderID        *string            `json:"senderId"`
+	Destination     *string            `json:"destination"`
+	FinalStatus     *string            `json:"finalStatus"`
+	ClientMessageID *string            `json:"clientMessageId"`
+	ClientRef       *string            `json:"clientRef"`
+	StartDate       pgtype.Timestamptz `json:"startDate"`
+	EndDate         pgtype.Timestamptz `json:"endDate"`
+	QueryOffset     int32              `json:"queryOffset"`
+	QueryLimit      int32              `json:"queryLimit"`
+}
+
+type ListMessageDetailsRow struct {
+	ID                      int64              `json:"id"`
+	ServiceProviderID       int32              `json:"serviceProviderId"`
+	ServiceProviderName     string             `json:"serviceProviderName"`
+	SpCredentialID          int32              `json:"spCredentialId"`
+	CredentialIdentifier    *string            `json:"credentialIdentifier"`
+	Protocol                string             `json:"protocol"`
+	ClientMessageID         *string            `json:"clientMessageId"`
+	ClientRef               *string            `json:"clientRef"`
+	OriginalSourceAddr      string             `json:"originalSourceAddr"`
+	OriginalDestinationAddr string             `json:"originalDestinationAddr"`
+	TotalSegments           int32              `json:"totalSegments"`
+	SubmittedAt             pgtype.Timestamptz `json:"submittedAt"`
+	ReceivedAt              pgtype.Timestamptz `json:"receivedAt"`
+	RoutedMnoID             *int32             `json:"routedMnoId"`
+	MnoName                 *string            `json:"mnoName"`
+	CurrencyCode            string             `json:"currencyCode"`
+	Cost                    pgtype.Numeric     `json:"cost"`
+	ProcessingStatus        string             `json:"processingStatus"`
+	FinalStatus             string             `json:"finalStatus"`
+	ErrorCode               *string            `json:"errorCode"`
+	ErrorDescription        *string            `json:"errorDescription"`
+	CompletedAt             pgtype.Timestamptz `json:"completedAt"`
+	MnoMessageIds           []byte             `json:"mnoMessageIds"`
+}
+
+// Lists detailed message information based on optional filters with pagination. Excludes message content.
+// LEFT JOIN needed for EXISTS filter below, but DISTINCT ON handles duplicates if join remains
+func (q *Queries) ListMessageDetails(ctx context.Context, arg ListMessageDetailsParams) ([]ListMessageDetailsRow, error) {
+	rows, err := q.db.Query(ctx, listMessageDetails,
+		arg.MnoMessageID,
+		arg.SpID,
+		arg.SpCredentialID,
+		arg.MnoID,
+		arg.SenderID,
+		arg.Destination,
+		arg.FinalStatus,
+		arg.ClientMessageID,
+		arg.ClientRef,
+		arg.StartDate,
+		arg.EndDate,
+		arg.QueryOffset,
+		arg.QueryLimit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListMessageDetailsRow
+	for rows.Next() {
+		var i ListMessageDetailsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.ServiceProviderID,
+			&i.ServiceProviderName,
+			&i.SpCredentialID,
+			&i.CredentialIdentifier,
+			&i.Protocol,
+			&i.ClientMessageID,
+			&i.ClientRef,
+			&i.OriginalSourceAddr,
+			&i.OriginalDestinationAddr,
+			&i.TotalSegments,
+			&i.SubmittedAt,
+			&i.ReceivedAt,
+			&i.RoutedMnoID,
+			&i.MnoName,
+			&i.CurrencyCode,
+			&i.Cost,
+			&i.ProcessingStatus,
+			&i.FinalStatus,
+			&i.ErrorCode,
+			&i.ErrorDescription,
+			&i.CompletedAt,
+			&i.MnoMessageIds,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const markMessageSendFailed = `-- name: MarkMessageSendFailed :exec

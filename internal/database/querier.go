@@ -9,13 +9,32 @@ import (
 )
 
 type Querier interface {
+	CountMNOConnectionsByMNO(ctx context.Context, mnoID int32) (int64, error)
+	CountMNOs(ctx context.Context) (int64, error)
+	// Counts messages based on optional filters, joining necessary tables.
+	// Only JOIN segments if filtering by mno_message_id
+	CountMessageDetails(ctx context.Context, arg CountMessageDetailsParams) (int64, error)
+	// Counts credentials, optionally filtered by Service Provider ID
+	CountSPCredentials(ctx context.Context, dollar_1 int32) (int64, error)
 	CountServiceProviders(ctx context.Context) (int64, error)
+	CreateMNO(ctx context.Context, arg CreateMNOParams) (Mno, error)
+	CreateMNOConnection(ctx context.Context, arg CreateMNOConnectionParams) (MnoConnection, error)
 	// Creates initial segment record before sending attempt
 	CreateMessageSegment(ctx context.Context, arg CreateMessageSegmentParams) (int64, error)
 	CreateSMPPCredential(ctx context.Context, arg CreateSMPPCredentialParams) (SpCredential, error)
+	// Creates an SP credential (SMPP or HTTP)
+	CreateSPCredential(ctx context.Context, arg CreateSPCredentialParams) (SpCredential, error)
 	CreateServiceProvider(ctx context.Context, arg CreateServiceProviderParams) (ServiceProvider, error)
 	CreateWallet(ctx context.Context, arg CreateWalletParams) (Wallet, error)
 	CreateWalletTransaction(ctx context.Context, arg CreateWalletTransactionParams) (WalletTransaction, error)
+	// Optional: Query to set MNO status to inactive instead of deleting
+	DeactivateMNO(ctx context.Context, id int32) (Mno, error)
+	// Consider consequences - deletes might fail if MNO is referenced by connections/rules (ON DELETE RESTRICT)
+	// It might be safer to just set status to 'inactive'.
+	DeleteMNO(ctx context.Context, id int32) error
+	DeleteMNOConnection(ctx context.Context, id int32) error
+	DeleteSPCredential(ctx context.Context, id int32) error
+	DeleteServiceProvider(ctx context.Context, id int32) error
 	// Inserts a new DLR forwarding job into the queue.
 	EnqueueDLRForForwarding(ctx context.Context, arg EnqueueDLRForForwardingParams) error
 	FindDebitTransactionForMessage(ctx context.Context, messageID *int64) (FindDebitTransactionForMessageRow, error)
@@ -28,6 +47,8 @@ type Querier interface {
 	GetApplicableRoutingRule(ctx context.Context, prefix string) (int32, error)
 	// Filter by date range (inclusive)
 	GetDailyReport(ctx context.Context, arg GetDailyReportParams) ([]GetDailyReportRow, error)
+	GetMNOByID(ctx context.Context, id int32) (Mno, error)
+	GetMNOConnectionByID(ctx context.Context, id int32) (MnoConnection, error)
 	// Select fields needed by the Pricer
 	GetMessageDetailsForPricing(ctx context.Context, id int64) (GetMessageDetailsForPricingRow, error)
 	GetMessageDetailsForSending(ctx context.Context, id int64) (GetMessageDetailsForSendingRow, error)
@@ -39,6 +60,7 @@ type Querier interface {
 	GetPendingDLRsToForward(ctx context.Context, arg GetPendingDLRsToForwardParams) ([]GetPendingDLRsToForwardRow, error)
 	// Gets SP credential based on a hashed API key for HTTP auth.
 	GetSPCredentialByAPIKey(ctx context.Context, apiKeyHash *string) (GetSPCredentialByAPIKeyRow, error)
+	GetSPCredentialByID(ctx context.Context, id int32) (SpCredential, error)
 	// Gets SP credential based on a unique API key identifier for HTTP auth.
 	GetSPCredentialByKeyIdentifier(ctx context.Context, apiKeyIdentifier *string) (GetSPCredentialByKeyIdentifierRow, error)
 	GetSPCredentialBySystemID(ctx context.Context, systemID *string) (GetSPCredentialBySystemIDRow, error)
@@ -53,6 +75,13 @@ type Querier interface {
 	GetWalletForUpdateByID(ctx context.Context, id int32) (Wallet, error)
 	GetWalletsBelowThreshold(ctx context.Context) ([]GetWalletsBelowThresholdRow, error)
 	InsertMessageIn(ctx context.Context, arg InsertMessageInParams) (int64, error)
+	ListMNOConnectionsByMNO(ctx context.Context, arg ListMNOConnectionsByMNOParams) ([]MnoConnection, error)
+	ListMNOs(ctx context.Context, arg ListMNOsParams) ([]Mno, error)
+	// Lists detailed message information based on optional filters with pagination. Excludes message content.
+	// LEFT JOIN needed for EXISTS filter below, but DISTINCT ON handles duplicates if join remains
+	ListMessageDetails(ctx context.Context, arg ListMessageDetailsParams) ([]ListMessageDetailsRow, error)
+	// Lists credentials, optionally filtered by Service Provider ID
+	ListSPCredentials(ctx context.Context, arg ListSPCredentialsParams) ([]SpCredential, error)
 	ListServiceProviders(ctx context.Context, arg ListServiceProvidersParams) ([]ServiceProvider, error)
 	// Marks a job as failed for this attempt, increments attempts, and potentially sets to permanent failure.
 	MarkDLRForwardingAttemptFailed(ctx context.Context, arg MarkDLRForwardingAttemptFailedParams) error
@@ -66,6 +95,8 @@ type Querier interface {
 	UnlockStaleDLRs(ctx context.Context) error
 	// Check threshold and notification time
 	UpdateLowBalanceNotifiedAt(ctx context.Context, id int32) error
+	UpdateMNO(ctx context.Context, arg UpdateMNOParams) (Mno, error)
+	UpdateMNOConnection(ctx context.Context, arg UpdateMNOConnectionParams) (MnoConnection, error)
 	UpdateMessageDLRStatus(ctx context.Context, arg UpdateMessageDLRStatusParams) error
 	// Updates the final aggregated status and error info
 	UpdateMessageFinalStatus(ctx context.Context, arg UpdateMessageFinalStatusParams) error
@@ -74,12 +105,16 @@ type Querier interface {
 	// Updates status after Sender.Send finishes (regardless of segment success/failure)
 	UpdateMessageSendAttempted(ctx context.Context, id int64) error
 	UpdateMessageValidatedRouted(ctx context.Context, arg UpdateMessageValidatedRoutedParams) error
+	// Updates status, password hash, http_config for a credential.
+	UpdateSPCredential(ctx context.Context, arg UpdateSPCredentialParams) (SpCredential, error)
 	// Updates segment status based on received DLR
 	UpdateSegmentDLR(ctx context.Context, arg UpdateSegmentDLRParams) error
 	// Updates segment if MNO submission attempt failed
 	UpdateSegmentSendFailed(ctx context.Context, arg UpdateSegmentSendFailedParams) error
 	// Updates segment after successful MNO submission
 	UpdateSegmentSent(ctx context.Context, arg UpdateSegmentSentParams) error
+	// New Queries:
+	UpdateServiceProvider(ctx context.Context, arg UpdateServiceProviderParams) (ServiceProvider, error)
 	// Lock the row for atomic update
 	UpdateWalletBalance(ctx context.Context, arg UpdateWalletBalanceParams) (Wallet, error)
 	ValidateSenderID(ctx context.Context, arg ValidateSenderIDParams) (int32, error)

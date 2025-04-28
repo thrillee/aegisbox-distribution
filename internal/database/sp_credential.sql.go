@@ -9,6 +9,81 @@ import (
 	"context"
 )
 
+const countSPCredentials = `-- name: CountSPCredentials :one
+SELECT count(*) FROM sp_credentials
+WHERE ($1::INT IS NULL OR service_provider_id = $1)
+`
+
+// Counts credentials, optionally filtered by Service Provider ID
+func (q *Queries) CountSPCredentials(ctx context.Context, dollar_1 int32) (int64, error) {
+	row := q.db.QueryRow(ctx, countSPCredentials, dollar_1)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
+const createSPCredential = `-- name: CreateSPCredential :one
+INSERT INTO sp_credentials (
+    service_provider_id, protocol, status,
+    system_id, password_hash, bind_type, -- SMPP
+    api_key_identifier, api_key_hash, http_config -- HTTP
+) VALUES (
+    $1, $2, $3, $4, $5, $6, $7, $8, $9
+) RETURNING id, service_provider_id, protocol, status, system_id, password_hash, bind_type, api_key_hash, api_key_identifier, http_config, created_at, updated_at
+`
+
+type CreateSPCredentialParams struct {
+	ServiceProviderID int32   `json:"serviceProviderId"`
+	Protocol          string  `json:"protocol"`
+	Status            string  `json:"status"`
+	SystemID          *string `json:"systemId"`
+	PasswordHash      *string `json:"passwordHash"`
+	BindType          *string `json:"bindType"`
+	ApiKeyIdentifier  *string `json:"apiKeyIdentifier"`
+	ApiKeyHash        *string `json:"apiKeyHash"`
+	HttpConfig        []byte  `json:"httpConfig"`
+}
+
+// Creates an SP credential (SMPP or HTTP)
+func (q *Queries) CreateSPCredential(ctx context.Context, arg CreateSPCredentialParams) (SpCredential, error) {
+	row := q.db.QueryRow(ctx, createSPCredential,
+		arg.ServiceProviderID,
+		arg.Protocol,
+		arg.Status,
+		arg.SystemID,
+		arg.PasswordHash,
+		arg.BindType,
+		arg.ApiKeyIdentifier,
+		arg.ApiKeyHash,
+		arg.HttpConfig,
+	)
+	var i SpCredential
+	err := row.Scan(
+		&i.ID,
+		&i.ServiceProviderID,
+		&i.Protocol,
+		&i.Status,
+		&i.SystemID,
+		&i.PasswordHash,
+		&i.BindType,
+		&i.ApiKeyHash,
+		&i.ApiKeyIdentifier,
+		&i.HttpConfig,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const deleteSPCredential = `-- name: DeleteSPCredential :exec
+DELETE FROM sp_credentials WHERE id = $1
+`
+
+func (q *Queries) DeleteSPCredential(ctx context.Context, id int32) error {
+	_, err := q.db.Exec(ctx, deleteSPCredential, id)
+	return err
+}
+
 const getSPCredentialByAPIKey = `-- name: GetSPCredentialByAPIKey :one
 SELECT
     spc.id,
@@ -52,6 +127,30 @@ func (q *Queries) GetSPCredentialByAPIKey(ctx context.Context, apiKeyHash *strin
 	return i, err
 }
 
+const getSPCredentialByID = `-- name: GetSPCredentialByID :one
+SELECT id, service_provider_id, protocol, status, system_id, password_hash, bind_type, api_key_hash, api_key_identifier, http_config, created_at, updated_at FROM sp_credentials WHERE id = $1 LIMIT 1
+`
+
+func (q *Queries) GetSPCredentialByID(ctx context.Context, id int32) (SpCredential, error) {
+	row := q.db.QueryRow(ctx, getSPCredentialByID, id)
+	var i SpCredential
+	err := row.Scan(
+		&i.ID,
+		&i.ServiceProviderID,
+		&i.Protocol,
+		&i.Status,
+		&i.SystemID,
+		&i.PasswordHash,
+		&i.BindType,
+		&i.ApiKeyHash,
+		&i.ApiKeyIdentifier,
+		&i.HttpConfig,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const getSPCredentialByKeyIdentifier = `-- name: GetSPCredentialByKeyIdentifier :one
 SELECT
     spc.id,
@@ -91,6 +190,97 @@ func (q *Queries) GetSPCredentialByKeyIdentifier(ctx context.Context, apiKeyIden
 		&i.ApiKeyHash,
 		&i.HttpConfig,
 		&i.DefaultCurrencyCode,
+	)
+	return i, err
+}
+
+const listSPCredentials = `-- name: ListSPCredentials :many
+SELECT id, service_provider_id, protocol, status, system_id, password_hash, bind_type, api_key_hash, api_key_identifier, http_config, created_at, updated_at FROM sp_credentials
+WHERE ($1::INT IS NULL OR service_provider_id = $1)
+ORDER BY created_at DESC
+LIMIT $2 OFFSET $3
+`
+
+type ListSPCredentialsParams struct {
+	Column1 int32 `json:"column1"`
+	Limit   int32 `json:"limit"`
+	Offset  int32 `json:"offset"`
+}
+
+// Lists credentials, optionally filtered by Service Provider ID
+func (q *Queries) ListSPCredentials(ctx context.Context, arg ListSPCredentialsParams) ([]SpCredential, error) {
+	rows, err := q.db.Query(ctx, listSPCredentials, arg.Column1, arg.Limit, arg.Offset)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []SpCredential
+	for rows.Next() {
+		var i SpCredential
+		if err := rows.Scan(
+			&i.ID,
+			&i.ServiceProviderID,
+			&i.Protocol,
+			&i.Status,
+			&i.SystemID,
+			&i.PasswordHash,
+			&i.BindType,
+			&i.ApiKeyHash,
+			&i.ApiKeyIdentifier,
+			&i.HttpConfig,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const updateSPCredential = `-- name: UpdateSPCredential :one
+UPDATE sp_credentials
+SET
+    status = COALESCE($1, status),
+    password_hash = COALESCE($2, password_hash), -- Only for SMPP if password reset
+    http_config = COALESCE($3, http_config),     -- Only for HTTP
+    updated_at = NOW()
+WHERE id = $4
+RETURNING id, service_provider_id, protocol, status, system_id, password_hash, bind_type, api_key_hash, api_key_identifier, http_config, created_at, updated_at
+`
+
+type UpdateSPCredentialParams struct {
+	Status       *string `json:"status"`
+	PasswordHash *string `json:"passwordHash"`
+	HttpConfig   []byte  `json:"httpConfig"`
+	ID           int32   `json:"id"`
+}
+
+// Updates status, password hash, http_config for a credential.
+func (q *Queries) UpdateSPCredential(ctx context.Context, arg UpdateSPCredentialParams) (SpCredential, error) {
+	row := q.db.QueryRow(ctx, updateSPCredential,
+		arg.Status,
+		arg.PasswordHash,
+		arg.HttpConfig,
+		arg.ID,
+	)
+	var i SpCredential
+	err := row.Scan(
+		&i.ID,
+		&i.ServiceProviderID,
+		&i.Protocol,
+		&i.Status,
+		&i.SystemID,
+		&i.PasswordHash,
+		&i.BindType,
+		&i.ApiKeyHash,
+		&i.ApiKeyIdentifier,
+		&i.HttpConfig,
+		&i.CreatedAt,
+		&i.UpdatedAt,
 	)
 	return i, err
 }
