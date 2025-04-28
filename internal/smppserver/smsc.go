@@ -14,7 +14,6 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/linxGnu/gosmpp/data"
 	"github.com/linxGnu/gosmpp/pdu"
 	"github.com/thrillee/aegisbox/internal/auth"
 	"github.com/thrillee/aegisbox/internal/config"
@@ -460,6 +459,20 @@ func (s *Server) handleSubmitSM(ctx context.Context, ss *sessionState, hdr PDUHe
 	}
 	registeredDelivery := submitSM.RegisteredDelivery
 
+	totalParts := 1
+	mref := 1
+
+	if submitSM.Message.UDH() != nil {
+		udh := submitSM.Message.UDH()
+		// Look for concatenation information in UDH
+		// Standard concatenation IE identifier is 0x00 (8-bit) or 0x08 (16-bit)
+		totalPartsByte, _, mrefByte, found := udh.GetConcatInfo()
+		if found {
+			totalParts = int(totalPartsByte)
+			mref = int(mrefByte)
+		}
+	}
+
 	// --- Call Core Handler ---
 	inMsg := sp.IncomingSPMessage{
 		ServiceProviderID: ss.serviceProviderID,
@@ -469,9 +482,9 @@ func (s *Server) handleSubmitSM(ctx context.Context, ss *sessionState, hdr PDUHe
 		SenderID:          sourceAddr,
 		DestinationMSISDN: destAddr,
 		MessageContent:    messageContent,
-		TotalSegments:     getTotalSegments(submitSM),
-		SegmentSeqn:       getSegmentSequence(submitSM),
-		ConcatRef:         getConcatRef(submitSM),
+		TotalSegments:     int32(totalParts),
+		SegmentSeqn:       submitSM.GetSequenceNumber(),
+		ConcatRef:         int32(mref),
 		IsFlash:           isFlashMessage(submitSM.Message.Encoding().DataCoding()),
 		RequestDLR:        (registeredDelivery & 0x01) != 0,
 		ReceivedAt:        time.Now(),
@@ -518,45 +531,6 @@ func (s *Server) handleSubmitSM(ctx context.Context, ss *sessionState, hdr PDUHe
 		slog.InfoContext(ctx, "SubmitSM processed successfully",
 			slog.Int64("internal_msg_id", ack.InternalMessageID))
 	}
-}
-
-type ConcatSM struct {
-	Reference byte
-	Total     byte
-	Sequence  byte
-}
-
-type ShortMessageWithUDH struct {
-	pdu.ShortMessage
-	udh map[pdu.Tag]pdu.Field
-}
-
-// Helper functions for UDH parsing
-func getTotalSegments(sm *pdu.SubmitSM) int32 {
-	if udh, ok := sm.Message.(*pdu.ShortMessageWithUDH); ok {
-		if concat, exists := udh.UDH()[pdu.TagConcatenatedSM]; exists {
-			return int32(concat.(*pdu.ConcatSM).Total)
-		}
-	}
-	return 1
-}
-
-func getSegmentSequence(sm *pdu.SubmitSM) int32 {
-	if udh, ok := sm.Message.(*pdu.ShortMessageWithUDH); ok {
-		if concat, exists := udh.UDH()[pdu.TagConcatenatedSM]; exists {
-			return int32(concat.(*pdu.ConcatSM).Sequence)
-		}
-	}
-	return 1
-}
-
-func getConcatRef(sm *pdu.SubmitSM) int32 {
-	if udh, ok := sm.Message.(*pdu.ShortMessageWithUDH); ok {
-		if concat, exists := udh.UDH()[pdu.TagConcatenatedSM]; exists {
-			return int32(concat.(*pdu.ConcatSM).Reference)
-		}
-	}
-	return 0
 }
 
 func isFlashMessage(dataCoding byte) bool {
