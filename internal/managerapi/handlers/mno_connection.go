@@ -157,8 +157,7 @@ func (h *MNOConnectionHandler) ListMNOConnections(c *gin.Context) {
 	for i, conn := range conns {
 		respData[i] = mapDBMNOConnToResponse(conn)
 	}
-	paginatedResp := dto.PaginatedListResponse{ /* ... */ }
-	c.JSON(http.StatusOK, paginatedResp)
+	c.JSON(http.StatusOK, conns)
 }
 
 // GetMNOConnection handles GET /mno-connections/:conn_id

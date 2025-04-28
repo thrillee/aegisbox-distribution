@@ -48,6 +48,7 @@ func (h *MNOHandler) CreateMNO(c *gin.Context) {
 	createdMNO, err := h.dbQueries.CreateMNO(logCtx, params)
 	if err != nil {
 		// Handle potential unique constraint violation on name
+		fmt.Println("Err: ", err)
 		if isUniqueViolationError(err) { // Use helper to check DB error
 			slog.WarnContext(logCtx, "MNO creation failed: Duplicate name", slog.String("name", req.Name))
 			c.JSON(http.StatusConflict, gin.H{"error": fmt.Sprintf("MNO with name '%s' already exists", req.Name)})

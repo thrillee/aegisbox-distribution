@@ -57,7 +57,7 @@ func SetupRoutes(router gin.IRouter, q database.Querier, pool *pgxpool.Pool) {
 		mnoGroup.PUT("/:id", mnoHandler.UpdateMNO)
 		mnoGroup.DELETE("/:id", mnoHandler.DeleteMNO)
 
-		connNestedGroup := mnoGroup.Group("/:mno_id/connections")
+		connNestedGroup := mnoGroup.Group("/connections/:mno_id/")
 		{
 			connNestedGroup.POST("", connHandler.CreateMNOConnection) // Handler needs to get mno_id from path
 			connNestedGroup.GET("", connHandler.ListMNOConnections)   // Handler needs to get mno_id from path

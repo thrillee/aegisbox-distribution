@@ -48,7 +48,12 @@ func (h *ServiceProviderHandler) CreateServiceProvider(c *gin.Context) {
 	qtx := database.New(tx) // <<< Create querier attached to transaction
 
 	// Call database query to create SP using qtx
-	spParams := database.CreateServiceProviderParams{ /* ... */ }
+	spParams := database.CreateServiceProviderParams{
+		Name:                req.Name,
+		Email:               req.Email,
+		Status:              "active",
+		DefaultCurrencyCode: req.DefaultCurrencyCode,
+	}
 	createdSP, err := qtx.CreateServiceProvider(logCtx, spParams) // Use qtx
 	if err != nil {                                               /* ... handle unique constraint or other DB errors ... */
 		return
@@ -76,9 +81,8 @@ func (h *ServiceProviderHandler) CreateServiceProvider(c *gin.Context) {
 	}
 
 	// Map DB result to response DTO
-	resp := dto.ServiceProviderResponse{ /* ... */ }
 	slog.InfoContext(logCtx, "Service provider created successfully")
-	c.JSON(http.StatusCreated, resp)
+	c.JSON(http.StatusCreated, createdSP)
 }
 
 // ListServiceProviders handles GET /service-providers with pagination

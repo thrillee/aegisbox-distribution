@@ -206,6 +206,8 @@ func (c *SMPPMNOConnector) ConnectAndBind(ctx context.Context) error {
 		slog.String("system_id", c.config.SystemID),
 		slog.Int("mno_id", int(c.config.MNOID)),
 		slog.Int("conn_id", int(c.config.ConnectionID)),
+		slog.Duration("Enquiry Link Interval", c.config.EnquireLink),
+		slog.Duration("Request Timeout", c.config.RequestTimeout),
 	)
 
 	auth := gosmpp.Auth{
@@ -233,15 +235,16 @@ func (c *SMPPMNOConnector) ConnectAndBind(ctx context.Context) error {
 
 	settings := gosmpp.Settings{
 		EnquireLink:  c.config.EnquireLink,
-		ReadTimeout:  c.config.RequestTimeout + 5*time.Second, // Read timeout slightly longer
+		ReadTimeout:  c.config.EnquireLink + 5*time.Second, // Read timeout slightly longer
 		WriteTimeout: c.config.RequestTimeout,
 
 		// Use Windowed Tracking for async submit correlation
 		WindowedRequestTracking: &gosmpp.WindowedRequestTracking{
 			MaxWindowSize:         uint8(c.config.MaxWindowSize),
-			PduExpireTimeOut:      c.config.RequestTimeout,       // Timeout for expecting a response PDU
-			ExpireCheckTimer:      5 * time.Second,               // How often to check for expired PDUs
-			EnableAutoRespond:     false,                         // We handle responses manually where needed
+			PduExpireTimeOut:      c.config.RequestTimeout, // Timeout for expecting a response PDU
+			ExpireCheckTimer:      5 * time.Second,         // How often to check for expired PDUs
+			EnableAutoRespond:     false,                   // We handle responses manually where needed
+			StoreAccessTimeOut:    5 * time.Second,
 			OnReceivedPduRequest:  c.handleReceivedPduRequest(),  // Handler for incoming PDUs (DeliverSM, EnquireLink...)
 			OnExpectedPduResponse: c.handleExpectedPduResponse(), // Handler for expected responses (SubmitSMResp...)
 			OnExpiredPduRequest:   c.handleExpirePduRequest(),    // Handler for requests that timed out
