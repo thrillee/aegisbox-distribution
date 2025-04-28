@@ -377,7 +377,8 @@ func (s *Server) handleBind(ctx context.Context, ss *sessionState, hdr PDUHeader
 		s.writeErrorResponse(ss, hdr, StatusBindFailed)
 		return false
 	}
-	if cred.PasswordHash != nil || !auth.CheckPasswordHash(password, *cred.PasswordHash) {
+
+	if cred.PasswordHash != nil && !auth.CheckPasswordHash(password, *cred.PasswordHash) {
 		slog.WarnContext(logCtx, "Bind failed: Invalid password")
 		s.writeErrorResponse(ss, hdr, StatusInvPasswd)
 		return false

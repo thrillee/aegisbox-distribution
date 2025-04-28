@@ -63,15 +63,15 @@ func NewSMPPConfigFromDB(dbConn database.MnoConnection) (SMPPConnectorConfig, er
 		BindType:     "trx",              // Default, set below
 		SystemType:   *dbConn.SystemType, // Default to empty string if NULL
 		// Set defaults for durations/int, override below if valid
-		EnquireLink:       30 * time.Second,
-		RequestTimeout:    10 * time.Second,
-		ConnectRetryDelay: 5 * time.Second,
-		MaxWindowSize:     10,
-		DefaultDataCoding: data.GSM7BIT, // Default coding
-		SourceAddrTON:     1,            // Default TON/NPI
-		SourceAddrNPI:     1,
-		DestAddrTON:       1,
-		DestAddrNPI:       1,
+		EnquireLink:       time.Duration(*dbConn.EnquireLinkIntervalSecs) * time.Second,
+		RequestTimeout:    time.Duration(*dbConn.RequestTimeoutSecs) * time.Second,
+		ConnectRetryDelay: time.Duration(*dbConn.ConnectRetryDelaySecs) * time.Second,
+		MaxWindowSize:     uint(*dbConn.MaxWindowSize),
+		DefaultDataCoding: data.GSM7BIT,                // Default coding
+		SourceAddrTON:     byte(*dbConn.SourceAddrNpi), // Default TON/NPI
+		SourceAddrNPI:     byte(*dbConn.SourceAddrTon),
+		DestAddrTON:       byte(*dbConn.DestAddrTon),
+		DestAddrNPI:       byte(*dbConn.DestAddrNpi),
 	}
 
 	// --- Assign values from DB, checking Valid flag for Null types ---

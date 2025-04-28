@@ -207,7 +207,7 @@ func (p *Processor) validateAndRouteMessage(ctx context.Context, msg database.Ge
 	validationRes, valErr := p.validator.Validate(ctx, msg.ServiceProviderID, msg.OriginalSourceAddr)
 	if valErr != nil {
 		internalError = fmt.Errorf("validation internal error: %w", valErr)
-		slog.ErrorContext(ctx, "Internal error during validation step", slog.Any("error", valErr))
+		slog.ErrorContext(ctx, "Internal error during validation step", slog.Any("error", valErr), slog.Int("sp_id", int(msg.ServiceProviderID)), slog.String("Source Addr", msg.OriginalDestinationAddr))
 	}
 	if validationRes == nil {
 		// Should not happen if validator implementation is correct

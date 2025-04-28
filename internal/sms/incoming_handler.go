@@ -36,6 +36,8 @@ func (h *DefaultIncomingMessageHandler) HandleIncomingMessage(ctx context.Contex
 	logCtx := logging.ContextWithSenderID(ctx, msg.SenderID) // Add logging helpers as needed
 	logCtx = logging.ContextWithMSISDN(logCtx, msg.DestinationMSISDN)
 	slog.InfoContext(logCtx, "Handling incoming message", slog.String("protocol", msg.Protocol))
+	fmt.Println("SenderID: ", msg.SenderID)
+	fmt.Println("DestinationMSISDN: ", msg.DestinationMSISDN)
 
 	// 1. Basic Input Validation (Add more specific rules as needed)
 	if err := validateIncomingMessage(msg); err != nil {
