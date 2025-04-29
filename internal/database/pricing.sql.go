@@ -8,8 +8,67 @@ package database
 import (
 	"context"
 
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/shopspring/decimal"
 )
+
+const countPricingRulesBySP = `-- name: CountPricingRulesBySP :one
+SELECT count(*)
+FROM pricing_rules
+WHERE service_provider_id = $1
+`
+
+// Counts pricing rules for a specific Service Provider.
+func (q *Queries) CountPricingRulesBySP(ctx context.Context, serviceProviderID int32) (int64, error) {
+	row := q.db.QueryRow(ctx, countPricingRulesBySP, serviceProviderID)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
+const createPricingRule = `-- name: CreatePricingRule :one
+INSERT INTO pricing_rules (
+    service_provider_id, mno_id, currency_code, price_per_sms
+) VALUES (
+    $1, $2, $3, $4 -- $2 is sql.NullInt32, $4 is decimal.Decimal
+) RETURNING id, service_provider_id, mno_id, currency_code, price_per_sms, created_at, updated_at
+`
+
+type CreatePricingRuleParams struct {
+	ServiceProviderID int32           `json:"serviceProviderId"`
+	MnoID             *int32          `json:"mnoId"`
+	CurrencyCode      string          `json:"currencyCode"`
+	PricePerSms       decimal.Decimal `json:"pricePerSms"`
+}
+
+func (q *Queries) CreatePricingRule(ctx context.Context, arg CreatePricingRuleParams) (PricingRule, error) {
+	row := q.db.QueryRow(ctx, createPricingRule,
+		arg.ServiceProviderID,
+		arg.MnoID,
+		arg.CurrencyCode,
+		arg.PricePerSms,
+	)
+	var i PricingRule
+	err := row.Scan(
+		&i.ID,
+		&i.ServiceProviderID,
+		&i.MnoID,
+		&i.CurrencyCode,
+		&i.PricePerSms,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const deletePricingRule = `-- name: DeletePricingRule :exec
+DELETE FROM pricing_rules WHERE id = $1
+`
+
+func (q *Queries) DeletePricingRule(ctx context.Context, id int32) error {
+	_, err := q.db.Exec(ctx, deletePricingRule, id)
+	return err
+}
 
 const getApplicablePrice = `-- name: GetApplicablePrice :one
 SELECT price_per_sms, currency_code
@@ -37,4 +96,95 @@ func (q *Queries) GetApplicablePrice(ctx context.Context, arg GetApplicablePrice
 	var i GetApplicablePriceRow
 	err := row.Scan(&i.PricePerSms, &i.CurrencyCode)
 	return i, err
+}
+
+const getPricingRuleByID = `-- name: GetPricingRuleByID :one
+SELECT pr.id, pr.service_provider_id, pr.mno_id, pr.currency_code, pr.price_per_sms, pr.created_at, pr.updated_at, m.name as mno_name
+FROM pricing_rules pr
+LEFT JOIN mnos m ON pr.mno_id = m.id
+WHERE pr.id = $1 LIMIT 1
+`
+
+type GetPricingRuleByIDRow struct {
+	ID                int32              `json:"id"`
+	ServiceProviderID int32              `json:"serviceProviderId"`
+	MnoID             *int32             `json:"mnoId"`
+	CurrencyCode      string             `json:"currencyCode"`
+	PricePerSms       decimal.Decimal    `json:"pricePerSms"`
+	CreatedAt         pgtype.Timestamptz `json:"createdAt"`
+	UpdatedAt         pgtype.Timestamptz `json:"updatedAt"`
+	MnoName           *string            `json:"mnoName"`
+}
+
+// Join MNO Name for display
+func (q *Queries) GetPricingRuleByID(ctx context.Context, id int32) (GetPricingRuleByIDRow, error) {
+	row := q.db.QueryRow(ctx, getPricingRuleByID, id)
+	var i GetPricingRuleByIDRow
+	err := row.Scan(
+		&i.ID,
+		&i.ServiceProviderID,
+		&i.MnoID,
+		&i.CurrencyCode,
+		&i.PricePerSms,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.MnoName,
+	)
+	return i, err
+}
+
+const listPricingRulesBySP = `-- name: ListPricingRulesBySP :many
+SELECT pr.id, pr.service_provider_id, pr.mno_id, pr.currency_code, pr.price_per_sms, pr.created_at, pr.updated_at, m.name as mno_name
+FROM pricing_rules pr
+LEFT JOIN mnos m ON pr.mno_id = m.id
+WHERE pr.service_provider_id = $1 -- Required SP ID filter
+ORDER BY pr.mno_id NULLS FIRST, pr.currency_code -- Show defaults first
+LIMIT $2 OFFSET $3
+`
+
+type ListPricingRulesBySPParams struct {
+	ServiceProviderID int32 `json:"serviceProviderId"`
+	Limit             int32 `json:"limit"`
+	Offset            int32 `json:"offset"`
+}
+
+type ListPricingRulesBySPRow struct {
+	ID                int32              `json:"id"`
+	ServiceProviderID int32              `json:"serviceProviderId"`
+	MnoID             *int32             `json:"mnoId"`
+	CurrencyCode      string             `json:"currencyCode"`
+	PricePerSms       decimal.Decimal    `json:"pricePerSms"`
+	CreatedAt         pgtype.Timestamptz `json:"createdAt"`
+	UpdatedAt         pgtype.Timestamptz `json:"updatedAt"`
+	MnoName           *string            `json:"mnoName"`
+}
+
+// Lists pricing rules for a specific Service Provider, paginated.
+func (q *Queries) ListPricingRulesBySP(ctx context.Context, arg ListPricingRulesBySPParams) ([]ListPricingRulesBySPRow, error) {
+	rows, err := q.db.Query(ctx, listPricingRulesBySP, arg.ServiceProviderID, arg.Limit, arg.Offset)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListPricingRulesBySPRow
+	for rows.Next() {
+		var i ListPricingRulesBySPRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.ServiceProviderID,
+			&i.MnoID,
+			&i.CurrencyCode,
+			&i.PricePerSms,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.MnoName,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }

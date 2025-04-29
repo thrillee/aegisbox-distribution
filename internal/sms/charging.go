@@ -104,6 +104,7 @@ func (p *DefaultPricer) PriceAndDebit(ctx context.Context, msgID int64) (result 
 
 		statusUpdateErr := dbQueriesFromPool.UpdateMessagePriced(logCtx, database.UpdateMessagePricedParams{
 			Cost:             pgtype.Numeric{Int: totalCost.BigInt(), Valid: true},
+			Column5:          finalStatus,
 			ProcessingStatus: finalStatus,
 			ErrorDescription: &errMsgForDB,
 			ID:               msgID,
@@ -114,6 +115,7 @@ func (p *DefaultPricer) PriceAndDebit(ctx context.Context, msgID int64) (result 
 				"CRITICAL: Failed to update message status AFTER pricing transaction",
 				slog.String("attempted_status", finalStatus),
 				slog.Any("update_error", statusUpdateErr),
+				slog.Any("totalCost", totalCost),
 				slog.Any("original_tx_error", result.Error), // Log original error for context
 			)
 			// Potentially add to a retry queue or alert.
@@ -166,7 +168,7 @@ func (p *DefaultPricer) PriceAndDebit(ctx context.Context, msgID int64) (result 
 	})
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			err = fmt.Errorf("no applicable pricing rule found for SP %d, Currency %s, MNO %v", spID, currency, mnoID)
+			err = fmt.Errorf("no applicable pricing rule found for SP %d, Currency %s, MNO %v", spID, currency, *mnoID)
 		} else {
 			err = fmt.Errorf("failed to get price: %w", err)
 		}
@@ -230,7 +232,7 @@ func (p *DefaultPricer) PriceAndDebit(ctx context.Context, msgID int64) (result 
 	}
 
 	// Create Wallet Transaction
-	txDesc := fmt.Sprintf("SMS charge (%d segments) MNO %v", totalSegments, mnoID)
+	txDesc := fmt.Sprintf("SMS charge (%d segments) MNO %v", totalSegments, *mnoID)
 	_, err = qtx.CreateWalletTransaction(logCtx, database.CreateWalletTransactionParams{
 		WalletID:        wallet.ID,
 		MessageID:       &msgID,

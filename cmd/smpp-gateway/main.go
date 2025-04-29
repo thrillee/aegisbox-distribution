@@ -101,7 +101,7 @@ func main() {
 		cfg.MNOClientConfig.SyncInterval) // Pass DLR handler func from sms.Processor
 
 	// --- Initialize SMS Processor (Needs initialized dependencies) ---
-	processorDeps.Sender = sms.NewDefaultSender(dbQueries, mnoManager, mainSegmenter)
+	smsProcessor.SetSender(sms.NewDefaultSender(dbQueries, mnoManager, mainSegmenter))
 
 	// --- Initialize SMPP Server (Implements Session Manager) ---
 	smppServer := smppserver.NewServer(appCtx, cfg.ServerConfig, dbQueries, incomingMessageHandler) // Pass core msg handler

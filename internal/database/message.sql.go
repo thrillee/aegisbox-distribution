@@ -641,8 +641,8 @@ SET
     cost=$2,
     error_code = $3,    
     error_description = $4, 
-    processed_for_queue_at = CASE WHEN $1 = 'queued_for_send' THEN NOW() ELSE processed_for_queue_at END
-WHERE id = $5
+    processed_for_queue_at = CASE WHEN $5 = 'queued_for_send' THEN NOW() ELSE processed_for_queue_at END
+WHERE id = $6
 `
 
 type UpdateMessagePricedParams struct {
@@ -650,6 +650,7 @@ type UpdateMessagePricedParams struct {
 	Cost             pgtype.Numeric `json:"cost"`
 	ErrorCode        *string        `json:"errorCode"`
 	ErrorDescription *string        `json:"errorDescription"`
+	Column5          interface{}    `json:"column5"`
 	ID               int64          `json:"id"`
 }
 
@@ -659,6 +660,7 @@ func (q *Queries) UpdateMessagePriced(ctx context.Context, arg UpdateMessagePric
 		arg.Cost,
 		arg.ErrorCode,
 		arg.ErrorDescription,
+		arg.Column5,
 		arg.ID,
 	)
 	return err

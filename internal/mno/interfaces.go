@@ -35,6 +35,7 @@ type PreparedMessage struct {
 	ESMClass          byte
 	RequestDLR        bool
 	MNOInfo           database.Mno // Information about the target MNO (optional)
+	DBSeqs            []int64      // Segment sequence number (1-based)
 	// Add other fields: ValidityPeriod, Priority, TLVs etc. if needed
 }
 

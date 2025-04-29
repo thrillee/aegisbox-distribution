@@ -389,31 +389,32 @@ func (c *SMPPMNOConnector) SubmitMessage(ctx context.Context, msg PreparedMessag
 	}
 
 	// 2. Create DB Segment Records (required BEFORE submitting)
-	segmentIDs := make([]int64, totalSegments)
-	dbCtx, cancel := context.WithTimeout(logCtx, 5*time.Second) // Timeout for DB operations
-	defer cancel()
-	for i := 0; i < totalSegments; i++ {
-		segID, dbErr := c.dbQueries.CreateMessageSegment(dbCtx, database.CreateMessageSegmentParams{
-			MessageID:   msg.InternalMessageID,
-			SegmentSeqn: int32(i + 1),
-		})
-		if dbErr != nil {
-			err = fmt.Errorf("failed to create DB record for segment %d/%d: %w", i+1, totalSegments, dbErr)
-			slog.ErrorContext(logCtx, err.Error())
-			result.Error = err // Mark overall error
-			// Don't attempt to send if we can't create DB records
-			return result, err // Return internal error
-		}
-		segmentIDs[i] = segID
-	}
-	slog.DebugContext(logCtx, "Created segment DB records", slog.Int("count", totalSegments))
+	// segmentIDs := make([]int64, totalSegments)
+	// dbCtx, cancel := context.WithTimeout(logCtx, 5*time.Second) // Timeout for DB operations
+	// defer cancel()
+	// fmt.Println("Submit")
+	// for i := range totalSegments {
+	// 	segID, dbErr := c.dbQueries.CreateMessageSegment(dbCtx, database.CreateMessageSegmentParams{
+	// 		MessageID:   msg.InternalMessageID,
+	// 		SegmentSeqn: int32(i + 1),
+	// 	})
+	// 	if dbErr != nil {
+	// 		err = fmt.Errorf("failed to create DB record for segment %d/%d: %w", i+1, totalSegments, dbErr)
+	// 		slog.ErrorContext(logCtx, err.Error())
+	// 		result.Error = err // Mark overall error
+	// 		// Don't attempt to send if we can't create DB records
+	// 		return result, err // Return internal error
+	// 	}
+	// 	segmentIDs[i] = segID
+	// }
+	// slog.DebugContext(logCtx, "Created segment DB records", slog.Int("count", totalSegments))
 
 	// 3. Submit Segments
 	result.Segments = make([]SegmentSubmitInfo, totalSegments)
 	var submitErrorsExist bool
 
 	for i, content := range segments {
-		dbSegmentID := segmentIDs[i]
+		dbSegmentID := msg.DBSeqs[i]
 		segmentSeqn := int32(i + 1)
 		segLogCtx := logging.ContextWithSegmentID(logCtx, dbSegmentID)
 
@@ -734,6 +735,7 @@ func (c *SMPPMNOConnector) handleOnClosePduRequest() func(pdu.PDU) {
 // processSubmitSMResp handles the asynchronous response to a SubmitSM request.
 func (c *SMPPMNOConnector) processSubmitSMResp(ctx context.Context, sequence uint32, resp *pdu.SubmitSMResp) {
 	// Retrieve the job details associated with this sequence number
+	fmt.Println("Sequence: ", sequence)
 	val, loaded := c.pendingSubmits.LoadAndDelete(sequence)
 	if !loaded {
 		slog.WarnContext(ctx, "Received SubmitSMResp for unknown or already processed sequence number")

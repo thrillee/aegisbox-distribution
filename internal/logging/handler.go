@@ -22,13 +22,14 @@ const (
 	JobIDKey            contextKey = "job_id"
 	CommandIDKey        contextKey = "cmd_id"
 	SeqNumberKey        contextKey = "seq_num"
-	CredentialIDKey     contextKey = "seq_num"
+	CredentialIDKey     contextKey = "credential_id"
 	SenderIDKey         contextKey = "sender_id"
 	CurrencyCodeKey     contextKey = "currency_code"
 	APIKeyIdentifierKey contextKey = "api_key_identifier"
 	RemoteAddrKey       contextKey = "remote_addr"
 	MangerAPIHandlerKey contextKey = "manager_api_handler"
 	SpEMailKey          contextKey = "sp_email"
+	PricingRuleID       contextKey = "pricing_rule_id"
 	// Add other keys as needed
 )
 
@@ -141,4 +142,12 @@ func ContextWithHandler(ctx context.Context, handler string) context.Context {
 
 func ContextWithSPEmail(ctx context.Context, email string) context.Context {
 	return context.WithValue(ctx, SpEMailKey, email)
+}
+
+func ContextWithRuleID(ctx context.Context, createdRuleID int32) context.Context {
+	return context.WithValue(ctx, SpEMailKey, createdRuleID)
+}
+
+func ContextWithPricingRuleID(ctx context.Context, createdRuleID int32) context.Context {
+	return context.WithValue(ctx, PricingRuleID, createdRuleID)
 }

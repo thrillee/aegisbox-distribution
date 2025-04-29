@@ -80,8 +80,8 @@ SET
     cost=$2,
     error_code = $3,    
     error_description = $4, 
-    processed_for_queue_at = CASE WHEN $1 = 'queued_for_send' THEN NOW() ELSE processed_for_queue_at END
-WHERE id = $5;
+    processed_for_queue_at = CASE WHEN $5 = 'queued_for_send' THEN NOW() ELSE processed_for_queue_at END
+WHERE id = $6;
 
 -- name: GetMessagesToPrice :many
 SELECT id, service_provider_id, routed_mno_id

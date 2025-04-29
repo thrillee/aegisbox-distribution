@@ -58,6 +58,6 @@ func (r *DefaultRouter) Route(ctx context.Context, msisdn string) (*mno.RoutingR
 	// Route found
 	result.ShouldUse = true
 	result.MNOID = routedMnoID
-	slog.InfoContext(logCtx, "Route found successfully", slog.Int("mno_id", int(routedMnoID)))
+	slog.InfoContext(logCtx, "Route found successfully", slog.Int("mno_id", int(routedMnoID)), slog.String("mno_id", msisdn))
 	return result, nil
 }

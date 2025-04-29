@@ -14,13 +14,21 @@ type Querier interface {
 	// Counts messages based on optional filters, joining necessary tables.
 	// Only JOIN segments if filtering by mno_message_id
 	CountMessageDetails(ctx context.Context, arg CountMessageDetailsParams) (int64, error)
+	// Counts pricing rules for a specific Service Provider.
+	CountPricingRulesBySP(ctx context.Context, serviceProviderID int32) (int64, error)
+	// Counts routing rules, optionally filtered by MNO ID.
+	CountRoutingRules(ctx context.Context, dollar_1 int32) (int64, error)
 	// Counts credentials, optionally filtered by Service Provider ID
 	CountSPCredentials(ctx context.Context, dollar_1 int32) (int64, error)
 	CountServiceProviders(ctx context.Context) (int64, error)
+	// Counts wallets for a specific Service Provider.
+	CountWalletsBySP(ctx context.Context, serviceProviderID int32) (int64, error)
 	CreateMNO(ctx context.Context, arg CreateMNOParams) (Mno, error)
 	CreateMNOConnection(ctx context.Context, arg CreateMNOConnectionParams) (MnoConnection, error)
 	// Creates initial segment record before sending attempt
 	CreateMessageSegment(ctx context.Context, arg CreateMessageSegmentParams) (int64, error)
+	CreatePricingRule(ctx context.Context, arg CreatePricingRuleParams) (PricingRule, error)
+	CreateRoutingRule(ctx context.Context, arg CreateRoutingRuleParams) (RoutingRule, error)
 	CreateSMPPCredential(ctx context.Context, arg CreateSMPPCredentialParams) (SpCredential, error)
 	// Creates an SP credential (SMPP or HTTP)
 	CreateSPCredential(ctx context.Context, arg CreateSPCredentialParams) (SpCredential, error)
@@ -33,6 +41,9 @@ type Querier interface {
 	// It might be safer to just set status to 'inactive'.
 	DeleteMNO(ctx context.Context, id int32) error
 	DeleteMNOConnection(ctx context.Context, id int32) error
+	DeletePricingRule(ctx context.Context, id int32) error
+	// Note: If updating mno_id, ensure the new MNO exists (handled by FK or check in handler)
+	DeleteRoutingRule(ctx context.Context, id int32) error
 	DeleteSPCredential(ctx context.Context, id int32) error
 	DeleteServiceProvider(ctx context.Context, id int32) error
 	// Inserts a new DLR forwarding job into the queue.
@@ -58,6 +69,10 @@ type Querier interface {
 	GetMessagesToPrice(ctx context.Context, limit int32) ([]GetMessagesToPriceRow, error)
 	// Selects pending DLR jobs and locks them for processing.
 	GetPendingDLRsToForward(ctx context.Context, arg GetPendingDLRsToForwardParams) ([]GetPendingDLRsToForwardRow, error)
+	// Join MNO Name for display
+	GetPricingRuleByID(ctx context.Context, id int32) (GetPricingRuleByIDRow, error)
+	// Join with MNOs to get the name for display
+	GetRoutingRuleByID(ctx context.Context, id int32) (GetRoutingRuleByIDRow, error)
 	// Gets SP credential based on a hashed API key for HTTP auth.
 	GetSPCredentialByAPIKey(ctx context.Context, apiKeyHash *string) (GetSPCredentialByAPIKeyRow, error)
 	GetSPCredentialByID(ctx context.Context, id int32) (SpCredential, error)
@@ -71,6 +86,8 @@ type Querier interface {
 	GetSegmentStatusesForMessage(ctx context.Context, messageID int64) ([]GetSegmentStatusesForMessageRow, error)
 	GetServiceProviderByID(ctx context.Context, id int32) (ServiceProvider, error)
 	GetTemplateContent(ctx context.Context, arg GetTemplateContentParams) (string, error)
+	// Gets a specific wallet by its primary ID.
+	GetWalletByID(ctx context.Context, id int32) (Wallet, error)
 	GetWalletForUpdate(ctx context.Context, arg GetWalletForUpdateParams) (GetWalletForUpdateRow, error)
 	GetWalletForUpdateByID(ctx context.Context, id int32) (Wallet, error)
 	GetWalletsBelowThreshold(ctx context.Context) ([]GetWalletsBelowThresholdRow, error)
@@ -80,9 +97,15 @@ type Querier interface {
 	// Lists detailed message information based on optional filters with pagination. Excludes message content.
 	// LEFT JOIN needed for EXISTS filter below, but DISTINCT ON handles duplicates if join remains
 	ListMessageDetails(ctx context.Context, arg ListMessageDetailsParams) ([]ListMessageDetailsRow, error)
+	// Lists pricing rules for a specific Service Provider, paginated.
+	ListPricingRulesBySP(ctx context.Context, arg ListPricingRulesBySPParams) ([]ListPricingRulesBySPRow, error)
+	// Lists routing rules, optionally filtered by MNO ID, with pagination.
+	ListRoutingRules(ctx context.Context, arg ListRoutingRulesParams) ([]ListRoutingRulesRow, error)
 	// Lists credentials, optionally filtered by Service Provider ID
 	ListSPCredentials(ctx context.Context, arg ListSPCredentialsParams) ([]SpCredential, error)
 	ListServiceProviders(ctx context.Context, arg ListServiceProvidersParams) ([]ServiceProvider, error)
+	// Lists wallets for a specific Service Provider, paginated.
+	ListWalletsBySP(ctx context.Context, arg ListWalletsBySPParams) ([]Wallet, error)
 	// Marks a job as failed for this attempt, increments attempts, and potentially sets to permanent failure.
 	MarkDLRForwardingAttemptFailed(ctx context.Context, arg MarkDLRForwardingAttemptFailedParams) error
 	// Marks a job as successfully completed.
@@ -105,6 +128,8 @@ type Querier interface {
 	// Updates status after Sender.Send finishes (regardless of segment success/failure)
 	UpdateMessageSendAttempted(ctx context.Context, id int64) error
 	UpdateMessageValidatedRouted(ctx context.Context, arg UpdateMessageValidatedRoutedParams) error
+	// Optional MNO ID filter
+	UpdateRoutingRule(ctx context.Context, arg UpdateRoutingRuleParams) (RoutingRule, error)
 	// Updates status, password hash, http_config for a credential.
 	UpdateSPCredential(ctx context.Context, arg UpdateSPCredentialParams) (SpCredential, error)
 	// Updates segment status based on received DLR

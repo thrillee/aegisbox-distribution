@@ -37,7 +37,7 @@ func (s *DefaultSender) Send(ctx context.Context, msg database.GetMessageDetails
 	slog.DebugContext(logCtx, "Starting send process")
 
 	// 1. Get MNO Connector
-	if msg.RoutedMnoID != nil {
+	if msg.RoutedMnoID == nil {
 		// This should ideally be caught earlier, but double-check
 		err := errors.New("cannot send message: Routed MNO ID is invalid or missing")
 		slog.ErrorContext(logCtx, err.Error())
@@ -87,6 +87,7 @@ func (s *DefaultSender) Send(ctx context.Context, msg database.GetMessageDetails
 		}
 		segmentIDs[i] = segID
 	}
+	preparedMsg.DBSeqs = segmentIDs
 	slog.DebugContext(logCtx, "Created initial segment records in DB", slog.Int("count", len(segmentIDs)))
 
 	// 4. Submit Message via Connector
@@ -100,13 +101,13 @@ func (s *DefaultSender) Send(ctx context.Context, msg database.GetMessageDetails
 	if submitErr != nil {
 		slog.ErrorContext(logCtx, "Catastrophic error during MNO submission", slog.Any("error", submitErr))
 		// Mark all created segments as failed?
-		for i, segID := range segmentIDs {
+		for i, segInfo := range submitResult.Segments {
 			_ = s.dbQueries.UpdateSegmentSendFailed(logCtx, database.UpdateSegmentSendFailedParams{
-				ID:               segID,
+				ID:               int64(segInfo.Seqn),
 				ErrorDescription: &errDesc,
 				ErrorCode:        &errCode,
 			})
-			slog.WarnContext(logCtx, "Marked segment as failed due to overall submission error", slog.Int64("segment_id", segID), slog.Int("seqn", i+1))
+			slog.WarnContext(logCtx, "Marked segment as failed due to overall submission error", slog.Int64("segment_id", int64(segInfo.Seqn)), slog.Int("seqn", i+1))
 		}
 		// Return the overall error wrapped in SubmitResult
 		submitResult.Error = submitErr
@@ -120,20 +121,20 @@ func (s *DefaultSender) Send(ctx context.Context, msg database.GetMessageDetails
 	for _, segResult := range submitResult.Segments {
 		// Find the corresponding DB segment ID (using Seqn assumes order is preserved)
 		// A map might be safer if order isn't guaranteed.
-		if segResult.Seqn <= 0 || int(segResult.Seqn) > len(segmentIDs) {
+		if segResult.Seqn <= 0 || int(segResult.Seqn) > len(submitResult.Segments) {
 			slog.ErrorContext(logCtx, "Invalid segment sequence number received from connector result", slog.Int("seqn", int(segResult.Seqn)))
 			updateErrors = true
 			continue
 		}
-		dbSegmentID := segmentIDs[segResult.Seqn-1]
-		segLogCtx := logging.ContextWithSegmentID(logCtx, dbSegmentID) // Add Segment ID
+		dbSegmentID := submitResult.Segments[segResult.Seqn-1].Seqn
+		segLogCtx := logging.ContextWithSegmentID(logCtx, int64(dbSegmentID)) // Add Segment ID
 
 		mnoConnID := connector.ConnectionID()
 
 		if segResult.IsSuccess {
 			// Update segment as sent successfully
 			err = s.dbQueries.UpdateSegmentSent(segLogCtx, database.UpdateSegmentSentParams{
-				ID:              dbSegmentID,
+				ID:              int64(dbSegmentID),
 				MnoMessageID:    segResult.MnoMessageID,
 				MnoConnectionID: &mnoConnID,
 			})
@@ -150,7 +151,7 @@ func (s *DefaultSender) Send(ctx context.Context, msg database.GetMessageDetails
 				errMsg = segResult.Error.Error()
 			}
 			err = s.dbQueries.UpdateSegmentSendFailed(segLogCtx, database.UpdateSegmentSendFailedParams{
-				ID:               dbSegmentID,
+				ID:               int64(dbSegmentID),
 				ErrorDescription: &errMsg,
 				ErrorCode:        segResult.ErrorCode, // Pass sql.NullString directly
 			})

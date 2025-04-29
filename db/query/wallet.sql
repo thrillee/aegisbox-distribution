@@ -13,9 +13,9 @@ RETURNING *;
 
 -- name: CreateWalletTransaction :one
 INSERT INTO wallet_transactions (
-    wallet_id, message_id, transaction_type, amount, balance_before, balance_after, description
+    wallet_id, message_id, transaction_type, amount, balance_before, balance_after, description, reference_transaction_id
 ) VALUES (
-    $1, $2, $3, $4, $5, $6, $7
+    $1, $2, $3, $4, $5, $6, $7, $8
 ) RETURNING *;
 
 -- name: GetWalletsBelowThreshold :many
@@ -34,7 +34,7 @@ WHERE id = $1;
 SELECT id, wallet_id, amount
 FROM wallet_transactions
 WHERE message_id = $1
-  AND direction = 'debit'
+  AND transaction_type = 'debit'
 LIMIT 1;
 
 -- name: GetWalletForUpdateByID :one
@@ -42,3 +42,20 @@ SELECT *
 FROM wallets
 WHERE id = $1
 FOR UPDATE;
+
+-- name: ListWalletsBySP :many
+-- Lists wallets for a specific Service Provider, paginated.
+SELECT * FROM wallets
+WHERE service_provider_id = $1
+ORDER BY currency_code
+LIMIT $2 OFFSET $3;
+
+-- name: CountWalletsBySP :one
+-- Counts wallets for a specific Service Provider.
+SELECT count(*) FROM wallets
+WHERE service_provider_id = $1;
+
+-- name: GetWalletByID :one
+-- Gets a specific wallet by its primary ID.
+SELECT * FROM wallets WHERE id = $1 LIMIT 1;
+

@@ -11,22 +11,36 @@ import (
 	"github.com/shopspring/decimal"
 )
 
+const countWalletsBySP = `-- name: CountWalletsBySP :one
+SELECT count(*) FROM wallets
+WHERE service_provider_id = $1
+`
+
+// Counts wallets for a specific Service Provider.
+func (q *Queries) CountWalletsBySP(ctx context.Context, serviceProviderID int32) (int64, error) {
+	row := q.db.QueryRow(ctx, countWalletsBySP, serviceProviderID)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const createWalletTransaction = `-- name: CreateWalletTransaction :one
 INSERT INTO wallet_transactions (
-    wallet_id, message_id, transaction_type, amount, balance_before, balance_after, description
+    wallet_id, message_id, transaction_type, amount, balance_before, balance_after, description, reference_transaction_id
 ) VALUES (
-    $1, $2, $3, $4, $5, $6, $7
+    $1, $2, $3, $4, $5, $6, $7, $8
 ) RETURNING id, wallet_id, message_id, transaction_type, amount, balance_before, balance_after, description, transaction_date, reference_transaction_id
 `
 
 type CreateWalletTransactionParams struct {
-	WalletID        int32           `json:"walletId"`
-	MessageID       *int64          `json:"messageId"`
-	TransactionType string          `json:"transactionType"`
-	Amount          decimal.Decimal `json:"amount"`
-	BalanceBefore   decimal.Decimal `json:"balanceBefore"`
-	BalanceAfter    decimal.Decimal `json:"balanceAfter"`
-	Description     *string         `json:"description"`
+	WalletID               int32           `json:"walletId"`
+	MessageID              *int64          `json:"messageId"`
+	TransactionType        string          `json:"transactionType"`
+	Amount                 decimal.Decimal `json:"amount"`
+	BalanceBefore          decimal.Decimal `json:"balanceBefore"`
+	BalanceAfter           decimal.Decimal `json:"balanceAfter"`
+	Description            *string         `json:"description"`
+	ReferenceTransactionID *int64          `json:"referenceTransactionId"`
 }
 
 func (q *Queries) CreateWalletTransaction(ctx context.Context, arg CreateWalletTransactionParams) (WalletTransaction, error) {
@@ -38,6 +52,7 @@ func (q *Queries) CreateWalletTransaction(ctx context.Context, arg CreateWalletT
 		arg.BalanceBefore,
 		arg.BalanceAfter,
 		arg.Description,
+		arg.ReferenceTransactionID,
 	)
 	var i WalletTransaction
 	err := row.Scan(
@@ -59,7 +74,7 @@ const findDebitTransactionForMessage = `-- name: FindDebitTransactionForMessage 
 SELECT id, wallet_id, amount
 FROM wallet_transactions
 WHERE message_id = $1
-  AND direction = 'debit'
+  AND transaction_type = 'debit'
 LIMIT 1
 `
 
@@ -73,6 +88,27 @@ func (q *Queries) FindDebitTransactionForMessage(ctx context.Context, messageID 
 	row := q.db.QueryRow(ctx, findDebitTransactionForMessage, messageID)
 	var i FindDebitTransactionForMessageRow
 	err := row.Scan(&i.ID, &i.WalletID, &i.Amount)
+	return i, err
+}
+
+const getWalletByID = `-- name: GetWalletByID :one
+SELECT id, service_provider_id, currency_code, balance, low_balance_threshold, low_balance_notified_at, created_at, updated_at FROM wallets WHERE id = $1 LIMIT 1
+`
+
+// Gets a specific wallet by its primary ID.
+func (q *Queries) GetWalletByID(ctx context.Context, id int32) (Wallet, error) {
+	row := q.db.QueryRow(ctx, getWalletByID, id)
+	var i Wallet
+	err := row.Scan(
+		&i.ID,
+		&i.ServiceProviderID,
+		&i.CurrencyCode,
+		&i.Balance,
+		&i.LowBalanceThreshold,
+		&i.LowBalanceNotifiedAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
 	return i, err
 }
 
@@ -156,6 +192,49 @@ func (q *Queries) GetWalletsBelowThreshold(ctx context.Context) ([]GetWalletsBel
 			&i.CurrencyCode,
 			&i.ServiceProviderID,
 			&i.Email,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listWalletsBySP = `-- name: ListWalletsBySP :many
+SELECT id, service_provider_id, currency_code, balance, low_balance_threshold, low_balance_notified_at, created_at, updated_at FROM wallets
+WHERE service_provider_id = $1
+ORDER BY currency_code
+LIMIT $2 OFFSET $3
+`
+
+type ListWalletsBySPParams struct {
+	ServiceProviderID int32 `json:"serviceProviderId"`
+	Limit             int32 `json:"limit"`
+	Offset            int32 `json:"offset"`
+}
+
+// Lists wallets for a specific Service Provider, paginated.
+func (q *Queries) ListWalletsBySP(ctx context.Context, arg ListWalletsBySPParams) ([]Wallet, error) {
+	rows, err := q.db.Query(ctx, listWalletsBySP, arg.ServiceProviderID, arg.Limit, arg.Offset)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Wallet
+	for rows.Next() {
+		var i Wallet
+		if err := rows.Scan(
+			&i.ID,
+			&i.ServiceProviderID,
+			&i.CurrencyCode,
+			&i.Balance,
+			&i.LowBalanceThreshold,
+			&i.LowBalanceNotifiedAt,
+			&i.CreatedAt,
+			&i.UpdatedAt,
 		); err != nil {
 			return nil, err
 		}

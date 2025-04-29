@@ -154,6 +154,10 @@ func NewProcessor(deps ProcessorDependencies) *Processor {
 	}
 }
 
+func (p *Processor) SetSender(sender Sender) {
+	p.sender = sender
+}
+
 // ========================================================================================
 // Processing Steps (Called by Worker Manager)
 // ========================================================================================
@@ -280,7 +284,7 @@ func (p *Processor) validateAndRouteMessage(ctx context.Context, msg database.Ge
 		ProcessingStatus: finalStatus,
 		RoutedMnoID:      &routingRes.MNOID,
 		ApprovedSenderID: &validationRes.ApprovedSenderID,
-		TemplateID:       &validationRes.TemplateID,
+		// TemplateID:       &validationRes.TemplateID,
 		ErrorDescription: &dbErrMsg,
 		ErrorCode:        &errorCode,
 		ID:               msg.ID,
@@ -404,7 +408,7 @@ func (p *Processor) ProcessSendingStep(ctx context.Context, batchSize int) (proc
 		}
 
 		// 2. Basic check before calling sender
-		if fullMsg.RoutedMnoID != nil {
+		if fullMsg.RoutedMnoID == nil {
 			sendErr = errors.New("missing Routed MNO ID")
 			slog.ErrorContext(logCtx, "Cannot send message", slog.Any("reason", sendErr))
 			p.attemptReversal(logCtx, msg.ID, sendErr.Error())

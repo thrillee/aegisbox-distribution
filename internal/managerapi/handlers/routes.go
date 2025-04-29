@@ -15,6 +15,10 @@ func SetupRoutes(router gin.IRouter, q database.Querier, pool *pgxpool.Pool) {
 
 	mnoHandler := NewMNOHandler(q, pool)
 	connHandler := NewMNOConnectionHandler(q, pool)
+	routingHandler := NewRoutingRuleHandler(q, pool)
+
+	pricingHandler := NewPricingRuleHandler(q, pool)
+	walletHandler := NewWalletHandler(q, pool)
 
 	// ... other handlers ...
 
@@ -66,10 +70,14 @@ func SetupRoutes(router gin.IRouter, q database.Querier, pool *pgxpool.Pool) {
 	}
 
 	// --- Routing Rule Routes ---
-	// POST /routing-rules
-	// GET /routing-rules
-	// DELETE /routing-rules/{id}
-	// ...
+	ruleGroup := router.Group("/routing-rules")
+	{
+		ruleGroup.POST("", routingHandler.CreateRule)
+		ruleGroup.GET("", routingHandler.ListRules) // Optional filter ?mno_id=...
+		ruleGroup.GET("/:id", routingHandler.GetRule)
+		ruleGroup.PUT("/:id", routingHandler.UpdateRule)
+		ruleGroup.DELETE("/:id", routingHandler.DeleteRule)
+	}
 
 	// --- Sender ID Routes ---
 	// POST /sender-ids
@@ -78,13 +86,21 @@ func SetupRoutes(router gin.IRouter, q database.Querier, pool *pgxpool.Pool) {
 	// ...
 
 	// --- Pricing Rule Routes ---
-	// POST /pricing-rules
-	// GET /pricing-rules?sp_id={id}
-	// DELETE /pricing-rules/{id}
-	// ...
+	pricingGroup := router.Group("/pricing-rules")
+	{
+		pricingGroup.POST("", pricingHandler.CreatePricingRule)
+		pricingGroup.GET("", pricingHandler.ListPricingRules) // Requires ?sp_id=... filter
+		pricingGroup.DELETE("/:id", pricingHandler.DeletePricingRule)
+	}
 
 	// --- Wallet Routes ---
-	// GET /wallets?sp_id={id}
-	// POST /wallets/{id}/credit // Manual credit endpoint
-	// ...
+	walletGroup := router.Group("/wallets")
+	{
+		walletGroup.GET("", walletHandler.ListWallets) // Requires ?sp_id=... filter
+		// GET /wallets/:id might be useful too
+		// walletGroup.GET("/:id", walletHandler.GetWallet)
+		walletGroup.POST("/:id/credit", walletHandler.CreditWallet) // Manual credit
+		// DELETE /wallets/:id ? Probably not needed, deleted with SP.
+		// PUT /wallets/:id ? Maybe to update low_balance_threshold?
+	}
 }
