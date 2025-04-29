@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/linxGnu/gosmpp/pdu"
 	"github.com/thrillee/aegisbox/internal/auth"
 	"github.com/thrillee/aegisbox/internal/config"
 	"github.com/thrillee/aegisbox/internal/database"
@@ -193,7 +194,7 @@ func (s *Server) handleSession(ctx context.Context, ss *sessionState) {
 				isBound = s.handleBind(logCtx, ss, hdr, body) // handleBind returns true on successful bind
 			}
 		case CommandSubmitSM:
-			s.handleSubmitSM(logCtx, ss, hdr, body)
+			s.handleSubmitSM(logCtx, ss, hdr, r)
 		case CommandUnbind:
 			s.handleUnbind(logCtx, ss, hdr)
 			return // Close connection after unbind response sent
@@ -377,7 +378,6 @@ func (s *Server) handleBind(ctx context.Context, ss *sessionState, hdr PDUHeader
 		s.writeErrorResponse(ss, hdr, StatusBindFailed)
 		return false
 	}
-
 	if cred.PasswordHash != nil && !auth.CheckPasswordHash(password, *cred.PasswordHash) {
 		slog.WarnContext(logCtx, "Bind failed: Invalid password")
 		s.writeErrorResponse(ss, hdr, StatusInvPasswd)
@@ -429,178 +429,125 @@ func (s *Server) handleUnbind(ctx context.Context, ss *sessionState, hdr PDUHead
 	}
 }
 
-// handleSubmitSM parses SubmitSM, calls handler, sends response.
-func (s *Server) handleSubmitSM(ctx context.Context, ss *sessionState, hdr PDUHeader, body []byte) {
+// handleSubmitSM parses SubmitSM using gosmpp PDUs, calls handler, and sends response.
+func (s *Server) handleSubmitSM(ctx context.Context, ss *sessionState, hdr PDUHeader, buf *bufio.Reader) {
 	slog.DebugContext(ctx, "Handling SubmitSM request")
 
-	// --- VERY SIMPLIFIED PARSING - NOT PRODUCTION READY ---
-	// Assumes fixed order and no optional parameters/TLVs.
-	// A real implementation needs a proper PDU parsing library or detailed spec handling.
-	var sourceAddr, destAddr, messageContent string
-	var registeredDelivery, smLength byte
-	var n int
-	var ok bool
-	offset := 0
-
-	// Helper to read required CString or fail
-	readReqCString := func(name string) (string, bool) {
-		val, read, ok := readCString(body[offset:])
-		if !ok {
-			slog.WarnContext(ctx, fmt.Sprintf("Failed to parse required CString field: %s", name))
-			s.writeErrorResponse(ss, hdr, StatusInvMsgLen) // Or more specific error?
-			return "", false
-		}
-		offset += read
-		return val, true
-	}
-	// Helper to read required byte or fail
-	readReqByte := func(name string) (byte, bool) {
-		if offset >= len(body) {
-			slog.WarnContext(ctx, fmt.Sprintf("PDU too short when reading byte field: %s", name))
-			s.writeErrorResponse(ss, hdr, StatusInvMsgLen)
-			return 0, false
-		}
-		val := body[offset]
-		offset++
-		return val, true
-	}
-
-	// if serviceType, ok = readReqCString("service_type"); !ok {
-	// 	return
-	// }
-	// if sourceTON, ok = readReqByte("source_addr_ton"); !ok {
-	// 	return
-	// }
-	// if sourceNPI, ok = readReqByte("source_addr_npi"); !ok {
-	// 	return
-	// }
-	if sourceAddr, ok = readReqCString("source_addr"); !ok {
-		return
-	}
-	// if destTON, ok = readReqByte("dest_addr_ton"); !ok {
-	// 	return
-	// }
-	// if destNPI, ok = readReqByte("dest_addr_npi"); !ok {
-	// 	return
-	// }
-	if destAddr, ok = readReqCString("destination_addr"); !ok {
-		return
-	}
-	// if esmClass, ok = readReqByte("esm_class"); !ok {
-	// 	return
-	// }
-	// if protocolID, ok = readReqByte("protocol_id"); !ok {
-	// 	return
-	// }
-	// if priorityFlag, ok = readReqByte("priority_flag"); !ok {
-	// 	return
-	// }
-	// Skip schedule_delivery_time CString (optional)
-	_, n, ok = readCString(body[offset:])
-	if !ok { /* Handle error */
-		return
-	}
-	offset += n
-	// Skip validity_period CString (optional)
-	_, n, ok = readCString(body[offset:])
-	if !ok { /* Handle error */
-		return
-	}
-	offset += n
-	if registeredDelivery, ok = readReqByte("registered_delivery"); !ok {
-		return
-	}
-	// if replaceIfPresentFlag, ok = readReqByte("replace_if_present_flag"); !ok {
-	// 	return
-	// }
-	// if dataCoding, ok = readReqByte("data_coding"); !ok {
-	// 	return
-	// }
-	// if smDefaultMsgID, ok = readReqByte("sm_default_msg_id"); !ok {
-	// 	return
-	// }
-	if smLength, ok = readReqByte("sm_length"); !ok {
-		return
-	}
-
-	// Read short_message based on smLength
-	if offset+int(smLength) > len(body) {
-		slog.WarnContext(ctx, "sm_length exceeds PDU body boundary")
+	// Parse the full PDU using gosmpp's parser
+	parsedPdu, err := pdu.Parse(buf)
+	if err != nil {
+		slog.ErrorContext(ctx, "Failed to parse SubmitSM PDU", slog.Any("error", err))
 		s.writeErrorResponse(ss, hdr, StatusInvMsgLen)
 		return
 	}
-	messageContent = string(body[offset : offset+int(smLength)])
-	offset += int(smLength)
 
-	// TODO: Parse optional TLVs from body[offset:] if needed
-
-	// --- End Simplified Parsing ---
-
-	// --- Call Core Handler ---
-	// Basic check for message content if length > 0
-	if smLength > 0 && messageContent == "" {
-		// This might happen if content has NUL bytes interpreted by string conversion
-		slog.WarnContext(ctx, "SubmitSM has non-zero sm_length but message content is empty string")
-		// Let handler decide if this is acceptable
+	submitSM, ok := parsedPdu.(*pdu.SubmitSM)
+	if !ok {
+		slog.WarnContext(ctx, "Received PDU is not a SubmitSM")
+		s.writeErrorResponse(ss, hdr, StatusInvCmdID)
+		return
 	}
 
-	// TODO: Detect UDH from esmClass or dataCoding if needed
-	totalSegments := int32(1)
-	segmentSeqn := int32(1)
-	concatRef := int32(0)
-	// if (esmClass & UDH_MASK) != 0 { detect/parse UDH... }
+	// Extract message details from parsed PDU
+	sourceAddr := submitSM.SourceAddr.Address()
+	destAddr := submitSM.DestAddr.Address()
+	messageContent, err := submitSM.Message.GetMessage()
+	if err != nil {
+		slog.ErrorContext(ctx, "Failed to Get Message", slog.Any("error", err))
+		s.writeErrorResponse(ss, hdr, StatusInvMsgLen)
+		return
+	}
+	registeredDelivery := submitSM.RegisteredDelivery
 
+	totalParts := 1
+	mref := 1
+
+	if submitSM.Message.UDH() != nil {
+		udh := submitSM.Message.UDH()
+		// Look for concatenation information in UDH
+		// Standard concatenation IE identifier is 0x00 (8-bit) or 0x08 (16-bit)
+		totalPartsByte, _, mrefByte, found := udh.GetConcatInfo()
+		if found {
+			totalParts = int(totalPartsByte)
+			mref = int(mrefByte)
+		}
+	}
+
+	// --- Call Core Handler ---
 	inMsg := sp.IncomingSPMessage{
 		ServiceProviderID: ss.serviceProviderID,
 		CredentialID:      ss.credentialID,
 		Protocol:          "smpp",
-		ClientMessageRef:  "", // Populate if available (e.g., from TLV)
+		ClientMessageRef:  "", // Populate from optional params if needed
 		SenderID:          sourceAddr,
 		DestinationMSISDN: destAddr,
 		MessageContent:    messageContent,
-		TotalSegments:     totalSegments,                    // Update if UDH detected
-		SegmentSeqn:       segmentSeqn,                      // Update if UDH detected
-		ConcatRef:         concatRef,                        // Update if UDH detected
-		IsFlash:           false,                            // TODO: Detect based on DataCoding?
-		RequestDLR:        (registeredDelivery & 0x01) != 0, // Check DLR request bit
+		TotalSegments:     int32(totalParts),
+		SegmentSeqn:       submitSM.GetSequenceNumber(),
+		ConcatRef:         int32(mref),
+		IsFlash:           isFlashMessage(submitSM.Message.Encoding().DataCoding()),
+		RequestDLR:        (registeredDelivery & 0x01) != 0,
 		ReceivedAt:        time.Now(),
-		// DataCoding:     dataCoding, // Pass if needed by handler
-		// ESMClass:       esmClass,   // Pass if needed by handler
+		// DataCoding:        submitSM.DataCoding,
+		// ESMClass:          submitSM.ESMClass,
 	}
 
 	ack, err := s.messageHandler.HandleIncomingMessage(ctx, inMsg)
 	if err != nil {
-		// Internal error in handler
 		slog.ErrorContext(ctx, "Incoming message handler failed", slog.Any("error", err))
 		s.writeErrorResponse(ss, hdr, StatusSystemError)
 		return
 	}
 
-	// --- Send Response ---
-	if ack.Status != "accepted" || ack.InternalMessageID > 0 {
-		// Message rejected by handler logic
+	// Handle message rejection
+	if ack.Status != "accepted" || ack.InternalMessageID <= 0 {
 		slog.WarnContext(ctx, "Message rejected by core handler", slog.String("reason", ack.Error))
-		// Map rejection reason to SMPP status code?
-		status := StatusThrottled // Default rejection
-		// ... map ack.Error to specific SMPP status codes ...
+		status := mapErrorToSMPPStatus(ack.Error)
 		s.writeErrorResponse(ss, hdr, status)
 		return
 	}
 
-	// Accepted - Send SubmitSMResp with message ID
-	respHdr := makeHeader(CommandSubmitSMResp, hdr.SequenceNumber, StatusOk)
-	// Body: message_id<NUL>
-	midStr := fmt.Sprintf("%d", ack.InternalMessageID) // Use our internal ID
-	respBody := append([]byte(midStr), 0x00)
-	respHdr.Length += uint32(len(respBody))
-	if err := s.writePDU(ss, respHdr, respBody); err != nil {
-		slog.ErrorContext(ctx, "Failed to write successful SubmitSMResp PDU", slog.Any("error", err))
-		// Connection likely broken, cleanup happens when handleSession exits.
-		return
-	}
-	slog.InfoContext(ctx, "SubmitSM processed successfully", slog.Int64("internal_msg_id", ack.InternalMessageID))
+	// Create and send SubmitSMResp
+	resp := submitSM.GetResponse().(*pdu.SubmitSMResp)
+	resp.MessageID = fmt.Sprintf("%d", ack.InternalMessageID)
+	// resp.SetStatus(data.ESME_ROK)
 
-	// DLR forwarding is handled by the DLR worker now, no simulation needed here.
+	// Marshal the response PDU
+	respBuf := pdu.NewBuffer(nil)
+	resp.Marshal(respBuf)
+	respBytes := respBuf.Bytes()
+
+	// Write response
+	respHdr := PDUHeader{
+		Length:         uint32(len(respBytes)),
+		CommandID:      SubmitSMResp,
+		CommandStatus:  uint32(resp.GetHeader().CommandStatus),
+		SequenceNumber: hdr.SequenceNumber,
+	}
+
+	if err := s.writePDU(ss, respHdr, respBytes[16:]); err != nil {
+		slog.ErrorContext(ctx, "Failed to write SubmitSMResp", slog.Any("error", err))
+	} else {
+		slog.InfoContext(ctx, "SubmitSM processed successfully",
+			slog.Int64("internal_msg_id", ack.InternalMessageID))
+	}
+}
+
+func isFlashMessage(dataCoding byte) bool {
+	return (dataCoding & 0xF0) == 0x10
+}
+
+func mapErrorToSMPPStatus(err string) uint32 {
+	switch err {
+	case "throttled":
+		return StatusThrottled
+	case "invalid sender":
+		return StatusInvSrcAddr
+	case "invalid receiver":
+		return StatusInvDstAddr
+	default:
+		return StatusSystemError
+	}
 }
 
 // ForwardRawPDU implements RawPDUForwarder interface for sending DLRs etc.

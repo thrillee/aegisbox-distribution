@@ -1,6 +1,8 @@
 package smppserver
 
-import "fmt"
+import (
+	"fmt"
+)
 
 // commandIDToString converts command ID to string for logging
 func commandIDToString(cmdID uint32) string {
