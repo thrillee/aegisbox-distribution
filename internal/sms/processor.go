@@ -683,8 +683,17 @@ func (p *Processor) generateAndEnqueueSuccessDLR(ctx context.Context, messageID 
 		ServiceProviderID: spMsgInfo.ServiceProviderID, // Need SP ID from query
 		Protocol:          spMsgInfo.Protocol,
 		SMPPSystemID:      *spMsgInfo.SystemID, // This is sql.NullString from DB
-		HTTPCallbackURL:   *sp.GetHttpCallBackURL(spMsgInfo.HttpConfig),
-		HTTPAuthConfig:    *sp.GetHttpCallBackKey(spMsgInfo.HttpConfig),
+	}
+
+	callbackUrl := sp.GetHttpCallBackURL(spMsgInfo.HttpConfig)
+	authConfig := sp.GetHttpCallBackKey(spMsgInfo.HttpConfig)
+
+	if callbackUrl != nil {
+		spDetails.HTTPCallbackURL = *callbackUrl
+	}
+
+	if authConfig != nil {
+		spDetails.HTTPAuthConfig = *authConfig
 	}
 
 	// 3. Construct Forwarded DLR Info
