@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/thrillee/aegisbox/internal/database"
 	"github.com/thrillee/aegisbox/internal/logging"
@@ -78,11 +79,12 @@ func (h *DefaultIncomingMessageHandler) HandleIncomingMessage(ctx context.Contex
 		msg.TotalSegments = 1
 	}
 
+	clientMessageId := uuid.New().String()
 	params := database.InsertMessageInParams{
 		ServiceProviderID:       msg.ServiceProviderID,
-		SpCredentialID:          msg.CredentialID,      // Use correct FK name from schema/sqlc
-		ClientMessageID:         &msg.ClientMessageRef, // Map ClientRef to client_message_id
-		ClientRef:               nil,                   // If UDH/concat ref is parsed, put it here
+		SpCredentialID:          msg.CredentialID, // Use correct FK name from schema/sqlc
+		ClientMessageID:         &clientMessageId, // Map ClientRef to client_message_id
+		ClientRef:               nil,              // If UDH/concat ref is parsed, put it here
 		OriginalSourceAddr:      msg.SenderID,
 		OriginalDestinationAddr: msg.DestinationMSISDN,
 		ShortMessage:            msg.MessageContent,
@@ -109,7 +111,7 @@ func (h *DefaultIncomingMessageHandler) HandleIncomingMessage(ctx context.Contex
 	// 5. Return Success Acknowledgement
 	slog.InfoContext(logCtx, "Incoming message accepted and stored", slog.Int64("internal_msg_id", insertedID))
 	return sp.Acknowledgement{
-		InternalMessageID: insertedID,
+		InternalMessageID: clientMessageId,
 		Status:            "accepted",
 	}, nil
 }

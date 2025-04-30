@@ -25,7 +25,7 @@ type IncomingSPMessage struct {
 
 // Acknowledgement is sent back to the SP after initial message acceptance.
 type Acknowledgement struct {
-	InternalMessageID int64  // Our messages.id (Null if initial acceptance failed)
+	InternalMessageID string // Our messages.id (Null if initial acceptance failed)
 	Status            string // e.g., "accepted", "rejected"
 	Error             string // Error description if rejected
 }

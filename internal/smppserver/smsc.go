@@ -500,7 +500,7 @@ func (s *Server) handleSubmitSM(ctx context.Context, ss *sessionState, hdr PDUHe
 	}
 
 	// Handle message rejection
-	if ack.Status != "accepted" || ack.InternalMessageID <= 0 {
+	if ack.Status != "accepted" || ack.InternalMessageID == "" {
 		slog.WarnContext(ctx, "Message rejected by core handler", slog.String("reason", ack.Error))
 		status := mapErrorToSMPPStatus(ack.Error)
 		s.writeErrorResponse(ss, hdr, status)
@@ -509,7 +509,7 @@ func (s *Server) handleSubmitSM(ctx context.Context, ss *sessionState, hdr PDUHe
 
 	// Create and send SubmitSMResp
 	resp := submitSM.GetResponse().(*pdu.SubmitSMResp)
-	resp.MessageID = fmt.Sprintf("%d", ack.InternalMessageID)
+	resp.MessageID = fmt.Sprintf("%s", ack.InternalMessageID)
 	// resp.SetStatus(data.ESME_ROK)
 
 	// Marshal the response PDU
@@ -529,7 +529,7 @@ func (s *Server) handleSubmitSM(ctx context.Context, ss *sessionState, hdr PDUHe
 		slog.ErrorContext(ctx, "Failed to write SubmitSMResp", slog.Any("error", err))
 	} else {
 		slog.InfoContext(ctx, "SubmitSM processed successfully",
-			slog.Int64("internal_msg_id", ack.InternalMessageID))
+			slog.String("internal_msg_id", ack.InternalMessageID))
 	}
 }
 

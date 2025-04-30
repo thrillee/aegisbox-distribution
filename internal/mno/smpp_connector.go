@@ -25,7 +25,9 @@ var _ Connector = (*SMPPMNOConnector)(nil)
 
 // Regular expression to parse simple Appendix B DLR format (adjust if needed)
 // Example: "id:12345 sub:001 dlvrd:001 submit date:2404251000 done date:2404251001 stat:DELIVRD err:000 text:Hello"
-var dlrRegex = regexp.MustCompile(`id:([\S]+)\s+sub:(\d{1,3})\s+dlvrd:(\d{1,3})\s+submit date:(\d{10,12})\s+done date:(\d{10,12})\s+stat:([A-Z]{5,7})\s+err:([\dA-Fa-f]{3})\s+text:(.*)`)
+var (
+	dlrRegex = regexp.MustCompile(`(?i)id:([\S]+)\s+sub:(\d{1,3})\s+dlvrd:(\d{1,3})\s+submit date:(\d{10,12})\s+done date:(\d{10,12})\s+stat:([A-Z]{5,7})\s+err:([\dA-Za-z]{3})(?:\s+text:(.*))?\s*$`)
+)
 
 // SMPPConnectorConfig holds specific configuration for an SMPP connection derived from mno_connections.
 type SMPPConnectorConfig struct {
@@ -819,43 +821,82 @@ type DLRParseResult struct {
 }
 
 // parseDLRContent attempts to parse the short message text based on Appendix B format.
-// Returns parsed info or error. A more robust implementation is needed for production.
-func parseDLRContent(text string) (DLRParseResult, error) {
-	match := dlrRegex.FindStringSubmatch(text)
+func parseDLRContent(dlrText string) (DLRParseResult, error) {
+	slog.Debug("Attempting to parse DLR content", slog.String("text", dlrText))
+	match := dlrRegex.FindStringSubmatch(dlrText)
+
+	// Expected number of elements in match:
+	// 1 (full match) + 7 mandatory groups + 1 optional group = 9
 	if len(match) != 9 {
-		return DLRParseResult{}, fmt.Errorf("failed to match standard DLR format (found %d parts)", len(match))
+		// Check for common variations or log the failure clearly
+		// Example: Sometimes 'submit date' or 'done date' might be missing or different format
+		slog.Warn("Failed to match standard DLR format", slog.String("text", dlrText), slog.Int("match_count", len(match)))
+		return DLRParseResult{}, fmt.Errorf("failed to match standard DLR format (found %d parts, expected 9)", len(match))
 	}
 
 	res := DLRParseResult{
-		ID:   match[1],
-		Stat: match[6],
-		Err:  match[7],
-		// Ignoring sub, dlvrd, text for now
+		ID:   strings.TrimSpace(match[1]),                  // MNO Message ID
+		Stat: strings.ToUpper(strings.TrimSpace(match[6])), // DLR Status (DELIVRD, UNDELIV etc)
+		Err:  strings.TrimSpace(match[7]),                  // MNO Error code
 	}
 
-	// Parse dates (YYMMDDhhmm or YYYYMMDDhhmm)
+	// --- Date Parsing ---
 	submitDateStr := match[4]
 	doneDateStr := match[5]
-	layout := "0601021504" // YYMMDDhhmm
-	if len(submitDateStr) == 12 {
-		layout = "200601021504" // YYYYMMDDhhmm - Assuming 4 digit year if 12 chars
-	}
 	var err error
-	res.SubmitDate, err = time.Parse(layout, submitDateStr[:len(layout)]) // Adjust length based on detected layout
-	if err != nil {
-		return res, fmt.Errorf("failed to parse submit date '%s': %w", submitDateStr, err)
-	}
-	// Use same layout logic for done date
-	if len(doneDateStr) == 12 {
-		layout = "200601021504"
-	} else {
-		layout = "0601021504"
-	}
-	res.DoneDate, err = time.Parse(layout, doneDateStr[:len(layout)])
-	if err != nil {
-		return res, fmt.Errorf("failed to parse done date '%s': %w", doneDateStr, err)
+
+	// Function to parse YYMMDDHHMM or YYYYMMDDHHMM format relative to current time
+	// Assumes YY < 70 maps to 20xx, YY >= 70 maps to 19xx (common interpretation)
+	parseSmppDate := func(dateStr string) (time.Time, error) {
+		var parsedTime time.Time
+		var parseErr error
+		layout := ""
+		// Determine layout based on length
+		switch len(dateStr) {
+		case 10: // YYMMDDHHMM
+			layout = "0601021504" // Go's reference layout for YYMMDDHHMM
+			// Handle year YY - assume current century or previous based on value
+			// Note: This is heuristic. MNO might provide timezone offsets or full year.
+			// It's safer if MNOs provide YYYY or timezone info.
+			// We'll parse directly, time.Parse handles 2-digit year based on context (usually current century)
+			parsedTime, parseErr = time.Parse(layout, dateStr)
+
+		case 12: // YYYYMMDDHHMM - Some SMSCs might use this
+			layout = "200601021504"
+			parsedTime, parseErr = time.Parse(layout, dateStr)
+
+		default:
+			parseErr = fmt.Errorf("unsupported date string length %d", len(dateStr))
+		}
+		if parseErr != nil {
+			return time.Time{}, parseErr
+		}
+		// TODO: Consider potential Timezone issues. SMPP dates usually relative to SMSC time.
+		// Assuming dates are close to 'now' and parsing into local/UTC is acceptable here.
+		return parsedTime, nil
 	}
 
+	res.SubmitDate, err = parseSmppDate(submitDateStr)
+	if err != nil {
+		slog.Warn("Failed to parse DLR submit date", slog.String("date_str", submitDateStr), slog.Any("error", err))
+		// Continue parsing other fields even if date fails? Maybe return partial result?
+		// Let's return error for now if dates are crucial.
+		return res, fmt.Errorf("failed to parse submit date '%s': %w", submitDateStr, err)
+	}
+
+	res.DoneDate, err = parseSmppDate(doneDateStr)
+	if err != nil {
+		slog.Warn("Failed to parse DLR done date", slog.String("date_str", doneDateStr), slog.Any("error", err))
+		return res, fmt.Errorf("failed to parse done date '%s': %w", doneDateStr, err)
+	}
+	// --- End Date Parsing ---
+
+	slog.Debug("Successfully parsed DLR content",
+		slog.String("mno_id", res.ID),
+		slog.String("status", res.Stat),
+		slog.String("error_code", res.Err),
+		slog.Time("done_date", res.DoneDate),
+	)
 	return res, nil
 }
 
@@ -885,7 +926,7 @@ func (c *SMPPMNOConnector) processIncomingDeliverSM(ctx context.Context, p *pdu.
 
 		receipt, err := parseDLRContent(messageText)
 		if err != nil {
-			slog.WarnContext(ctx, "Failed to parse standard DLR format from DeliverSM short_message", slog.Any("error", err))
+			slog.WarnContext(ctx, "Failed to parse standard DLR format from DeliverSM short_message", slog.Any("error", err), slog.String("messageText", messageText))
 			// TODO: Implement manual parsing for non-standard formats if needed
 			// Fallback: Try to extract MNO ID if possible even if format is bad?
 			// If cannot parse ID, cannot process DLR.

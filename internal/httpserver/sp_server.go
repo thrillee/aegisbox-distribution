@@ -248,16 +248,16 @@ func (s *Server) handleIncomingSMS(w http.ResponseWriter, r *http.Request) {
 
 	// 4. Send HTTP Response based on Acknowledgement
 	w.Header().Set("Content-Type", "application/json")
-	if ack.Status == "accepted" && ack.InternalMessageID > 0 {
+	if ack.Status == "accepted" && ack.InternalMessageID != "" {
 		w.WriteHeader(http.StatusAccepted) // 202 Accepted is suitable
 		respBody := map[string]interface{}{
 			"status":     "accepted",
-			"message_id": fmt.Sprintf("%d", ack.InternalMessageID), // Return our internal ID as string
+			"message_id": fmt.Sprintf("%s", ack.InternalMessageID), // Return our internal ID as string
 		}
 		if err := json.NewEncoder(w).Encode(respBody); err != nil {
 			slog.ErrorContext(logCtx, "Failed to encode HTTP success response", slog.Any("error", err))
 		}
-		slog.InfoContext(logCtx, "HTTP message accepted", slog.Int64("internal_msg_id", ack.InternalMessageID))
+		slog.InfoContext(logCtx, "HTTP message accepted", slog.String("internal_msg_id", ack.InternalMessageID))
 	} else {
 		// Determine appropriate HTTP status code for rejection
 		statusCode := http.StatusBadRequest // Default for rejection
