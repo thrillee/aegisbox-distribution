@@ -25,7 +25,7 @@ type Querier interface {
 	CountWalletsBySP(ctx context.Context, serviceProviderID int32) (int64, error)
 	CreateMNO(ctx context.Context, arg CreateMNOParams) (Mno, error)
 	CreateMNOConnection(ctx context.Context, arg CreateMNOConnectionParams) (MnoConnection, error)
-	// Creates initial segment record before sending attempt
+	// Inserts initial segment record OR returns existing ID if conflict occurs on (message_id, segment_seqn).
 	CreateMessageSegment(ctx context.Context, arg CreateMessageSegmentParams) (int64, error)
 	CreatePricingRule(ctx context.Context, arg CreatePricingRuleParams) (PricingRule, error)
 	CreateRoutingRule(ctx context.Context, arg CreateRoutingRuleParams) (RoutingRule, error)

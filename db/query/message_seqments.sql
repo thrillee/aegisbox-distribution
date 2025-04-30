@@ -6,9 +6,18 @@ WHERE mno_message_id = $1 -- Expects sql.NullString
 LIMIT 1;
 
 -- name: CreateMessageSegment :one
--- Creates initial segment record before sending attempt
-INSERT INTO message_segments (message_id, segment_seqn, created_at)
-VALUES ($1, $2, NOW())
+-- Inserts initial segment record OR returns existing ID if conflict occurs on (message_id, segment_seqn).
+INSERT INTO message_segments (
+    message_id,
+    segment_seqn,
+    created_at
+) VALUES (
+    $1, $2, NOW()
+)
+ON CONFLICT (message_id, segment_seqn) DO UPDATE SET
+    -- No-op update: Set a column to its existing value just to enable RETURNING
+    segment_seqn = EXCLUDED.segment_seqn
+    -- updated_at = NOW()
 RETURNING id;
 
 -- name: UpdateSegmentSent :exec

@@ -80,16 +80,17 @@ func (s *DefaultSender) Send(ctx context.Context, msg database.GetMessageDetails
 			MessageID:   msg.ID,
 			SegmentSeqn: int32(i + 1),
 		})
-		if dbErr != nil && !isUniqueViolationError(dbErr) {
+		if dbErr != nil {
 			err = fmt.Errorf("failed to create DB record for segment %d/%d: %w", i+1, msg.TotalSegments, dbErr)
 			slog.ErrorContext(logCtx, err.Error())
 			// This is critical, fail the whole submission
 			return &mno.SubmitResult{WasSubmitted: false, Error: err}, err // Return internal error
 		}
 		segmentIDs[i] = segID
+		slog.InfoContext(logCtx, "Arranging Segmets", slog.Any("segID", segID))
 	}
 	preparedMsg.DBSeqs = segmentIDs
-	slog.DebugContext(logCtx, "Created initial segment records in DB", slog.Int("count", len(segmentIDs)))
+	slog.InfoContext(logCtx, "Created initial segment records in DB", slog.Int("count", len(segmentIDs)), slog.Any("DB Segements ID", segmentIDs))
 
 	// 4. Submit Message via Connector
 	submitResult, submitErr := connector.SubmitMessage(logCtx, preparedMsg)

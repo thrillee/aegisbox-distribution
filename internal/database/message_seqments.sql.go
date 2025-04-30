@@ -10,8 +10,17 @@ import (
 )
 
 const createMessageSegment = `-- name: CreateMessageSegment :one
-INSERT INTO message_segments (message_id, segment_seqn, created_at)
-VALUES ($1, $2, NOW())
+INSERT INTO message_segments (
+    message_id,
+    segment_seqn,
+    created_at
+) VALUES (
+    $1, $2, NOW()
+)
+ON CONFLICT (message_id, segment_seqn) DO UPDATE SET
+    -- No-op update: Set a column to its existing value just to enable RETURNING
+    segment_seqn = EXCLUDED.segment_seqn
+    -- updated_at = NOW()
 RETURNING id
 `
 
@@ -20,7 +29,7 @@ type CreateMessageSegmentParams struct {
 	SegmentSeqn int32 `json:"segmentSeqn"`
 }
 
-// Creates initial segment record before sending attempt
+// Inserts initial segment record OR returns existing ID if conflict occurs on (message_id, segment_seqn).
 func (q *Queries) CreateMessageSegment(ctx context.Context, arg CreateMessageSegmentParams) (int64, error) {
 	row := q.db.QueryRow(ctx, createMessageSegment, arg.MessageID, arg.SegmentSeqn)
 	var id int64

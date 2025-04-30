@@ -440,11 +440,11 @@ func (c *SMPPMNOConnector) SubmitMessage(ctx context.Context, msg PreparedMessag
 		}
 		// Use sequence number from PDU as key
 		seq := p.GetSequenceNumber()
-		slog.InfoContext(segLogCtx, "Segment Content", slog.Any("store_seqment_key", seq), slog.Any("Original Segment", segmentSeqn))
+		slog.InfoContext(segLogCtx, "Segment Content",
+			slog.Any("store_seqment_key", seq),
+			slog.Any("DB Segment DB", dbSegmentID),
+			slog.Any("Original Segment", segmentSeqn))
 		c.pendingSubmits.Store(seq, job)
-		val, _ := c.pendingSubmits.Load(seq)
-		fmt.Println("Instant GettingSyncMap: ", val)
-
 		// Submit asynchronously
 		err = c.session.Transceiver().Submit(p) // Use Transceiver for TRX bind type
 
@@ -474,7 +474,6 @@ func (c *SMPPMNOConnector) SubmitMessage(ctx context.Context, msg PreparedMessag
 
 			// Continue to next segment even if one fails? Yes.
 		} else {
-			// Submit call succeeded, response will come via callback
 			slog.DebugContext(segLogCtx, "Segment PDU submitted, awaiting response", slog.Uint64("pdu_seq", uint64(seq)))
 			result.Segments[i] = SegmentSubmitInfo{Seqn: segmentSeqn, IsSuccess: true} // Mark as submitted, success determined by response
 			result.WasSubmitted = true                                                 // Mark that at least one segment submit call succeeded
@@ -740,8 +739,7 @@ func (c *SMPPMNOConnector) handleOnClosePduRequest() func(pdu.PDU) {
 // processSubmitSMResp handles the asynchronous response to a SubmitSM request.
 func (c *SMPPMNOConnector) processSubmitSMResp(ctx context.Context, sequence uint32, resp *pdu.SubmitSMResp) {
 	// Retrieve the job details associated with this sequence number
-	val, loaded := c.pendingSubmits.LoadAndDelete(sequence)
-	fmt.Println("SyncMap: ", val)
+	val, loaded := c.pendingSubmits.LoadAndDelete(int32(sequence))
 	if !loaded {
 		slog.WarnContext(ctx, "Received SubmitSMResp for unknown or already processed sequence number",
 			slog.String("command_status", resp.CommandStatus.String()), slog.Int("seq_num", int(sequence)), slog.String("message_id", resp.MessageID))
@@ -754,7 +752,7 @@ func (c *SMPPMNOConnector) processSubmitSMResp(ctx context.Context, sequence uin
 
 	if status == data.ESME_ROK {
 		mnoMsgID := resp.MessageID
-		slog.InfoContext(logCtx, "SubmitSM successful according to Resp", slog.String("mno_msg_id", mnoMsgID))
+		slog.InfoContext(logCtx, "SubmitSM successful according to Resp", slog.String("mno_msg_id", mnoMsgID), slog.Int64("db_seg_id", job.dbSegmentID))
 		// Update segment as successfully submitted (MNO accepted)
 		connID := c.ConnectionID()
 		err := c.dbQueries.UpdateSegmentSent(logCtx, database.UpdateSegmentSentParams{
