@@ -284,7 +284,7 @@ func (p *Processor) validateAndRouteMessage(ctx context.Context, msg database.Ge
 		ProcessingStatus: finalStatus,
 		RoutedMnoID:      &routingRes.MNOID,
 		ApprovedSenderID: &validationRes.ApprovedSenderID,
-		// TemplateID:       &validationRes.TemplateID,
+		TemplateID:       nil,
 		ErrorDescription: &dbErrMsg,
 		ErrorCode:        &errorCode,
 		ID:               msg.ID,
@@ -422,6 +422,8 @@ func (p *Processor) ProcessSendingStep(ctx context.Context, batchSize int) (proc
 		// sendErr here represents errors *within* the Send logic (e.g., getting MNO client, segmentation issues)
 		// submitResult contains outcome per segment and overall MNO submission errors/success.
 
+		slog.InfoContext(logCtx, "Submit Result", slog.Any("WasSubmitted", submitResult.WasSubmitted))
+
 		// 4. Process Result / Handle Errors
 		if sendErr != nil {
 			// Internal error within the Sender itself before/during submission attempts
@@ -525,6 +527,8 @@ func (p *Processor) UpdateSegmentDLRStatus(ctx context.Context, connectorID int3
 	logCtx = logging.ContextWithMNOMsgID(logCtx, dlrInfo.MnoMessageID) // Add MNO Msg ID
 
 	slog.InfoContext(logCtx, "Processing received DLR",
+		slog.String("mno_msg_id", dlrInfo.MnoMessageID),
+		slog.Int64("og_msg_id", dlrInfo.OriginalMsgID),
 		slog.String("dlr_status", dlrInfo.Status),
 		slog.Any("dlr_error_code", dlrInfo.ErrorCode),
 		slog.Time("dlr_timestamp", dlrInfo.Timestamp),

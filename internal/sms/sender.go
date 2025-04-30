@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/thrillee/aegisbox/internal/database"
 	"github.com/thrillee/aegisbox/internal/logging"
 	"github.com/thrillee/aegisbox/internal/mno"
@@ -79,7 +80,7 @@ func (s *DefaultSender) Send(ctx context.Context, msg database.GetMessageDetails
 			MessageID:   msg.ID,
 			SegmentSeqn: int32(i + 1),
 		})
-		if dbErr != nil {
+		if dbErr != nil && !isUniqueViolationError(dbErr) {
 			err = fmt.Errorf("failed to create DB record for segment %d/%d: %w", i+1, msg.TotalSegments, dbErr)
 			slog.ErrorContext(logCtx, err.Error())
 			// This is critical, fail the whole submission
@@ -116,7 +117,10 @@ func (s *DefaultSender) Send(ctx context.Context, msg database.GetMessageDetails
 	}
 
 	// 5. Record Segment-Specific Results in DB
-	slog.DebugContext(logCtx, "Processing MNO submission results for segments", slog.Int("segment_results_count", len(submitResult.Segments)))
+	slog.InfoContext(logCtx,
+		"Processing MNO submission results for segments",
+		slog.Any("segements", submitResult.Segments),
+		slog.Int("segment_results_count", len(submitResult.Segments)))
 	updateErrors := false
 	for _, segResult := range submitResult.Segments {
 		// Find the corresponding DB segment ID (using Seqn assumes order is preserved)
@@ -126,11 +130,16 @@ func (s *DefaultSender) Send(ctx context.Context, msg database.GetMessageDetails
 			updateErrors = true
 			continue
 		}
+
 		dbSegmentID := submitResult.Segments[segResult.Seqn-1].Seqn
 		segLogCtx := logging.ContextWithSegmentID(logCtx, int64(dbSegmentID)) // Add Segment ID
 
 		mnoConnID := connector.ConnectionID()
 
+		slog.InfoContext(segLogCtx, "Processing Segment",
+			slog.Any("IsSuccess", segResult.IsSuccess),
+			slog.Any("dbSegmentId", dbSegmentID),
+			slog.Any("mnoConnID", mnoConnID))
 		if segResult.IsSuccess {
 			// Update segment as sent successfully
 			err = s.dbQueries.UpdateSegmentSent(segLogCtx, database.UpdateSegmentSentParams{
@@ -142,7 +151,7 @@ func (s *DefaultSender) Send(ctx context.Context, msg database.GetMessageDetails
 				slog.ErrorContext(segLogCtx, "Failed to update DB for successfully sent segment", slog.Any("error", err))
 				updateErrors = true // Log DB error but continue processing results
 			} else {
-				slog.InfoContext(segLogCtx, "Segment sent successfully to MNO", slog.String("mno_msg_id", *segResult.MnoMessageID))
+				slog.InfoContext(segLogCtx, "Segment sent successfully to MNO", slog.Any("dbSegmentID", dbSegmentID), slog.Any("mno_msg_id", segResult.MnoMessageID))
 			}
 		} else {
 			// Update segment as failed
@@ -159,7 +168,7 @@ func (s *DefaultSender) Send(ctx context.Context, msg database.GetMessageDetails
 				slog.ErrorContext(segLogCtx, "Failed to update DB for failed segment submission", slog.Any("error", err))
 				updateErrors = true
 			} else {
-				slog.WarnContext(segLogCtx, "Segment submission failed at MNO", slog.String("reason", errMsg), slog.String("mno_err_code", *segResult.ErrorCode))
+				slog.WarnContext(segLogCtx, "Segment submission failed at MNO", slog.String("reason", errMsg), slog.Any("mno_err_code", segResult.ErrorCode))
 			}
 		}
 	}
@@ -172,4 +181,10 @@ func (s *DefaultSender) Send(ctx context.Context, msg database.GetMessageDetails
 
 	// Return the result received from the connector (potentially modified if DB updates failed critically)
 	return &submitResult, nil // Return logical outcome
+}
+
+// Helper to check for unique violation errors (adapt based on actual pgx error type)
+func isUniqueViolationError(err error) bool {
+	var pgErr *pgconn.PgError // Use correct type from pgx driver
+	return errors.As(err, &pgErr) && pgErr.Code == "23505"
 }
