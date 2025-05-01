@@ -1,0 +1,44 @@
+version: '3.8'
+
+services:
+  # Service definition for the Manager API
+  manager-api:
+    build:
+      context: .
+      dockerfile: manager-api/Dockerfile # Make sure this filename matches yours
+    image: manager-api:latest
+    restart: unless-stopped
+    env_file:
+      - .env
+    ports:
+      - "8001:8001"
+
+  # Service definition for the SMPP Gateway
+  smpp-gateway:
+    build:
+      context: .
+      dockerfile: smpp-gateway/Dockerfile
+    # Name the resulting image
+    image: my-smpp-gateway:latest
+    # Restart policy
+    restart: unless-stopped
+    env_file:
+      - .env
+    ports:
+      - "2775:2775"
+
+  # Migration definition
+  migration:
+    build:
+      context: .
+      dockerfile: migration/Dockerfile
+    # Name the resulting image
+    image: migration:latest
+    env_file:
+      - .env
+
+# Define networks (optional)
+# networks:
+#   app-network:
+#     driver: bridge
+

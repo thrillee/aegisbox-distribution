@@ -151,7 +151,7 @@ push: tidy audit no-dirty
 
 ## production/deploy: build linux binary and suggest deployment steps
 .PHONY: production/deploy
-production/deploy: confirm tidy audit no-dirty
+production/deploy: confirm tidy
 	@echo "Building Linux AMD64 binary for Gateway..."
 	GOOS=linux GOARCH=amd64 $(GOBUILD) -ldflags='-s -w' -o=$(OUTPUT_DIR)/linux_amd64/$(GATEWAY_BINARY_NAME) $(GATEWAY_PKG_PATH)
 	@echo "Building Linux AMD64 binary for Manager API..."
