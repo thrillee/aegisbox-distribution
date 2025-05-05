@@ -224,6 +224,7 @@ func (m *Manager) loadAndSyncConnectors(ctx context.Context) error {
 	// Update the mnoConnectors map (atomically if Go maps supported it, otherwise simple replace under lock)
 	m.mnoConnectors = sync.Map{} // Clear and rebuild (or use newMnoMap directly if locking allows)
 	for mnoID, connIDs := range newMnoMap {
+		// slog.InfoContext(ctx, "Register Connection", slog.Any("conn_ids", connIDs), slog.Any("mno_id", mnoID))
 		m.mnoConnectors.Store(mnoID, connIDs)
 	}
 	slog.DebugContext(ctx, "Finished MNO connector sync")

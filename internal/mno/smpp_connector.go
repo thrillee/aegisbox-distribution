@@ -914,14 +914,25 @@ func (c *SMPPMNOConnector) processIncomingDeliverSM(ctx context.Context, p *pdu.
 	// Common values are 0x04 or checking specific bits. Let's assume it's a defined constant.
 	isReceipt := (p.EsmClass) != 0 //(p.EsmClass & pdu.MSG_TYPE_DEL_RCPT) != 0
 	if isReceipt {                 // Check ESM class bit for DLR
-		slog.InfoContext(ctx, "DeliverSM is a Delivery Receipt")
+		slog.InfoContext(ctx, "DeliverSM is a Delivery Receipt", slog.Any("encoding", p.Message.Encoding()))
 		// Attempt to parse standard receipt format
 
 		// Get short message content
 		messageText, err := p.Message.GetMessage()
 		if err != nil {
-			slog.ErrorContext(ctx, "Failed to get short message content from DLR", slog.Any("error", err))
-			return // Cannot process without content
+			msgBytes, err := p.Message.GetMessageData()
+			messageText = string(msgBytes)
+			slog.ErrorContext(ctx, "Raw Data",
+				slog.Any("err", err),
+				slog.Any("Message Bytes", msgBytes),
+				slog.Any("Message Bytes Length", len(msgBytes)),
+				slog.Any("Message Bytes String", messageText),
+			)
+
+			if err != nil {
+				slog.ErrorContext(ctx, "Failed to get short message content from DLR", slog.Any("error", err))
+				return // Cannot process without content
+			}
 		}
 
 		receipt, err := parseDLRContent(messageText)
