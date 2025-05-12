@@ -2,19 +2,21 @@ package smppserver
 
 // SMPP Command IDs (subset needed)
 const (
-	CommandBindTransceiver uint32 = 0x00000009
-	CommandBindReceiver    uint32 = 0x00000001
-	CommandBindTransmitter uint32 = 0x00000002
-	CommandSubmitSM        uint32 = 0x00000004
-	CommandDeliverSM       uint32 = 0x00000005
-	CommandUnbind          uint32 = 0x00000006
-	CommandEnquireLink     uint32 = 0x00000015
-	CommandGenericNack     uint32 = 0x80000000
-	CommandBindResp        uint32 = 0x80000009 // Generic response for all bind types
-	CommandSubmitSMResp    uint32 = 0x80000004
-	CommandDeliverSMResp   uint32 = 0x80000005
-	CommandUnbindResp      uint32 = 0x80000006
-	CommandEnquireLinkResp uint32 = 0x80000015
+	CommandBindTransceiver   uint32 = 0x00000009
+	CommandBindReceiver      uint32 = 0x00000001
+	CommandBindTransmitter   uint32 = 0x00000002
+	CommandSubmitSM          uint32 = 0x00000004
+	CommandSubmitMultiSM     uint32 = 0x00000021
+	CommandDeliverSM         uint32 = 0x00000005
+	CommandUnbind            uint32 = 0x00000006
+	CommandEnquireLink       uint32 = 0x00000015
+	CommandGenericNack       uint32 = 0x80000000
+	CommandBindResp          uint32 = 0x80000009 // Generic response for all bind types
+	CommandSubmitSMResp      uint32 = 0x80000004
+	CommandSubmitMultiSMResp uint32 = 0x80000021
+	CommandDeliverSMResp     uint32 = 0x80000005
+	CommandUnbindResp        uint32 = 0x80000006
+	CommandEnquireLinkResp   uint32 = 0x80000015
 )
 
 // SMPP Command Status Codes (subset needed)

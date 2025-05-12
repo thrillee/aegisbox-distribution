@@ -288,6 +288,7 @@ SELECT
     m.id,
     m.service_provider_id,
     m.client_ref,
+    m.client_message_id,
     m.original_source_addr,
     m.original_destination_addr,
     m.submitted_at,
@@ -306,6 +307,7 @@ type GetSPMessageInfoForDLRRow struct {
 	ID                      int64              `json:"id"`
 	ServiceProviderID       int32              `json:"serviceProviderId"`
 	ClientRef               *string            `json:"clientRef"`
+	ClientMessageID         *string            `json:"clientMessageId"`
 	OriginalSourceAddr      string             `json:"originalSourceAddr"`
 	OriginalDestinationAddr string             `json:"originalDestinationAddr"`
 	SubmittedAt             pgtype.Timestamptz `json:"submittedAt"`
@@ -325,6 +327,7 @@ func (q *Queries) GetSPMessageInfoForDLR(ctx context.Context, id int64) (GetSPMe
 		&i.ID,
 		&i.ServiceProviderID,
 		&i.ClientRef,
+		&i.ClientMessageID,
 		&i.OriginalSourceAddr,
 		&i.OriginalDestinationAddr,
 		&i.SubmittedAt,

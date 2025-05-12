@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/linxGnu/gosmpp/data"
 	"github.com/linxGnu/gosmpp/pdu"
 	"github.com/thrillee/aegisbox/internal/auth"
 	"github.com/thrillee/aegisbox/internal/config"
@@ -193,8 +194,9 @@ func (s *Server) handleSession(ctx context.Context, ss *sessionState) {
 			} else {
 				isBound = s.handleBind(logCtx, ss, hdr, body) // handleBind returns true on successful bind
 			}
-		case CommandSubmitSM:
-			s.handleSubmitSM(logCtx, ss, hdr, r)
+		// Unified entry point for SubmitSM and SubmitMultiSM based on initial header
+		case CommandSubmitSM, CommandSubmitMultiSM:
+			s.handleGenericSubmit(logCtx, ss, hdr, body)
 		case CommandUnbind:
 			s.handleUnbind(logCtx, ss, hdr)
 			return // Close connection after unbind response sent
@@ -204,7 +206,7 @@ func (s *Server) handleSession(ctx context.Context, ss *sessionState) {
 			respHdr := makeHeader(CommandEnquireLinkResp, hdr.SequenceNumber, StatusOk)
 			s.writePDU(ss, respHdr, nil) // Response has no body
 		default:
-			slog.WarnContext(logCtx, "Received unknown/unhandled Command ID")
+			slog.WarnContext(logCtx, "Received unknown/unhandled Command ID", slog.Any("COMMAND ID", hdr.CommandID), slog.Any("COMMAND STATUS", hdr.CommandStatus))
 			// Unknown => Generic Nack with Invalid Command ID status
 			s.writeErrorResponse(ss, hdr, StatusInvCmdID)
 		}
@@ -429,47 +431,109 @@ func (s *Server) handleUnbind(ctx context.Context, ss *sessionState, hdr PDUHead
 	}
 }
 
-// handleSubmitSM parses SubmitSM using gosmpp PDUs, calls handler, and sends response.
-func (s *Server) handleSubmitSM(ctx context.Context, ss *sessionState, hdr PDUHeader, buf *bufio.Reader) {
-	slog.DebugContext(ctx, "Handling SubmitSM request")
+// handleGenericSubmit parses SubmitSM or SubmitMulti PDU, routes to appropriate handler logic,
+// calls the core message handler, and sends the corresponding response.
+// It uses the parsed PDU's CommandID for routing.
+func (s *Server) handleGenericSubmit(ctx context.Context, ss *sessionState, originalHdr PDUHeader, bodyBytes []byte) {
+	slog.InfoContext(ctx, "Handling generic submit request",
+		slog.String("original_header_command_id_str", commandIDToString(originalHdr.CommandID)),
+		slog.Uint64("original_header_command_id_val", uint64(originalHdr.CommandID)),
+		slog.Uint64("original_sequence_number", uint64(originalHdr.SequenceNumber)))
 
-	// Parse the full PDU using gosmpp's parser
-	parsedPdu, err := pdu.Parse(buf)
+	// Reconstruct the full PDU bytes as received for gosmpp parsing
+	// The bodyBytes already excludes the 16-byte header, originalHdr contains that header.
+	fullPduBytesForParsing := make([]byte, 16+len(bodyBytes))
+	binary.BigEndian.PutUint32(fullPduBytesForParsing[0:4], originalHdr.Length)
+	binary.BigEndian.PutUint32(fullPduBytesForParsing[4:8], originalHdr.CommandID)
+	binary.BigEndian.PutUint32(fullPduBytesForParsing[8:12], originalHdr.CommandStatus)
+	binary.BigEndian.PutUint32(fullPduBytesForParsing[12:16], originalHdr.SequenceNumber)
+	copy(fullPduBytesForParsing[16:], bodyBytes)
+
+	// Create a gosmpp buffer
+	smppBuf := pdu.NewBuffer(fullPduBytesForParsing)
+
+	// Parse the PDU using gosmpp
+	parsedPdu, err := pdu.Parse(smppBuf)
 	if err != nil {
-		slog.ErrorContext(ctx, "Failed to parse SubmitSM PDU", slog.Any("error", err))
-		s.writeErrorResponse(ss, hdr, StatusInvMsgLen)
+		slog.ErrorContext(ctx, "Failed to parse PDU in handleGenericSubmit",
+			slog.Any("error", err),
+			slog.String("original_header_command_id", commandIDToString(originalHdr.CommandID)))
+		s.writeErrorResponse(ss, originalHdr, StatusInvMsgLen) // Invalid Message Length or other suitable error
 		return
 	}
 
-	submitSM, ok := parsedPdu.(*pdu.SubmitSM)
-	if !ok {
-		slog.WarnContext(ctx, "Received PDU is not a SubmitSM")
-		s.writeErrorResponse(ss, hdr, StatusInvCmdID)
-		return
+	parsedCommandID := uint32(parsedPdu.GetHeader().CommandID)
+	slog.InfoContext(ctx, "PDU parsed in handleGenericSubmit",
+		slog.String("original_header_command_id", commandIDToString(originalHdr.CommandID)),
+		slog.String("parsed_pdu_command_id", commandIDToString(parsedCommandID)))
+
+	// Explicitly log if there's a mismatch, as this is key to the problem described
+	if originalHdr.CommandID != parsedCommandID {
+		slog.WarnContext(ctx, "MISMATCH between received header CommandID and parsed PDU CommandID",
+			slog.String("received_command", commandIDToString(originalHdr.CommandID)),
+			slog.String("parsed_command", commandIDToString(parsedCommandID)))
+		// We will proceed based on the parsedCommandID as it reflects the PDU body's content.
 	}
 
+	// Switch on the PARSED PDU's command ID
+	switch parsedCommandID {
+	case CommandSubmitSM: // Corresponds to CommandSubmitSM (0x00000004)
+		submitSM, ok := parsedPdu.(*pdu.SubmitSM)
+		if !ok {
+			slog.WarnContext(ctx, "Parsed PDU as SubmitSMID, but type assertion to *pdu.SubmitSM failed",
+				slog.String("pdu_type", fmt.Sprintf("%T", parsedPdu)),
+				slog.String("original_header_command_id", commandIDToString(originalHdr.CommandID)))
+			s.writeErrorResponse(ss, originalHdr, StatusInvCmdID) // Use originalHdr for seq num
+			return
+		}
+		slog.InfoContext(ctx, "Processing as SubmitSM based on parsed PDU body")
+		s.processSubmitSM(ctx, ss, originalHdr, submitSM)
+
+	case CommandSubmitMultiSM: // Corresponds to CommandSubmitMultiSM (0x00000021)
+		submitMulti, ok := parsedPdu.(*pdu.SubmitMulti)
+		if !ok {
+			slog.WarnContext(ctx, "Parsed PDU as SubmitMultiID, but type assertion to *pdu.SubmitMulti failed",
+				slog.String("pdu_type", fmt.Sprintf("%T", parsedPdu)),
+				slog.String("original_header_command_id", commandIDToString(originalHdr.CommandID)))
+			s.writeErrorResponse(ss, originalHdr, StatusInvCmdID) // Use originalHdr for seq num
+			return
+		}
+		slog.InfoContext(ctx, "Processing as SubmitMulti based on parsed PDU body")
+		s.processSubmitMulti(ctx, ss, originalHdr, submitMulti)
+
+	default:
+		slog.WarnContext(ctx, "Received PDU with unhandled parsed Command ID in handleGenericSubmit",
+			slog.String("parsed_command_id_str", commandIDToString(parsedCommandID)),
+			slog.Uint64("parsed_command_id_val", uint64(parsedCommandID)),
+			slog.String("original_header_command_id", commandIDToString(originalHdr.CommandID)))
+		s.writeErrorResponse(ss, originalHdr, StatusInvCmdID) // Invalid Command ID
+	}
+}
+
+// processSubmitSM handles the logic for a parsed SubmitSM PDU.
+func (s *Server) processSubmitSM(ctx context.Context, ss *sessionState, originalHdr PDUHeader, submitSM *pdu.SubmitSM) {
 	// Extract message details from parsed PDU
 	sourceAddr := submitSM.SourceAddr.Address()
 	destAddr := submitSM.DestAddr.Address()
 	messageContent, err := submitSM.Message.GetMessage()
 	if err != nil {
-		slog.ErrorContext(ctx, "Failed to Get Message", slog.Any("error", err))
-		s.writeErrorResponse(ss, hdr, StatusInvMsgLen)
+		slog.ErrorContext(ctx, "Failed to Get Message from SubmitSM", slog.Any("error", err))
+		s.writeErrorResponse(ss, originalHdr, StatusInvMsgLen)
 		return
 	}
 	registeredDelivery := submitSM.RegisteredDelivery
 
 	totalParts := 1
-	mref := 1
+	mref := 0 // Changed from 1 to 0 for non-concatenated default, check SMPP spec or gosmpp UDH behavior
+	currentPartNum := 1
 
-	if submitSM.Message.UDH() != nil {
-		udh := submitSM.Message.UDH()
-		// Look for concatenation information in UDH
-		// Standard concatenation IE identifier is 0x00 (8-bit) or 0x08 (16-bit)
-		totalPartsByte, _, mrefByte, found := udh.GetConcatInfo()
+	if udhBytes := submitSM.Message.UDH(); len(udhBytes) > 0 {
+		udh := pdu.UDH(udhBytes)
+		tpByte, cpByte, mrByte, found := udh.GetConcatInfo() // GetConcatInfo often returns 8-bit ref
 		if found {
-			totalParts = int(totalPartsByte)
-			mref = int(mrefByte)
+			totalParts = int(tpByte)
+			currentPartNum = int(cpByte) // Make sure to get current part number
+			mref = int(mrByte)
 		}
 	}
 
@@ -483,53 +547,191 @@ func (s *Server) handleSubmitSM(ctx context.Context, ss *sessionState, hdr PDUHe
 		DestinationMSISDN: destAddr,
 		MessageContent:    messageContent,
 		TotalSegments:     int32(totalParts),
-		SegmentSeqn:       submitSM.GetSequenceNumber(),
+		SegmentSeqn:       int32(currentPartNum), // Use current part number from UDH
 		ConcatRef:         int32(mref),
-		IsFlash:           isFlashMessage(submitSM.Message.Encoding().DataCoding()),
+		IsFlash:           isFlashMessage(submitSM.Message.Encoding().DataCoding()), // Ensure isFlashMessage exists
 		RequestDLR:        (registeredDelivery & 0x01) != 0,
-		ReceivedAt:        time.Now(),
-		// DataCoding:        submitSM.DataCoding,
-		// ESMClass:          submitSM.ESMClass,
+		ReceivedAt:        time.Now().UTC(),
 	}
 
-	ack, err := s.messageHandler.HandleIncomingMessage(ctx, inMsg)
-	if err != nil {
-		slog.ErrorContext(ctx, "Incoming message handler failed", slog.Any("error", err))
-		s.writeErrorResponse(ss, hdr, StatusSystemError)
+	ack, coreErr := s.messageHandler.HandleIncomingMessage(ctx, inMsg)
+	if coreErr != nil {
+		slog.ErrorContext(ctx, "Incoming message handler failed for SubmitSM", slog.Any("error", coreErr))
+		s.writeErrorResponse(ss, originalHdr, StatusSystemError)
 		return
 	}
 
-	// Handle message rejection
 	if ack.Status != "accepted" || ack.InternalMessageID == "" {
-		slog.WarnContext(ctx, "Message rejected by core handler", slog.String("reason", ack.Error))
-		status := mapErrorToSMPPStatus(ack.Error)
-		s.writeErrorResponse(ss, hdr, status)
+		slog.WarnContext(ctx, "Message rejected by core handler for SubmitSM", slog.String("reason", ack.Error))
+		status := mapErrorToSMPPStatus(ack.Error) // Ensure mapErrorToSMPPStatus exists
+		s.writeErrorResponse(ss, originalHdr, status)
 		return
 	}
 
 	// Create and send SubmitSMResp
 	resp := submitSM.GetResponse().(*pdu.SubmitSMResp)
-	resp.MessageID = fmt.Sprintf("%s", ack.InternalMessageID)
-	// resp.SetStatus(data.ESME_ROK)
+	resp.MessageID = ack.InternalMessageID
+	// Note: resp.Status() is already ESME_ROK by default from GetResponse()
 
-	// Marshal the response PDU
+	// Marshal the gosmpp response PDU to get its bytes
 	respBuf := pdu.NewBuffer(nil)
 	resp.Marshal(respBuf)
-	respBytes := respBuf.Bytes()
+	marshaledRespPduBytes := respBuf.Bytes() // Full PDU bytes (header + body)
+
+	if len(marshaledRespPduBytes) < 16 {
+		slog.ErrorContext(ctx, "Marshaled SubmitSMResp is too short", slog.Int("length", len(marshaledRespPduBytes)))
+		return
+	}
 
 	// Write response
 	respHdr := PDUHeader{
-		Length:         uint32(len(respBytes)),
+		Length:         uint32(len(marshaledRespPduBytes)),
 		CommandID:      SubmitSMResp,
 		CommandStatus:  uint32(resp.GetHeader().CommandStatus),
-		SequenceNumber: hdr.SequenceNumber,
+		SequenceNumber: originalHdr.SequenceNumber,
 	}
 
-	if err := s.writePDU(ss, respHdr, respBytes[16:]); err != nil {
+	if err := s.writePDU(ss, respHdr, marshaledRespPduBytes[16:]); err != nil {
 		slog.ErrorContext(ctx, "Failed to write SubmitSMResp", slog.Any("error", err))
 	} else {
 		slog.InfoContext(ctx, "SubmitSM processed successfully",
 			slog.String("internal_msg_id", ack.InternalMessageID))
+	}
+}
+
+// processSubmitMulti handles the logic for a parsed SubmitMulti PDU.
+func (s *Server) processSubmitMulti(ctx context.Context, ss *sessionState, originalHdr PDUHeader, submitMulti *pdu.SubmitMulti) {
+	sourceAddr := submitMulti.SourceAddr.Address()
+	messageContentBytes, err := submitMulti.Message.GetMessage() // This is []byte
+	if err != nil {
+		slog.ErrorContext(ctx, "Failed to Get Message from SubmitMulti", slog.Any("error", err))
+		s.writeErrorResponse(ss, originalHdr, StatusInvMsgLen)
+		return
+	}
+	messageContentStr := string(messageContentBytes) // Convert to string for IncomingSPMessage
+	registeredDelivery := submitMulti.RegisteredDelivery
+
+	totalParts := 1
+	currentPartNum := 1
+	mref := 0
+	if udhBytes := submitMulti.Message.UDH(); len(udhBytes) > 0 {
+		udh := pdu.UDH(udhBytes)
+		tpByte, cpByte, mrByte, found := udh.GetConcatInfo()
+		if found {
+			totalParts = int(tpByte)
+			currentPartNum = int(cpByte)
+			mref = int(mrByte)
+		}
+	}
+
+	destAddressesInfo := submitMulti.DestAddrs.Get() // This is []DestinationAddress
+	var unsuccessSMEs pdu.UnsuccessSMEs
+	var firstSuccessMessageID string
+
+	for _, destInfo := range destAddressesInfo {
+		destAddrStr := destInfo.Address().Address()
+		destAddrTON := destInfo.Address().Ton()
+		destAddrNPI := destInfo.Address().Npi()
+
+		inMsg := sp.IncomingSPMessage{
+			ServiceProviderID: ss.serviceProviderID,
+			CredentialID:      ss.credentialID,
+			Protocol:          "smpp",
+			// ClientMessageRef: // SubmitMulti doesn't typically have a per-destination client ref.
+			SenderID:          sourceAddr,
+			DestinationMSISDN: destAddrStr,
+			MessageContent:    messageContentStr,
+			TotalSegments:     int32(totalParts),
+			SegmentSeqn:       int32(currentPartNum),
+			ConcatRef:         int32(mref),
+			IsFlash:           isFlashMessage(submitMulti.Message.Encoding().DataCoding()),
+			RequestDLR:        (registeredDelivery & 0x01) != 0,
+			ReceivedAt:        time.Now().UTC(),
+			// DataCoding:     dataCoding,
+			// ESMClass:       esmClass,
+		}
+
+		ack, coreErr := s.messageHandler.HandleIncomingMessage(ctx, inMsg)
+		currentDestAddressForResp := pdu.NewAddress() // For UnsuccessSME
+		currentDestAddressForResp.SetTon(destAddrTON)
+		currentDestAddressForResp.SetNpi(destAddrNPI)
+		currentDestAddressForResp.SetAddress(destAddrStr)
+
+		if coreErr != nil {
+			slog.ErrorContext(ctx, "Core handler failed for destination in SubmitMulti",
+				slog.Any("error", coreErr), slog.String("destination", destAddrStr))
+			unsuccessSME := pdu.UnsuccessSME{
+				Address: currentDestAddressForResp,
+			}
+			unsuccessSME.SetErrorStatusCode(data.CommandStatusType(StatusSystemError))
+			unsuccessSMEs.Add(unsuccessSME)
+
+			continue
+		}
+
+		if ack.Status != "accepted" || ack.InternalMessageID == "" {
+			slog.WarnContext(ctx, "Message rejected by core for destination in SubmitMulti",
+				slog.String("reason", ack.Error), slog.String("destination", destAddrStr))
+
+			unsuccessSME := pdu.UnsuccessSME{
+				Address: currentDestAddressForResp,
+			}
+			unsuccessSME.SetErrorStatusCode(data.CommandStatusType(uint32(mapErrorToSMPPStatus(ack.Error))))
+			unsuccessSMEs.Add(unsuccessSME)
+
+		} else {
+			if firstSuccessMessageID == "" {
+				firstSuccessMessageID = ack.InternalMessageID
+			}
+			slog.InfoContext(ctx, "Message for destination in SubmitMulti accepted",
+				slog.String("internal_msg_id", ack.InternalMessageID), slog.String("destination", destAddrStr))
+		}
+	}
+	// --- Send SubmitMultiResp ---
+	respPDU := submitMulti.GetResponse() // This is pdu.PDU
+	submitMultiResp, castOk := respPDU.(*pdu.SubmitMultiResp)
+	if !castOk {
+		slog.ErrorContext(ctx, "Failed to cast GetResponse to *pdu.SubmitMultiResp",
+			slog.Any("response_pdu_type", fmt.Sprintf("%T", respPDU)))
+		s.writeErrorResponse(ss, originalHdr, StatusSystemError) // Generic error
+		return
+	}
+
+	submitMultiResp.MessageID = firstSuccessMessageID
+	if len(unsuccessSMEs.Get()) > 0 {
+		submitMultiResp.UnsuccessSMEs = unsuccessSMEs
+		if len(unsuccessSMEs.Get()) == len(destAddressesInfo) { // All failed
+			submitMultiResp.MessageID = "" // As per spec, MessageID can be NULL if all fail.
+			// Consider setting a specific CommandStatus on the response header if all fail.
+			// submitMultiResp.Header().SetCommandStatus(data.ESME_RSUBMITFAIL) // Example
+		}
+	}
+	// submitMultiResp.Header().SetCommandStatus(data.ESME_ROK) // gosmpp default is ROK. Adjust if needed.
+
+	respBuf := pdu.NewBuffer(nil)
+	submitMultiResp.Marshal(respBuf)
+	marshaledRespPduBytes := respBuf.Bytes()
+
+	if len(marshaledRespPduBytes) < 16 {
+		slog.ErrorContext(ctx, "Marshaled SubmitMultiResp is too short", slog.Int("length", len(marshaledRespPduBytes)))
+		return
+	}
+
+	responseHeaderToSend := PDUHeader{
+		CommandID:      SubmitSMResp,
+		SequenceNumber: originalHdr.SequenceNumber,
+		Length:         uint32(len(marshaledRespPduBytes)),
+		CommandStatus:  uint32(submitMultiResp.GetHeader().CommandStatus),
+	}
+	responseBodyBytesToSend := marshaledRespPduBytes[16:]
+
+	if err := s.writePDU(ss, responseHeaderToSend, responseBodyBytesToSend); err != nil {
+		slog.ErrorContext(ctx, "Failed to write SubmitMultiResp", slog.Any("error", err))
+	} else {
+		slog.InfoContext(ctx, "SubmitMulti processed",
+			slog.String("batch_msg_id_sent_in_resp", submitMultiResp.MessageID),
+			slog.Int("unsuccessful_smes", len(submitMultiResp.UnsuccessSMEs.Get())),
+			slog.Uint64("sequence_number", uint64(originalHdr.SequenceNumber)))
 	}
 }
 

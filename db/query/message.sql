@@ -161,6 +161,7 @@ SELECT
     m.id,
     m.service_provider_id,
     m.client_ref,
+    m.client_message_id,
     m.original_source_addr,
     m.original_destination_addr,
     m.submitted_at,

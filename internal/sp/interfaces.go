@@ -51,6 +51,7 @@ type SPDetails struct {
 type ForwardedDLRInfo struct {
 	InternalMessageID int64     // Our messages.id
 	ClientMessageRef  *string   // The SP's original reference ID (messages.client_ref)
+	ClientMessageID   *string   // The SP's original reference ID (messages.ClientMessageID)
 	SourceAddr        string    // Original Destination MSISDN (of the MT message)
 	DestAddr          string    // Original Sender ID (used by the SP)
 	SubmitDate        time.Time // When the message was submitted by SP (messages.submitted_at)

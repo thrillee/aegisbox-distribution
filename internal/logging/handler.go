@@ -11,6 +11,7 @@ const (
 	SPIDKey             contextKey = "sp_id"
 	SystemIDKey         contextKey = "system_id"
 	MessageIDKey        contextKey = "msg_id"
+	ClientMessageID     contextKey = "client_message_id"
 	MNOIDKey            contextKey = "mno_id"
 	MNOConnIDKey        contextKey = "mno_conn_id"
 	MNOMsgIDKey         contextKey = "mno_msg_id"
@@ -150,4 +151,8 @@ func ContextWithRuleID(ctx context.Context, createdRuleID int32) context.Context
 
 func ContextWithPricingRuleID(ctx context.Context, createdRuleID int32) context.Context {
 	return context.WithValue(ctx, PricingRuleID, createdRuleID)
+}
+
+func ContextWithClientMessageID(ctx context.Context, msgID string) context.Context {
+	return context.WithValue(ctx, ClientMessageID, msgID)
 }

@@ -567,7 +567,7 @@ func (p *Processor) UpdateSegmentDLRStatus(ctx context.Context, connectorID int3
 
 	// 3. Aggregate Status for Parent Message (Run asynchronously to avoid blocking DLR processing)
 	// Pass a clean background context enriched with MessageID for tracing aggregation task
-	go p.aggregateMessageStatus(logging.ContextWithMessageID(context.Background(), segmentInfo.MessageID), segmentInfo.MessageID)
+	go p.aggregateMessageStatus(logCtx, segmentInfo.MessageID)
 
 	// 4. Forward DLR back to the originating SP (Run asynchronously)
 	// Pass a clean background context enriched with MessageID for tracing forwarding task
@@ -699,7 +699,8 @@ func (p *Processor) generateAndEnqueueSuccessDLR(ctx context.Context, messageID 
 	// 3. Construct Forwarded DLR Info
 	forwardedDLR := sp.ForwardedDLRInfo{
 		InternalMessageID: messageID,
-		ClientMessageRef:  spMsgInfo.ClientRef,               // Use client's reference
+		ClientMessageRef:  spMsgInfo.ClientRef, // Use client's reference
+		ClientMessageID:   spMsgInfo.ClientMessageID,
 		SourceAddr:        spMsgInfo.OriginalDestinationAddr, // DLR source is original MT destination
 		DestAddr:          spMsgInfo.OriginalSourceAddr,      // DLR destination is original MT source (sender ID)
 		SubmitDate:        spMsgInfo.SubmittedAt.Time,        // Use submitted_at
@@ -769,6 +770,7 @@ func (p *Processor) generateAndEnqueueFailureDLR(ctx context.Context, messageID 
 	forwardedDLR := sp.ForwardedDLRInfo{
 		InternalMessageID: messageID,
 		ClientMessageRef:  spMsgInfo.ClientRef,
+		ClientMessageID:   spMsgInfo.ClientMessageID,
 		SourceAddr:        spMsgInfo.OriginalDestinationAddr,
 		DestAddr:          spMsgInfo.OriginalSourceAddr,
 		SubmitDate:        spMsgInfo.SubmittedAt.Time,

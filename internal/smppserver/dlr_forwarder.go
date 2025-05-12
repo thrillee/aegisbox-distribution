@@ -49,6 +49,7 @@ func (f *SMPSPForwarder) ForwardDLR(ctx context.Context, spDetails sp.SPDetails,
 	logCtx := logging.ContextWithMessageID(ctx, dlr.InternalMessageID)
 	logCtx = logging.ContextWithSystemID(logCtx, systemID)
 	logCtx = logging.ContextWithSPID(logCtx, spDetails.ServiceProviderID)
+	logCtx = logging.ContextWithClientMessageID(logCtx, *dlr.ClientMessageID)
 
 	slog.InfoContext(logCtx, "Constructing raw DeliverSM PDU for DLR forwarding", slog.String("dlr_status", dlr.Status))
 
@@ -59,15 +60,15 @@ func (f *SMPSPForwarder) ForwardDLR(ctx context.Context, spDetails sp.SPDetails,
 	} else {
 		smppErrCode = "000"
 	}
-	idField := fmt.Sprintf("%d", dlr.InternalMessageID)
-	if dlr.ClientMessageRef != nil && *dlr.ClientMessageRef != "" {
-		ref := *dlr.ClientMessageRef
-		if len(ref) <= 10 { // Max 10 chars suggested by Appendix B for 'id'
-			idField = ref
-		} else {
-			slog.WarnContext(logCtx, "Client reference too long for SMPP DLR 'id' field, using internal ID instead", slog.String("client_ref", ref))
-		}
-	}
+	// idField := fmt.Sprintf("%d", dlr.ClientMessageID)
+	// if dlr.ClientMessageRef != nil && *dlr.ClientMessageRef != "" {
+	// 	ref := *dlr.ClientMessageRef
+	// 	if len(ref) <= 10 { // Max 10 chars suggested by Appendix B for 'id'
+	// 		idField = ref
+	// 	} else {
+	// 		slog.WarnContext(logCtx, "Client reference too long for SMPP DLR 'id' field, using internal ID instead", slog.String("client_ref", ref))
+	// 	}
+	// }
 	submitDateStr := dlr.SubmitDate.UTC().Format("0601021504") // Use UTC? Or local? Check spec/expectations. Using UTC.
 	doneDateStr := dlr.DoneDate.UTC().Format("0601021504")
 	sub := "001"
@@ -76,9 +77,11 @@ func (f *SMPSPForwarder) ForwardDLR(ctx context.Context, spDetails sp.SPDetails,
 	if len(dlrStat) > 7 {
 		dlrStat = dlrStat[:7]
 	}
-	text := "" // Keep short message text minimal for DLR
+	text := "000" // Keep short message text minimal for DLR
 	dlrText := fmt.Sprintf("id:%s sub:%s dlvrd:%s submit date:%s done date:%s stat:%s err:%s text:%s",
-		idField, sub, dlvrd, submitDateStr, doneDateStr, dlrStat, smppErrCode, text)
+		*dlr.ClientMessageID, sub, dlvrd, submitDateStr, doneDateStr, dlrStat, smppErrCode, text)
+
+	slog.InfoContext(logCtx, "Forwarded DLR Text", slog.String("dlr_text", dlrText), slog.String("client_message_id", *dlr.ClientMessageID))
 
 	// Assume default GSM7 encoding for the text payload for now
 	dlrTextBytes := []byte(dlrText)
