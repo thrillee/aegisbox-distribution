@@ -3,12 +3,13 @@ package smppserver
 import (
 	"bytes"
 	"context"
-	"encoding/binary"
 	"errors"
 	"fmt"
 	"log/slog"
 	"strings"
 
+	"github.com/linxGnu/gosmpp/data"
+	"github.com/linxGnu/gosmpp/pdu"
 	"github.com/thrillee/aegisbox/internal/logging"
 	"github.com/thrillee/aegisbox/internal/sp"
 	"github.com/thrillee/aegisbox/pkg/errormapper"
@@ -60,6 +61,7 @@ func (f *SMPSPForwarder) ForwardDLR(ctx context.Context, spDetails sp.SPDetails,
 	} else {
 		smppErrCode = "000"
 	}
+	smppErrCode = "000"
 	// idField := fmt.Sprintf("%d", dlr.ClientMessageID)
 	// if dlr.ClientMessageRef != nil && *dlr.ClientMessageRef != "" {
 	// 	ref := *dlr.ClientMessageRef
@@ -81,78 +83,54 @@ func (f *SMPSPForwarder) ForwardDLR(ctx context.Context, spDetails sp.SPDetails,
 	dlrText := fmt.Sprintf("id:%s sub:%s dlvrd:%s submit date:%s done date:%s stat:%s err:%s text:%s",
 		*dlr.ClientMessageID, sub, dlvrd, submitDateStr, doneDateStr, dlrStat, smppErrCode, text)
 
-	slog.InfoContext(logCtx, "Forwarded DLR Text", slog.String("dlr_text", dlrText), slog.String("client_message_id", *dlr.ClientMessageID))
+	slog.InfoContext(logCtx, "Forwarded DLR Text",
+		slog.String("client_message_id", *dlr.ClientMessageID),
+		slog.String("dlr_text", dlrText),
+		slog.String("destAddr", dlr.DestAddr),
+		slog.String("srcAddr", dlr.SourceAddr),
+	)
 
-	// Assume default GSM7 encoding for the text payload for now
-	dlrTextBytes := []byte(dlrText)
-	dataCoding := byte(0x00) // Default alphabet
+	p := pdu.NewSubmitSM().(*pdu.SubmitSM)
 
-	// 2. Construct DeliverSM PDU Body Bytes manually
-	// service_type<NUL> - Empty for DLR usually
-	// source_addr_ton, source_addr_npi, source_addr<NUL> - Use original Destination
-	// dest_addr_ton, dest_addr_npi, destination_addr<NUL> - Use original SenderID
-	// esm_class, protocol_id, priority_flag
-	// schedule_delivery_time<NUL> - Empty
-	// validity_period<NUL> - Empty
-	// registered_delivery, replace_if_present_flag, data_coding, sm_default_msg_id
-	// sm_length, short_message
-	// Optional TLVs... none for now
+	// Set Addresses
+	srcAddr := pdu.NewAddress()
+	srcAddr.SetTon(1) // Use configured defaults
+	srcAddr.SetNpi(1)
+	if err := srcAddr.SetAddress(dlr.SourceAddr); err != nil {
+		return fmt.Errorf("invalid source address (SenderID) '%s': %w", dlr.SourceAddr, err)
+	}
+	p.SourceAddr = srcAddr
 
-	var bodyBuf bytes.Buffer
-	writeCString(&bodyBuf, "") // service_type
+	destAddr := pdu.NewAddress()
+	destAddr.SetTon(5)
+	destAddr.SetNpi(0)
+	if err := destAddr.SetAddress(dlr.DestAddr); err != nil {
+		return fmt.Errorf("invalid destination address '%s': %w", dlr.DestAddr, err)
+	}
+	p.DestAddr = destAddr
 
-	// Source Address (Original Destination)
-	bodyBuf.WriteByte(1) // TON (e.g., 1=International) - TODO: Determine from original dest?
-	bodyBuf.WriteByte(1) // NPI (e.g., 1=E.164)
-	writeCString(&bodyBuf, dlr.SourceAddr)
+	// Set Message Content and Encoding
+	coding := data.GSM7BIT
 
-	// Destination Address (Original SenderID)
-	bodyBuf.WriteByte(5) // TON (e.g., 5=Alphanumeric) - TODO: Determine from original sender?
-	bodyBuf.WriteByte(0) // NPI (e.g., 0=Unknown)
-	writeCString(&bodyBuf, dlr.DestAddr)
-
-	// Flags
-	bodyBuf.WriteByte(0x04) // esm_class (bit 2 set for DLR)
-	bodyBuf.WriteByte(0)    // protocol_id
-	bodyBuf.WriteByte(0)    // priority_flag
-
-	// Empty optional fields
-	writeCString(&bodyBuf, "") // schedule_delivery_time
-	writeCString(&bodyBuf, "") // validity_period
-
-	// More flags
-	bodyBuf.WriteByte(0)          // registered_delivery (0 for DLR itself)
-	bodyBuf.WriteByte(0)          // replace_if_present_flag
-	bodyBuf.WriteByte(dataCoding) // data_coding
-	bodyBuf.WriteByte(0)          // sm_default_msg_id
-
-	// Short Message
-	smLength := byte(len(dlrTextBytes))
-	bodyBuf.WriteByte(smLength)
-	bodyBuf.Write(dlrTextBytes)
-
-	// TLVs - None for now
-
-	bodyBytes := bodyBuf.Bytes()
-
-	// 3. Construct Header
-	hdr := PDUHeader{
-		CommandID:      CommandDeliverSM,
-		CommandStatus:  StatusOk,
-		SequenceNumber: 0, // SMSC initiated, sequence number can be 0 or managed by server
-		Length:         uint32(16 + len(bodyBytes)),
+	err := p.Message.SetMessageWithEncoding(dlrText, coding)
+	if err != nil {
+		return fmt.Errorf("failed to set message content (encoding: %d): %w", coding, err)
 	}
 
-	// 4. Combine Header and Body into raw PDU bytes
-	pduBytes := make([]byte, hdr.Length)
-	binary.BigEndian.PutUint32(pduBytes[0:], hdr.Length)
-	binary.BigEndian.PutUint32(pduBytes[4:], hdr.CommandID)
-	binary.BigEndian.PutUint32(pduBytes[8:], hdr.CommandStatus)
-	binary.BigEndian.PutUint32(pduBytes[12:], hdr.SequenceNumber)
-	copy(pduBytes[16:], bodyBytes)
+	// Set Flags and Options
+	p.ProtocolID = 0           // Usually 0
+	p.RegisteredDelivery = 0   // No DLR requested
+	p.ReplaceIfPresentFlag = 0 // Standard behavior
+
+	// ESM Class: Handle UDH and Message Type (e.g., Flash)
+	p.EsmClass = 0x04 // smpp.MSG_MODE_DEFAULT | smpp.MSG_TYPE_DEFAULT // Default
+
+	dlrBuf := pdu.NewBuffer(nil)
+	p.Marshal(dlrBuf)
+	marshaledDlrPduBytes := dlrBuf.Bytes()
 
 	// 5. Forward using the RawPDUForwarder interface
-	err := f.rawForwarder.ForwardRawPDU(logCtx, systemID, pduBytes)
+	err = f.rawForwarder.ForwardRawPDU(logCtx, systemID, marshaledDlrPduBytes)
 	if err != nil {
 		// Error already logged by ForwardRawPDU if needed
 		return fmt.Errorf("failed forwarding raw DLR PDU to SP %s: %w", systemID, err)
