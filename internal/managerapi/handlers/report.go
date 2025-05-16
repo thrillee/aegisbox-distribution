@@ -89,7 +89,7 @@ func (h *ReportHandler) GetDailyReport(c *gin.Context) {
 	}
 
 	// 3. Map results to DTO
-	respData := make([]database.GetDailyReportRow, len(reportRows))
+	// respData := make([]database.GetDailyReportRow, len(reportRows))
 
-	c.JSON(http.StatusOK, respData) // Return array directly for report
+	c.JSON(http.StatusOK, reportRows) // Return array directly for report
 }
