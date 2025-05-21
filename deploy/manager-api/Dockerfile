@@ -1,22 +1,36 @@
-FROM gcr.io/distroless/base-debian11 AS final
+# Stage 1: Build stage
+FROM golang:1.24-alpine AS builder
 
-# Set the working directory inside the container.
+# Install build dependencies
+RUN apk add --no-cache git
+
+# Set working directory
 WORKDIR /app
 
-COPY --chown=nonroot:nonroot manager-api /app/manager-api
+# Copy go.mod and go.sum files to download dependencies
+COPY go.mod go.sum ./
+RUN go mod download
 
-COPY .env /app/.env 
-# Environment variables will be managed via Docker Compose or runtime injection.
+# Copy the entire source code
+COPY . .
 
-# Expose the port the manager API listens on, as defined previously.
-# This informs Docker that the container listens on this port, but it doesn't publish it automatically.
+# Build the application
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags='-s -w' -o=manager-api ./cmd/manager-api
+
+# Stage 2: Final stage
+FROM gcr.io/distroless/base-debian11:latest
+
+# Set working directory
+WORKDIR /app
+
+# Copy only the binary from the builder stage
+COPY --from=builder --chown=nonroot:nonroot /app/manager-api /app/manager-api
+
+# Expose the required port
 EXPOSE 8001
 
-# Set the user to 'nonroot'. This is the default in distroless base images,
-# but explicitly setting it is good practice for clarity and security.
+# Use nonroot user for security
 USER nonroot
 
-# Define the command to run when the container starts.
-# This executes your manager-api binary.
-CMD ["/app/manager-api"]
-
+# Command to run the application
+ENTRYPOINT ["/app/manager-api"]

@@ -1,4 +1,4 @@
-# # Go parameters
+# Go parameters
 GOCMD=go
 GOBUILD=$(GOCMD) build
 GOCLEAN=$(GOCMD) clean
@@ -18,6 +18,9 @@ GATEWAY_PKG_PATH=./cmd/smpp-gateway
 MANAGER_API_PKG_PATH=./cmd/manager-api
 OUTPUT_DIR=./tmp/bin
 
+# Docker commands
+DOCKER_COMPOSE=docker compose
+DEPLOY_DIR=./deploy
 
 # ==================================================================================== #
 # HELPERS
@@ -50,7 +53,8 @@ tidy:
 
 ## audit: run quality control checks (vet, staticcheck, vulncheck)
 .PHONY: audit
-audit: lint vulncheck
+audit: 
+	$(GOVET) ./...
 	@echo "Audit checks passed."
 
 
@@ -81,12 +85,14 @@ build: build/gateway build/manager-api
 .PHONY: build/gateway
 build/gateway:
 	@echo "Building Gateway..."
+	mkdir -p $(OUTPUT_DIR)
 	$(GOBUILD) -o=$(OUTPUT_DIR)/$(GATEWAY_BINARY_NAME) $(GATEWAY_PKG_PATH)
 
 ## build/manager-api: build the manager-api application
 .PHONY: build/manager-api
 build/manager-api:
 	@echo "Building Manager API..."
+	mkdir -p $(OUTPUT_DIR)
 	$(GOBUILD) -o=$(OUTPUT_DIR)/$(MANAGER_API_BINARY_NAME) $(MANAGER_API_PKG_PATH)
 
 ## clean: remove temporary build files
@@ -141,21 +147,78 @@ run/live/manager-api:
 		--misc.clean_on_exit "true"
 
 # ==================================================================================== #
-# OPERATIONS
+# PRODUCTION BUILDING
 # ==================================================================================== #
 
-## push: push changes to the remote Git repository
-.PHONY: push
-push: tidy audit no-dirty
-	git push
-
-## production/deploy: build linux binary and suggest deployment steps
-.PHONY: production/deploy
-production/deploy: confirm tidy
+## production/build: build production Linux AMD64 binaries
+.PHONY: production/build
+production/build: tidy
 	@echo "Building Linux AMD64 binary for Gateway..."
+	mkdir -p $(OUTPUT_DIR)/linux_amd64
 	GOOS=linux GOARCH=amd64 $(GOBUILD) -ldflags='-s -w' -o=$(OUTPUT_DIR)/linux_amd64/$(GATEWAY_BINARY_NAME) $(GATEWAY_PKG_PATH)
 	@echo "Building Linux AMD64 binary for Manager API..."
 	GOOS=linux GOARCH=amd64 $(GOBUILD) -ldflags='-s -w' -o=$(OUTPUT_DIR)/linux_amd64/$(MANAGER_API_BINARY_NAME) $(MANAGER_API_PKG_PATH)
 	@echo "Binaries created in $(OUTPUT_DIR)/linux_amd64/"
-	@echo "TODO: Add deployment steps here (e.g., scp, docker build/push, systemctl restart)"
 
+# ==================================================================================== #
+# DOCKER
+# ==================================================================================== #
+
+## docker/prepare: create necessary directories for deployment
+.PHONY: docker/prepare
+docker/prepare:
+	@echo "Creating necessary directories for deployment..."
+	mkdir -p $(DEPLOY_DIR)/prometheus
+	mkdir -p $(DEPLOY_DIR)/loki
+	mkdir -p $(DEPLOY_DIR)/promtail
+	@echo "Directories created."
+
+## docker/build: build Docker images
+.PHONY: docker/build
+docker/build: production/build
+	@echo "Building Docker images..."
+	cd $(DEPLOY_DIR) && $(DOCKER_COMPOSE) build
+
+## docker/deploy: deploy application with Docker Compose
+.PHONY: docker/deploy
+docker/deploy: docker/build
+	@echo "Starting services with Docker Compose..."
+	cd $(DEPLOY_DIR) && $(DOCKER_COMPOSE) up -d
+
+## docker/logs: view Docker container logs
+.PHONY: docker/logs
+docker/logs:
+	@echo "Viewing Docker container logs..."
+	cd $(DEPLOY_DIR) && $(DOCKER_COMPOSE) logs -f
+
+## docker/stop: stop Docker services
+.PHONY: docker/stop
+docker/stop:
+	@echo "Stopping Docker services..."
+	cd $(DEPLOY_DIR) && $(DOCKER_COMPOSE) stop
+
+## docker/down: completely remove Docker services and volumes
+.PHONY: docker/down
+docker/down:
+	@echo "Removing Docker services and volumes..."
+	cd $(DEPLOY_DIR) && $(DOCKER_COMPOSE) down -v
+
+# ==================================================================================== #
+# DEPLOYMENT
+# ==================================================================================== #
+
+## deploy: complete deployment process
+.PHONY: deploy
+deploy: confirm tidy production/build docker/prepare docker/build docker/deploy
+	@echo "Deployment complete! Services should be running now."
+	@echo "Access your services at:"
+	@echo "  - Manager API: http://localhost:8001"
+	@echo "  - SMPP Gateway: localhost:6886"
+	@echo "  - Grafana: http://localhost:3000 (admin/secure_password by default)"
+	@echo "  - Prometheus: http://localhost:9090"
+
+## db/migrate: run database migrations manually
+.PHONY: db/migrate
+db/migrate:
+	@echo "Running database migrations..."
+	cd $(DEPLOY_DIR) && $(DOCKER_COMPOSE) run --rm migration

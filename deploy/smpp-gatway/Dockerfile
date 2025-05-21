@@ -1,25 +1,36 @@
-FROM gcr.io/distroless/base-debian11 AS final
+# Stage 1: Build stage
+FROM golang:1.24-alpine AS builder
 
-# Set the working directory inside the container.
+# Install build dependencies
+RUN apk add --no-cache git
+
+# Set working directory
 WORKDIR /app
 
-# Copy the pre-built smpp-gateway binary into the container.
-# Assumes `docker build` runs from the project root where the binary exists at this path.
-# Adjust the source path if necessary.
-# Use --chown=nonroot:nonroot for distroless non-root user.
-COPY --chown=nonroot:nonroot smpp-gateway /app/smpp-gateway
+# Copy go.mod and go.sum files to download dependencies
+COPY go.mod go.sum ./
+RUN go mod download
 
-COPY .env /app/.env 
+# Copy the entire source code
+COPY . .
 
-# Expose the port the SMPP gateway listens on (based on your .env snippet).
-# This informs Docker that the container listens on this port.
-EXPOSE 2775
+# Build the application
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags='-s -w' -o=smpp-gateway ./cmd/smpp-gateway
 
-# Set the user to 'nonroot'.
+# Stage 2: Final stage
+FROM gcr.io/distroless/base-debian11:latest
+
+# Set working directory
+WORKDIR /app
+
+# Copy only the binary from the builder stage
+COPY --from=builder --chown=nonroot:nonroot /app/smpp-gateway /app/smpp-gateway
+
+# Expose the required port
+EXPOSE 6886
+
+# Use nonroot user for security
 USER nonroot
 
-# Define the command to run when the container starts.
-# This executes your smpp-gateway binary.
-# Environment variables will be injected via Docker Compose.
-CMD ["/app/smpp-gateway"]
-
+# Command to run the application
+ENTRYPOINT ["/app/smpp-gateway"]

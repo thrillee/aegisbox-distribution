@@ -1,44 +1,138 @@
-version: '3.8'
-
 services:
-  # Service definition for the Manager API
+  # Database Migration Service
+  migration:
+    build:
+      context: ..
+      dockerfile: deploy/migration/Dockerfile
+    image: migration:latest
+    env_file:
+      - .env
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+        tag: "migration"
+
+  # Manager API Service
   manager-api:
     build:
-      context: .
-      dockerfile: manager-api/Dockerfile # Make sure this filename matches yours
+      context: ..
+      dockerfile: deploy/manager-api/Dockerfile
     image: manager-api:latest
     restart: unless-stopped
     env_file:
       - .env
     ports:
       - "8001:8001"
+    depends_on:
+      - migration
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+        tag: "manager-api"
 
-  # Service definition for the SMPP Gateway
+  # SMPP Gateway Service
   smpp-gateway:
     build:
-      context: .
-      dockerfile: smpp-gateway/Dockerfile
-    # Name the resulting image
-    image: my-smpp-gateway:latest
-    # Restart policy
+      context: ..
+      dockerfile: deploy/smpp-gateway/Dockerfile
+    image: smpp-gateway:latest
     restart: unless-stopped
     env_file:
       - .env
     ports:
       - "2775:2775"
+    depends_on:
+      - migration
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+        tag: "smpp-gateway"
 
-  # Migration definition
-  migration:
-    build:
-      context: .
-      dockerfile: migration/Dockerfile
-    # Name the resulting image
-    image: migration:latest
+  # Grafana for monitoring
+  grafana:
+    image: grafana/grafana:latest
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    volumes:
+      - grafana_data:/var/lib/grafana
     env_file:
       - .env
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PASSWORD:-admin}
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+        tag: "grafana"
 
-# Define networks (optional)
-# networks:
-#   app-network:
-#     driver: bridge
+  # Prometheus for metrics collection
+  prometheus:
+    image: prom/prometheus:latest
+    restart: unless-stopped
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
+      - prometheus_data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/etc/prometheus/console_libraries'
+      - '--web.console.templates=/etc/prometheus/consoles'
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+        tag: "prometheus"
 
+  # Loki for log aggregation
+  loki:
+    image: grafana/loki:latest
+    restart: unless-stopped
+    ports:
+      - "3100:3100"
+    command: -config.file=/etc/loki/local-config.yaml
+    volumes:
+      - ./loki/local-config.yaml:/etc/loki/local-config.yaml
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+        tag: "loki"
+
+  # Promtail to ship logs to Loki
+  promtail:
+    image: grafana/promtail:latest
+    restart: unless-stopped
+    volumes:
+      - ./promtail/config.yml:/etc/promtail/config.yml
+      - /var/log:/var/log
+      - /var/lib/docker/containers:/var/lib/docker/containers:ro
+    command: -config.file=/etc/promtail/config.yml
+    depends_on:
+      - loki
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+        tag: "promtail"
+
+volumes:
+  grafana_data:
+  prometheus_data:
+
+networks:
+  default:
+    driver: bridge
