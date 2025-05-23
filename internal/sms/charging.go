@@ -7,11 +7,9 @@ import (
 	"log/slog"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/shopspring/decimal"
 
-	// "github.com/shopspring/decimal" // Uncomment if using decimal types
 	"github.com/thrillee/aegisbox/internal/database"
 	"github.com/thrillee/aegisbox/internal/logging"
 )
@@ -103,7 +101,7 @@ func (p *DefaultPricer) PriceAndDebit(ctx context.Context, msgID int64) (result 
 		}
 
 		statusUpdateErr := dbQueriesFromPool.UpdateMessagePriced(logCtx, database.UpdateMessagePricedParams{
-			Cost:             pgtype.Numeric{Int: totalCost.BigInt(), Valid: true},
+			Column2:          totalCost,
 			Column5:          finalStatus,
 			ProcessingStatus: finalStatus,
 			ErrorDescription: &errMsgForDB,
@@ -120,7 +118,7 @@ func (p *DefaultPricer) PriceAndDebit(ctx context.Context, msgID int64) (result 
 			)
 			// Potentially add to a retry queue or alert.
 		} else {
-			slog.InfoContext(logCtx, logMsg) // Log the outcome using original context
+			slog.InfoContext(logCtx, logMsg, slog.Any("Cost", totalCost)) // Log the outcome using original context
 		}
 	}() // End of defer func
 

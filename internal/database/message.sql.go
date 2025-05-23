@@ -9,6 +9,7 @@ import (
 	"context"
 
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/shopspring/decimal"
 )
 
 const countMessageDetails = `-- name: CountMessageDetails :one
@@ -641,7 +642,7 @@ const updateMessagePriced = `-- name: UpdateMessagePriced :exec
 UPDATE messages
 SET
     processing_status = $1, -- 'queued_for_send' or 'failed_pricing'
-    cost=$2,
+    cost=$2::numeric, -- $2 is decimal.Decimal
     error_code = $3,    
     error_description = $4, 
     processed_for_queue_at = CASE WHEN $5 = 'queued_for_send' THEN NOW() ELSE processed_for_queue_at END
@@ -649,18 +650,18 @@ WHERE id = $6
 `
 
 type UpdateMessagePricedParams struct {
-	ProcessingStatus string         `json:"processingStatus"`
-	Cost             pgtype.Numeric `json:"cost"`
-	ErrorCode        *string        `json:"errorCode"`
-	ErrorDescription *string        `json:"errorDescription"`
-	Column5          interface{}    `json:"column5"`
-	ID               int64          `json:"id"`
+	ProcessingStatus string          `json:"processingStatus"`
+	Column2          decimal.Decimal `json:"column2"`
+	ErrorCode        *string         `json:"errorCode"`
+	ErrorDescription *string         `json:"errorDescription"`
+	Column5          interface{}     `json:"column5"`
+	ID               int64           `json:"id"`
 }
 
 func (q *Queries) UpdateMessagePriced(ctx context.Context, arg UpdateMessagePricedParams) error {
 	_, err := q.db.Exec(ctx, updateMessagePriced,
 		arg.ProcessingStatus,
-		arg.Cost,
+		arg.Column2,
 		arg.ErrorCode,
 		arg.ErrorDescription,
 		arg.Column5,

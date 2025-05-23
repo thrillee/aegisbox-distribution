@@ -77,7 +77,7 @@ WHERE id = $7;
 UPDATE messages
 SET
     processing_status = $1, -- 'queued_for_send' or 'failed_pricing'
-    cost=$2,
+    cost=$2::numeric, -- $2 is decimal.Decimal
     error_code = $3,    
     error_description = $4, 
     processed_for_queue_at = CASE WHEN $5 = 'queued_for_send' THEN NOW() ELSE processed_for_queue_at END

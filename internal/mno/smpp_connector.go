@@ -845,49 +845,18 @@ func parseDLRContent(dlrText string) (DLRParseResult, error) {
 	doneDateStr := match[5]
 	var err error
 
-	// Function to parse YYMMDDHHMM or YYYYMMDDHHMM format relative to current time
-	// Assumes YY < 70 maps to 20xx, YY >= 70 maps to 19xx (common interpretation)
-	parseSmppDate := func(dateStr string) (time.Time, error) {
-		var parsedTime time.Time
-		var parseErr error
-		layout := ""
-		// Determine layout based on length
-		switch len(dateStr) {
-		case 10: // YYMMDDHHMM
-			layout = "0601021504" // Go's reference layout for YYMMDDHHMM
-			// Handle year YY - assume current century or previous based on value
-			// Note: This is heuristic. MNO might provide timezone offsets or full year.
-			// It's safer if MNOs provide YYYY or timezone info.
-			// We'll parse directly, time.Parse handles 2-digit year based on context (usually current century)
-			parsedTime, parseErr = time.Parse(layout, dateStr)
-
-		case 12: // YYYYMMDDHHMM - Some SMSCs might use this
-			layout = "200601021504"
-			parsedTime, parseErr = time.Parse(layout, dateStr)
-
-		default:
-			parseErr = fmt.Errorf("unsupported date string length %d", len(dateStr))
-		}
-		if parseErr != nil {
-			return time.Time{}, parseErr
-		}
-		// TODO: Consider potential Timezone issues. SMPP dates usually relative to SMSC time.
-		// Assuming dates are close to 'now' and parsing into local/UTC is acceptable here.
-		return parsedTime, nil
-	}
-
 	res.SubmitDate, err = parseSmppDate(submitDateStr)
 	if err != nil {
 		slog.Warn("Failed to parse DLR submit date", slog.String("date_str", submitDateStr), slog.Any("error", err))
 		// Continue parsing other fields even if date fails? Maybe return partial result?
 		// Let's return error for now if dates are crucial.
-		return res, fmt.Errorf("failed to parse submit date '%s': %w", submitDateStr, err)
+		// return res, fmt.Errorf("failed to parse submit date '%s': %w", submitDateStr, err)
 	}
 
 	res.DoneDate, err = parseSmppDate(doneDateStr)
 	if err != nil {
 		slog.Warn("Failed to parse DLR done date", slog.String("date_str", doneDateStr), slog.Any("error", err))
-		return res, fmt.Errorf("failed to parse done date '%s': %w", doneDateStr, err)
+		res.DoneDate = time.Now()
 	}
 	// --- End Date Parsing ---
 
@@ -898,6 +867,30 @@ func parseDLRContent(dlrText string) (DLRParseResult, error) {
 		slog.Time("done_date", res.DoneDate),
 	)
 	return res, nil
+}
+
+// parseSmppDate attempts to parse SMPP date strings with flexible format handling.
+func parseSmppDate(dateStr string) (time.Time, error) {
+	var parsedTime time.Time
+	var parseErr error
+
+	switch len(dateStr) {
+	case 10: // YYMMDDHHMM
+		parsedTime, parseErr = time.Parse("0601021504", dateStr)
+	case 12: // Try YYYYMMDDHHMM first, then YYMMDDHHMMSS
+		parsedTime, parseErr = time.Parse("200601021504", dateStr)
+		if parseErr != nil {
+			parsedTime, parseErr = time.Parse("060102150405", dateStr)
+		}
+	default:
+		return time.Time{}, fmt.Errorf("unsupported date string length %d", len(dateStr))
+	}
+
+	if parseErr != nil {
+		return time.Time{}, parseErr
+	}
+
+	return parsedTime, nil
 }
 
 // processIncomingDeliverSM handles received DeliverSM PDUs (potential DLRs or MO messages).
