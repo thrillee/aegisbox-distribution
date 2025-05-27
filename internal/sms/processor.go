@@ -747,8 +747,21 @@ func (p *Processor) generateAndEnqueueFailureDLR(ctx context.Context, messageID 
 		slog.ErrorContext(logCtx, "Cannot forward DLR: Failed to get SP/Message info", slog.Any("error", err))
 		return
 	}
-	if err != nil { /* ... handle error ... */
-		return
+
+	httpCallbackURL := sp.GetHttpCallBackURL(spMsgInfo.HttpConfig)
+	httpCallbackKey := sp.GetHttpCallBackKey(spMsgInfo.HttpConfig)
+	var callbackURL string
+	var callbackKey string
+	if httpCallbackURL != nil {
+		callbackURL = *httpCallbackURL
+	} else {
+		callbackURL = "" // or some default value
+	}
+
+	if httpCallbackKey != nil {
+		callbackKey = *httpCallbackKey
+	} else {
+		callbackKey = "" // or some default value
 	}
 
 	// 2. Prepare SP Details
@@ -756,8 +769,8 @@ func (p *Processor) generateAndEnqueueFailureDLR(ctx context.Context, messageID 
 		ServiceProviderID: spMsgInfo.ServiceProviderID, // Need SP ID from query
 		Protocol:          spMsgInfo.Protocol,
 		SMPPSystemID:      *spMsgInfo.SystemID, // This is sql.NullString from DB
-		HTTPCallbackURL:   *sp.GetHttpCallBackURL(spMsgInfo.HttpConfig),
-		HTTPAuthConfig:    *sp.GetHttpCallBackKey(spMsgInfo.HttpConfig),
+		HTTPCallbackURL:   callbackURL,
+		HTTPAuthConfig:    callbackKey,
 	}
 
 	// Map internal failure status to DLR status code
