@@ -7,6 +7,8 @@ package database
 
 import (
 	"context"
+
+	"github.com/jackc/pgx/v5/pgtype"
 )
 
 const countMNOConnectionsByMNO = `-- name: CountMNOConnectionsByMNO :one
@@ -36,7 +38,7 @@ INSERT INTO mno_connections (
     $14, $15, $16, $17,
     $18, $19,
     $20
-) RETURNING id, mno_id, protocol, status, system_id, password, host, port, use_tls, bind_type, system_type, enquire_link_interval_secs, request_timeout_secs, connect_retry_delay_secs, max_window_size, default_data_coding, source_addr_ton, source_addr_npi, dest_addr_ton, dest_addr_npi, http_config, created_at, updated_at
+) RETURNING id, mno_id, protocol, status, system_id, password, host, port, use_tls, bind_type, system_type, enquire_link_interval_secs, request_timeout_secs, connect_retry_delay_secs, max_window_size, default_data_coding, source_addr_ton, source_addr_npi, dest_addr_ton, dest_addr_npi, http_config, created_at, updated_at, priority
 `
 
 type CreateMNOConnectionParams struct {
@@ -110,6 +112,7 @@ func (q *Queries) CreateMNOConnection(ctx context.Context, arg CreateMNOConnecti
 		&i.HttpConfig,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.Priority,
 	)
 	return i, err
 }
@@ -154,16 +157,42 @@ FROM mno_connections
 WHERE status = 'active'
 `
 
+type GetActiveMNOConnectionsRow struct {
+	ID                      int32              `json:"id"`
+	MnoID                   int32              `json:"mnoId"`
+	Protocol                string             `json:"protocol"`
+	Status                  string             `json:"status"`
+	SystemID                *string            `json:"systemId"`
+	Password                *string            `json:"password"`
+	Host                    *string            `json:"host"`
+	Port                    *int32             `json:"port"`
+	UseTls                  *bool              `json:"useTls"`
+	BindType                *string            `json:"bindType"`
+	SystemType              *string            `json:"systemType"`
+	EnquireLinkIntervalSecs *int32             `json:"enquireLinkIntervalSecs"`
+	RequestTimeoutSecs      *int32             `json:"requestTimeoutSecs"`
+	ConnectRetryDelaySecs   *int32             `json:"connectRetryDelaySecs"`
+	MaxWindowSize           *int32             `json:"maxWindowSize"`
+	DefaultDataCoding       *int32             `json:"defaultDataCoding"`
+	SourceAddrTon           *int32             `json:"sourceAddrTon"`
+	SourceAddrNpi           *int32             `json:"sourceAddrNpi"`
+	DestAddrTon             *int32             `json:"destAddrTon"`
+	DestAddrNpi             *int32             `json:"destAddrNpi"`
+	HttpConfig              []byte             `json:"httpConfig"`
+	CreatedAt               pgtype.Timestamptz `json:"createdAt"`
+	UpdatedAt               pgtype.Timestamptz `json:"updatedAt"`
+}
+
 // Selects all connections marked as 'active' in status
-func (q *Queries) GetActiveMNOConnections(ctx context.Context) ([]MnoConnection, error) {
+func (q *Queries) GetActiveMNOConnections(ctx context.Context) ([]GetActiveMNOConnectionsRow, error) {
 	rows, err := q.db.Query(ctx, getActiveMNOConnections)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []MnoConnection
+	var items []GetActiveMNOConnectionsRow
 	for rows.Next() {
-		var i MnoConnection
+		var i GetActiveMNOConnectionsRow
 		if err := rows.Scan(
 			&i.ID,
 			&i.MnoID,
@@ -200,7 +229,7 @@ func (q *Queries) GetActiveMNOConnections(ctx context.Context) ([]MnoConnection,
 }
 
 const getMNOConnectionByID = `-- name: GetMNOConnectionByID :one
-SELECT id, mno_id, protocol, status, system_id, password, host, port, use_tls, bind_type, system_type, enquire_link_interval_secs, request_timeout_secs, connect_retry_delay_secs, max_window_size, default_data_coding, source_addr_ton, source_addr_npi, dest_addr_ton, dest_addr_npi, http_config, created_at, updated_at FROM mno_connections WHERE id = $1 LIMIT 1
+SELECT id, mno_id, protocol, status, system_id, password, host, port, use_tls, bind_type, system_type, enquire_link_interval_secs, request_timeout_secs, connect_retry_delay_secs, max_window_size, default_data_coding, source_addr_ton, source_addr_npi, dest_addr_ton, dest_addr_npi, http_config, created_at, updated_at, priority FROM mno_connections WHERE id = $1 LIMIT 1
 `
 
 func (q *Queries) GetMNOConnectionByID(ctx context.Context, id int32) (MnoConnection, error) {
@@ -230,12 +259,13 @@ func (q *Queries) GetMNOConnectionByID(ctx context.Context, id int32) (MnoConnec
 		&i.HttpConfig,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.Priority,
 	)
 	return i, err
 }
 
 const listMNOConnectionsByMNO = `-- name: ListMNOConnectionsByMNO :many
-SELECT id, mno_id, protocol, status, system_id, password, host, port, use_tls, bind_type, system_type, enquire_link_interval_secs, request_timeout_secs, connect_retry_delay_secs, max_window_size, default_data_coding, source_addr_ton, source_addr_npi, dest_addr_ton, dest_addr_npi, http_config, created_at, updated_at FROM mno_connections
+SELECT id, mno_id, protocol, status, system_id, password, host, port, use_tls, bind_type, system_type, enquire_link_interval_secs, request_timeout_secs, connect_retry_delay_secs, max_window_size, default_data_coding, source_addr_ton, source_addr_npi, dest_addr_ton, dest_addr_npi, http_config, created_at, updated_at, priority FROM mno_connections
 WHERE mno_id = $1
 ORDER BY created_at DESC
 LIMIT $2 OFFSET $3
@@ -280,6 +310,7 @@ func (q *Queries) ListMNOConnectionsByMNO(ctx context.Context, arg ListMNOConnec
 			&i.HttpConfig,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.Priority,
 		); err != nil {
 			return nil, err
 		}
@@ -314,7 +345,7 @@ SET
     http_config = COALESCE($18, http_config),
     updated_at = NOW()
 WHERE id = $19
-RETURNING id, mno_id, protocol, status, system_id, password, host, port, use_tls, bind_type, system_type, enquire_link_interval_secs, request_timeout_secs, connect_retry_delay_secs, max_window_size, default_data_coding, source_addr_ton, source_addr_npi, dest_addr_ton, dest_addr_npi, http_config, created_at, updated_at
+RETURNING id, mno_id, protocol, status, system_id, password, host, port, use_tls, bind_type, system_type, enquire_link_interval_secs, request_timeout_secs, connect_retry_delay_secs, max_window_size, default_data_coding, source_addr_ton, source_addr_npi, dest_addr_ton, dest_addr_npi, http_config, created_at, updated_at, priority
 `
 
 type UpdateMNOConnectionParams struct {
@@ -386,6 +417,7 @@ func (q *Queries) UpdateMNOConnection(ctx context.Context, arg UpdateMNOConnecti
 		&i.HttpConfig,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.Priority,
 	)
 	return i, err
 }

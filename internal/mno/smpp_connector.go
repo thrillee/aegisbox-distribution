@@ -53,7 +53,7 @@ type SMPPConnectorConfig struct {
 
 // Helper function to create config from DB model
 // Assumes sqlc model `database.MnoConnection` has fields matching the ALTER TABLE additions
-func NewSMPPConfigFromDB(dbConn database.MnoConnection) (SMPPConnectorConfig, error) {
+func NewSMPPConfigFromDB(dbConn database.GetActiveMNOConnectionsRow) (SMPPConnectorConfig, error) {
 	cfg := SMPPConnectorConfig{
 		ConnectionID: dbConn.ID,
 		MNOID:        dbConn.MnoID,

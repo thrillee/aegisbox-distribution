@@ -18,15 +18,16 @@ type ManagerAPIConfig struct {
 
 // Config holds the overall application configuration.
 type Config struct {
-	DatabaseURL         string          `envconfig:"DATABASE_URL" required:"true"`
-	LogLevel            string          `envconfig:"LOG_LEVEL" default:"info"`
-	MNOClientConfig     MNOClientConfig // Assuming MNOClientConfig defined in smppclient pkg or here
-	WorkerConfig        WorkerConfig    // Assuming workers.Config defined in workers pkg or here
-	ServerConfig        ServerConfig
-	HttpConfig          HttpConfig
-	DLRForwardInterval  time.Duration `envconfig:"WORKER_DLR_INTERVAL" default:"2s"`
-	DLRForwardBatchSize int           `envconfig:"WORKER_DLR_BATCH_SIZE" default:"100"`
-	ManagerAPI          ManagerAPIConfig
+	DatabaseURL            string          `envconfig:"DATABASE_URL" required:"true"`
+	LogLevel               string          `envconfig:"LOG_LEVEL" default:"info"`
+	MNOClientConfig        MNOClientConfig // Assuming MNOClientConfig defined in smppclient pkg or here
+	WorkerConfig           WorkerConfig    // Assuming workers.Config defined in workers pkg or here
+	ServerConfig           ServerConfig
+	HttpConfig             HttpConfig
+	DLRForwardInterval     time.Duration `envconfig:"WORKER_DLR_INTERVAL" default:"2s"`
+	DLRForwardBatchSize    int           `envconfig:"WORKER_DLR_BATCH_SIZE" default:"100"`
+	DefaultRoutingGroupRef string        `envconfig:"DEFAULT_ROUTING_GROUP_REF" default:"001"`
+	ManagerAPI             ManagerAPIConfig
 }
 
 // ServerConfig holds SMPP Server specific configuration.

@@ -203,7 +203,7 @@ func (q *Queries) GetMessageTotalSegments(ctx context.Context, id int64) (int32,
 }
 
 const getMessagesByStatus = `-- name: GetMessagesByStatus :many
-SELECT id, service_provider_id, original_destination_addr, original_source_addr 
+SELECT id, service_provider_id, sp_credential_id, original_destination_addr, original_source_addr 
 FROM messages
 WHERE processing_status = $1 -- e.g., 'received', 'routed', 'queued_for_send'
 ORDER BY received_at -- Process in FIFO order
@@ -219,6 +219,7 @@ type GetMessagesByStatusParams struct {
 type GetMessagesByStatusRow struct {
 	ID                      int64  `json:"id"`
 	ServiceProviderID       int32  `json:"serviceProviderId"`
+	SpCredentialID          int32  `json:"spCredentialId"`
 	OriginalDestinationAddr string `json:"originalDestinationAddr"`
 	OriginalSourceAddr      string `json:"originalSourceAddr"`
 }
@@ -235,6 +236,7 @@ func (q *Queries) GetMessagesByStatus(ctx context.Context, arg GetMessagesByStat
 		if err := rows.Scan(
 			&i.ID,
 			&i.ServiceProviderID,
+			&i.SpCredentialID,
 			&i.OriginalDestinationAddr,
 			&i.OriginalSourceAddr,
 		); err != nil {

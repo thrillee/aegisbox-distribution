@@ -110,7 +110,7 @@ WHERE id = $1
 LIMIT 1;
 
 -- name: GetMessagesByStatus :many
-SELECT id, service_provider_id, original_destination_addr, original_source_addr 
+SELECT id, service_provider_id, sp_credential_id, original_destination_addr, original_source_addr 
 FROM messages
 WHERE processing_status = $1 -- e.g., 'received', 'routed', 'queued_for_send'
 ORDER BY received_at -- Process in FIFO order

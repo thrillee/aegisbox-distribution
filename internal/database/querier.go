@@ -9,13 +9,18 @@ import (
 )
 
 type Querier interface {
+	AssignRoutingGroupToSpCredential(ctx context.Context, arg AssignRoutingGroupToSpCredentialParams) (SpCredential, error)
 	CountMNOConnectionsByMNO(ctx context.Context, mnoID int32) (int64, error)
 	CountMNOs(ctx context.Context) (int64, error)
 	// Counts messages based on optional filters, joining necessary tables.
 	// Only JOIN segments if filtering by mno_message_id
 	CountMessageDetails(ctx context.Context, arg CountMessageDetailsParams) (int64, error)
+	CountMsisdnPrefixEntriesByGroup(ctx context.Context, msisdnPrefixGroupID int32) (int64, error)
+	CountMsisdnPrefixGroups(ctx context.Context) (int64, error)
 	// Counts pricing rules for a specific Service Provider.
 	CountPricingRulesBySP(ctx context.Context, serviceProviderID int32) (int64, error)
+	CountRoutingAssignmentsByRoutingGroup(ctx context.Context, routingGroupID int32) (int64, error)
+	CountRoutingGroups(ctx context.Context) (int64, error)
 	// Counts routing rules, optionally filtered by MNO ID.
 	CountRoutingRules(ctx context.Context, dollar_1 int32) (int64, error)
 	// Counts credentials, optionally filtered by Service Provider ID
@@ -27,7 +32,15 @@ type Querier interface {
 	CreateMNOConnection(ctx context.Context, arg CreateMNOConnectionParams) (MnoConnection, error)
 	// Inserts initial segment record OR returns existing ID if conflict occurs on (message_id, segment_seqn).
 	CreateMessageSegment(ctx context.Context, arg CreateMessageSegmentParams) (int64, error)
+	// Queries for MsisdnPrefixEntry
+	CreateMsisdnPrefixEntry(ctx context.Context, arg CreateMsisdnPrefixEntryParams) (MsisdnPrefixEntry, error)
+	// Queries for MsisdnPrefixGroup
+	CreateMsisdnPrefixGroup(ctx context.Context, arg CreateMsisdnPrefixGroupParams) (MsisdnPrefixGroup, error)
 	CreatePricingRule(ctx context.Context, arg CreatePricingRuleParams) (PricingRule, error)
+	// Queries for RoutingAssignment (the new routing rules)
+	CreateRoutingAssignment(ctx context.Context, arg CreateRoutingAssignmentParams) (RoutingAssignment, error)
+	// Queries for RoutingGroup
+	CreateRoutingGroup(ctx context.Context, arg CreateRoutingGroupParams) (RoutingGroup, error)
 	CreateRoutingRule(ctx context.Context, arg CreateRoutingRuleParams) (RoutingRule, error)
 	CreateSMPPCredential(ctx context.Context, arg CreateSMPPCredentialParams) (SpCredential, error)
 	// Creates an SP credential (SMPP or HTTP)
@@ -41,7 +54,15 @@ type Querier interface {
 	// It might be safer to just set status to 'inactive'.
 	DeleteMNO(ctx context.Context, id int32) error
 	DeleteMNOConnection(ctx context.Context, id int32) error
+	DeleteMsisdnPrefixEntriesByGroup(ctx context.Context, msisdnPrefixGroupID int32) error
+	DeleteMsisdnPrefixEntry(ctx context.Context, id int32) error
+	// Note: This will fail if the group is referenced in routing_assignments due to ON DELETE RESTRICT.
+	// Handle this in application logic (e.g., unassign first or provide a force option).
+	DeleteMsisdnPrefixGroup(ctx context.Context, id int32) error
 	DeletePricingRule(ctx context.Context, id int32) error
+	DeleteRoutingAssignment(ctx context.Context, id int32) error
+	// Note: This will fail if the group is referenced in routing_assignments or sp_credentials.
+	DeleteRoutingGroup(ctx context.Context, id int32) error
 	// Note: If updating mno_id, ensure the new MNO exists (handled by FK or check in handler)
 	DeleteRoutingRule(ctx context.Context, id int32) error
 	DeleteSPCredential(ctx context.Context, id int32) error
@@ -49,11 +70,20 @@ type Querier interface {
 	// Inserts a new DLR forwarding job into the queue.
 	EnqueueDLRForForwarding(ctx context.Context, arg EnqueueDLRForForwardingParams) error
 	FindDebitTransactionForMessage(ctx context.Context, messageID *int64) (FindDebitTransactionForMessageRow, error)
+	// Finds the msisdn_prefix_group_id for a given MSISDN by longest prefix match.
+	// $1: full_msisdn (e.g., '2348031234567')
+	FindMatchingPrefixGroupForMSISDN(ctx context.Context, msisdnPrefix string) (FindMatchingPrefixGroupForMSISDNRow, error)
 	FindMessageByMnoMessageID(ctx context.Context, mnoMessageID *string) (FindMessageByMnoMessageIDRow, error)
 	// Finds segment details based on MNO Message ID for DLR processing
 	FindSegmentByMnoMessageID(ctx context.Context, mnoMessageID *string) (FindSegmentByMnoMessageIDRow, error)
 	// Selects all connections marked as 'active' in status
-	GetActiveMNOConnections(ctx context.Context) ([]MnoConnection, error)
+	GetActiveMNOConnections(ctx context.Context) ([]GetActiveMNOConnectionsRow, error)
+	// Core routing query:
+	// Given a routing_group_id (from sp_credential or a default) and an msisdn_prefix_group_id (from MSISDN lookup),
+	// find the active MNO to route to.
+	// $1: routing_group_id
+	// $2: msisdn_prefix_group_id
+	GetApplicableMnoForRouting(ctx context.Context, arg GetApplicableMnoForRoutingParams) (GetApplicableMnoForRoutingRow, error)
 	GetApplicablePrice(ctx context.Context, arg GetApplicablePriceParams) (GetApplicablePriceRow, error)
 	GetApplicableRoutingRule(ctx context.Context, prefix string) (int32, error)
 	// Filter by date range (inclusive)
@@ -67,10 +97,21 @@ type Querier interface {
 	GetMessageTotalSegments(ctx context.Context, id int64) (int32, error)
 	GetMessagesByStatus(ctx context.Context, arg GetMessagesByStatusParams) ([]GetMessagesByStatusRow, error)
 	GetMessagesToPrice(ctx context.Context, limit int32) ([]GetMessagesToPriceRow, error)
+	GetMsisdnPrefixEntryByID(ctx context.Context, id int32) (MsisdnPrefixEntry, error)
+	GetMsisdnPrefixEntryByPrefix(ctx context.Context, msisdnPrefix string) (MsisdnPrefixEntry, error)
+	GetMsisdnPrefixGroupByID(ctx context.Context, id int32) (MsisdnPrefixGroup, error)
+	GetMsisdnPrefixGroupByReference(ctx context.Context, reference *string) (MsisdnPrefixGroup, error)
 	// Selects pending DLR jobs and locks them for processing.
 	GetPendingDLRsToForward(ctx context.Context, arg GetPendingDLRsToForwardParams) ([]GetPendingDLRsToForwardRow, error)
 	// Join MNO Name for display
 	GetPricingRuleByID(ctx context.Context, id int32) (GetPricingRuleByIDRow, error)
+	GetRoutingAssignmentByID(ctx context.Context, id int32) (GetRoutingAssignmentByIDRow, error)
+	GetRoutingAssignmentByRoutingGroupAndPrefixGroup(ctx context.Context, arg GetRoutingAssignmentByRoutingGroupAndPrefixGroupParams) (RoutingAssignment, error)
+	GetRoutingGroupByID(ctx context.Context, id int32) (RoutingGroup, error)
+	GetRoutingGroupByReference(ctx context.Context, reference *string) (RoutingGroup, error)
+	// Returns the routing_group_id (can be NULL) and the sp_credential_id itself for context.
+	GetRoutingGroupIdForSpCredential(ctx context.Context, id int32) (GetRoutingGroupIdForSpCredentialRow, error)
+	GetRoutingGroupReferenceById(ctx context.Context, id int32) (*string, error)
 	// Join with MNOs to get the name for display
 	GetRoutingRuleByID(ctx context.Context, id int32) (GetRoutingRuleByIDRow, error)
 	// Gets SP credential based on a hashed API key for HTTP auth.
@@ -85,6 +126,7 @@ type Querier interface {
 	// Gets all segment statuses for final status aggregation
 	GetSegmentStatusesForMessage(ctx context.Context, messageID int64) ([]GetSegmentStatusesForMessageRow, error)
 	GetServiceProviderByID(ctx context.Context, id int32) (ServiceProvider, error)
+	GetSpCredentialRoutingGroupId(ctx context.Context, id int32) (*int32, error)
 	GetTemplateContent(ctx context.Context, arg GetTemplateContentParams) (string, error)
 	// Gets a specific wallet by its primary ID.
 	GetWalletByID(ctx context.Context, id int32) (Wallet, error)
@@ -97,8 +139,13 @@ type Querier interface {
 	// Lists detailed message information based on optional filters with pagination. Excludes message content.
 	// LEFT JOIN needed for EXISTS filter below, but DISTINCT ON handles duplicates if join remains
 	ListMessageDetails(ctx context.Context, arg ListMessageDetailsParams) ([]ListMessageDetailsRow, error)
+	ListMsisdnPrefixEntriesByGroup(ctx context.Context, arg ListMsisdnPrefixEntriesByGroupParams) ([]MsisdnPrefixEntry, error)
+	ListMsisdnPrefixGroups(ctx context.Context, arg ListMsisdnPrefixGroupsParams) ([]MsisdnPrefixGroup, error)
 	// Lists pricing rules for a specific Service Provider, paginated.
 	ListPricingRulesBySP(ctx context.Context, arg ListPricingRulesBySPParams) ([]ListPricingRulesBySPRow, error)
+	// Lists assignments for a specific routing group.
+	ListRoutingAssignmentsByRoutingGroup(ctx context.Context, arg ListRoutingAssignmentsByRoutingGroupParams) ([]ListRoutingAssignmentsByRoutingGroupRow, error)
+	ListRoutingGroups(ctx context.Context, arg ListRoutingGroupsParams) ([]RoutingGroup, error)
 	// Lists routing rules, optionally filtered by MNO ID, with pagination.
 	ListRoutingRules(ctx context.Context, arg ListRoutingRulesParams) ([]ListRoutingRulesRow, error)
 	// Lists credentials, optionally filtered by Service Provider ID
@@ -114,6 +161,7 @@ type Querier interface {
 	// or potentially as the final aggregated status if needed.
 	MarkMessageSendFailed(ctx context.Context, arg MarkMessageSendFailedParams) error
 	MarkMessageSent(ctx context.Context, id int64) error
+	RemoveRoutingGroupFromSpCredential(ctx context.Context, spCredentialID int32) (SpCredential, error)
 	// Optional: Periodically run to unlock jobs held by dead workers.
 	UnlockStaleDLRs(ctx context.Context) error
 	// Check threshold and notification time
@@ -128,6 +176,12 @@ type Querier interface {
 	// Updates status after Sender.Send finishes (regardless of segment success/failure)
 	UpdateMessageSendAttempted(ctx context.Context, id int64) error
 	UpdateMessageValidatedRouted(ctx context.Context, arg UpdateMessageValidatedRoutedParams) error
+	UpdateMsisdnPrefixEntry(ctx context.Context, arg UpdateMsisdnPrefixEntryParams) (MsisdnPrefixEntry, error)
+	UpdateMsisdnPrefixGroup(ctx context.Context, arg UpdateMsisdnPrefixGroupParams) (MsisdnPrefixGroup, error)
+	// Can also add routing_group_id to WHERE if updates are always scoped to a group passed in context
+	// WHERE id = sqlc.arg(id) AND routing_group_id = sqlc.arg(routing_group_id_context)
+	UpdateRoutingAssignment(ctx context.Context, arg UpdateRoutingAssignmentParams) (RoutingAssignment, error)
+	UpdateRoutingGroup(ctx context.Context, arg UpdateRoutingGroupParams) (RoutingGroup, error)
 	// Optional MNO ID filter
 	UpdateRoutingRule(ctx context.Context, arg UpdateRoutingRuleParams) (RoutingRule, error)
 	// Updates status, password hash, http_config for a credential.

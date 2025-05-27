@@ -17,6 +17,7 @@ const (
 	MNOMsgIDKey         contextKey = "mno_msg_id"
 	SegMsgIDKey         contextKey = "seg_msg_id"
 	MSISDNKey           contextKey = "msisdn"
+	SpCredentialID      contextKey = "sp_credential_id"
 	WalletIDKey         contextKey = "wallet_id"
 	CallBackKey         contextKey = "callback_url"
 	WorkerID            contextKey = "worker_id"
@@ -94,6 +95,10 @@ func ContextWithSegmentID(ctx context.Context, segmentID int64) context.Context 
 
 func ContextWithMSISDN(ctx context.Context, msisdn string) context.Context {
 	return context.WithValue(ctx, MSISDNKey, msisdn)
+}
+
+func ContextWithSPCredentialID(ctx context.Context, spCredentialID int32) context.Context {
+	return context.WithValue(ctx, SpCredentialID, spCredentialID)
 }
 
 func ContextWithSenderID(ctx context.Context, senderID string) context.Context {

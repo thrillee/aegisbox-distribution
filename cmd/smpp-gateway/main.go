@@ -76,7 +76,7 @@ func main() {
 	processorDeps := sms.ProcessorDependencies{
 		DBPool:        dbpool,
 		DBQueries:     dbQueries,
-		Router:        sms.NewDefaultRouter(dbQueries),
+		Router:        sms.NewDefaultRouter(dbQueries, cfg.DefaultRoutingGroupRef),
 		Validator:     sms.NewDefaultValidator(dbQueries),
 		Pricer:        sms.NewDefaultPricer(dbpool),
 		WalletService: walletSvc,

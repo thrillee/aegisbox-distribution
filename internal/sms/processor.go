@@ -24,7 +24,7 @@ import (
 
 // Router finds the appropriate MNO for a destination MSISDN.
 type Router interface {
-	Route(ctx context.Context, msisdn string) (*mno.RoutingResult, error)
+	Route(ctx context.Context, spCredentialID int32, msisdn string) (*mno.RoutingResult, error)
 }
 
 // Validator checks SenderID, templates, etc.
@@ -226,7 +226,7 @@ func (p *Processor) validateAndRouteMessage(ctx context.Context, msg database.Ge
 	var routingRes *mno.RoutingResult
 	var routeErr error
 	if validationRes.IsValid {
-		routingRes, routeErr = p.router.Route(ctx, msg.OriginalDestinationAddr)
+		routingRes, routeErr = p.router.Route(ctx, msg.SpCredentialID, msg.OriginalDestinationAddr)
 		if routeErr != nil {
 			if internalError == nil {
 				internalError = fmt.Errorf("routing internal error: %w", routeErr)
