@@ -64,6 +64,21 @@ func (q *Queries) DeleteRoutingRule(ctx context.Context, id int32) error {
 	return err
 }
 
+const getApplicableRoutingRule = `-- name: GetApplicableRoutingRule :one
+SELECT mno_id
+FROM routing_rules
+WHERE $1 LIKE prefix || '%' -- Use LIKE for prefix matching (e.g., '234803...' LIKE '234803%')
+ORDER BY length(prefix) DESC, priority ASC -- Match longest prefix first, then by priority
+LIMIT 1
+`
+
+func (q *Queries) GetApplicableRoutingRule(ctx context.Context, prefix string) (int32, error) {
+	row := q.db.QueryRow(ctx, getApplicableRoutingRule, prefix)
+	var mno_id int32
+	err := row.Scan(&mno_id)
+	return mno_id, err
+}
+
 const getRoutingRuleByID = `-- name: GetRoutingRuleByID :one
 SELECT rr.id, rr.prefix, rr.mno_id, rr.priority, rr.created_at, rr.updated_at, m.name as mno_name
 FROM routing_rules rr
