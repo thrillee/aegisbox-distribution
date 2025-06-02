@@ -11,7 +11,6 @@ import (
 	"github.com/thrillee/aegisbox/internal/database"
 	"github.com/thrillee/aegisbox/internal/logging"
 	"github.com/thrillee/aegisbox/internal/sp"
-	// "regexp" // If needed for validation
 )
 
 // Compile-time check
@@ -32,7 +31,10 @@ func NewDefaultIncomingMessageHandler(q database.Querier) *DefaultIncomingMessag
 // HandleIncomingMessage implements the sp.IncomingMessageHandler interface.
 // It validates basic inputs, determines currency, inserts the message into the DB,
 // and returns an Acknowledgement.
-func (h *DefaultIncomingMessageHandler) HandleIncomingMessage(ctx context.Context, msg sp.IncomingSPMessage) (sp.Acknowledgement, error) {
+func (h *DefaultIncomingMessageHandler) HandleIncomingMessage(
+	ctx context.Context,
+	msg sp.IncomingSPMessage,
+) (sp.Acknowledgement, error) {
 	// Enrich context - SPID and CredentialID should already be in ctx from auth middleware/handler
 	logCtx := logging.ContextWithSenderID(ctx, msg.SenderID) // Add logging helpers as needed
 	logCtx = logging.ContextWithMSISDN(logCtx, msg.DestinationMSISDN)
@@ -54,7 +56,11 @@ func (h *DefaultIncomingMessageHandler) HandleIncomingMessage(ctx context.Contex
 	// Consider adding default_currency_code to the spAuthInfo context value during auth
 	spDetails, err := h.dbQueries.GetServiceProviderByID(logCtx, msg.ServiceProviderID)
 	if err != nil {
-		slog.ErrorContext(logCtx, "Failed to fetch service provider details for currency lookup", slog.Any("error", err))
+		slog.ErrorContext(
+			logCtx,
+			"Failed to fetch service provider details for currency lookup",
+			slog.Any("error", err),
+		)
 		return sp.Acknowledgement{
 			Status: "rejected",
 			Error:  "Internal error: could not verify service provider",
@@ -62,7 +68,11 @@ func (h *DefaultIncomingMessageHandler) HandleIncomingMessage(ctx context.Contex
 	}
 	currencyCode := spDetails.DefaultCurrencyCode
 	if currencyCode == "" {
-		slog.ErrorContext(logCtx, "Service provider is missing a default currency code", slog.Int("sp_id", int(msg.ServiceProviderID)))
+		slog.ErrorContext(
+			logCtx,
+			"Service provider is missing a default currency code",
+			slog.Int("sp_id", int(msg.ServiceProviderID)),
+		)
 		// Fallback or reject? Reject for now.
 		return sp.Acknowledgement{
 			Status: "rejected",
@@ -90,7 +100,10 @@ func (h *DefaultIncomingMessageHandler) HandleIncomingMessage(ctx context.Contex
 		ShortMessage:            msg.MessageContent,
 		TotalSegments:           msg.TotalSegments,
 		CurrencyCode:            currencyCode,
-		SubmittedAt:             pgtype.Timestamptz{Time: msg.ReceivedAt, Valid: true}, // Use SP submit time
+		SubmittedAt: pgtype.Timestamptz{
+			Time:  msg.ReceivedAt,
+			Valid: true,
+		}, // Use SP submit time
 	}
 	if msg.ConcatRef > 0 { // Example if concat ref parsed from UDH
 		concatRef := fmt.Sprintf("%d", msg.ConcatRef)
@@ -100,7 +113,11 @@ func (h *DefaultIncomingMessageHandler) HandleIncomingMessage(ctx context.Contex
 	// 4. Insert into Database
 	insertedID, err := h.dbQueries.InsertMessageIn(logCtx, params)
 	if err != nil {
-		slog.ErrorContext(logCtx, "Failed to insert incoming message into database", slog.Any("error", err))
+		slog.ErrorContext(
+			logCtx,
+			"Failed to insert incoming message into database",
+			slog.Any("error", err),
+		)
 		// Determine if it's a retryable DB error or something else?
 		return sp.Acknowledgement{
 			Status: "rejected",
@@ -109,7 +126,11 @@ func (h *DefaultIncomingMessageHandler) HandleIncomingMessage(ctx context.Contex
 	}
 
 	// 5. Return Success Acknowledgement
-	slog.InfoContext(logCtx, "Incoming message accepted and stored", slog.Int64("internal_msg_id", insertedID))
+	slog.InfoContext(
+		logCtx,
+		"Incoming message accepted and stored",
+		slog.Int64("internal_msg_id", insertedID),
+	)
 	return sp.Acknowledgement{
 		InternalMessageID: clientMessageId,
 		Status:            "accepted",
