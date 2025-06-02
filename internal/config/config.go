@@ -24,7 +24,7 @@ type Config struct {
 	WorkerConfig               WorkerConfig    // Assuming workers.Config defined in workers pkg or here
 	ServerConfig               ServerConfig
 	HttpConfig                 HttpConfig
-	otpScopePreprocessorConfig OtpScopePreprocessorConfig
+	OtpScopePreprocessorConfig OtpScopePreprocessorConfig
 	DLRForwardInterval         time.Duration `envconfig:"WORKER_DLR_INTERVAL"                       default:"2s"`
 	DLRForwardBatchSize        int           `envconfig:"WORKER_DLR_BATCH_SIZE"                     default:"100"`
 	DefaultRoutingGroupRef     string        `envconfig:"DEFAULT_ROUTING_GROUP_REF"                 default:"001"`
