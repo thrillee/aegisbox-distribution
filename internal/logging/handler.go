@@ -32,6 +32,7 @@ const (
 	MangerAPIHandlerKey contextKey = "manager_api_handler"
 	SpEMailKey          contextKey = "sp_email"
 	PricingRuleID       contextKey = "pricing_rule_id"
+	ServiceName         contextKey = "serivce_name"
 	// Add other keys as needed
 )
 
@@ -160,4 +161,8 @@ func ContextWithPricingRuleID(ctx context.Context, createdRuleID int32) context.
 
 func ContextWithClientMessageID(ctx context.Context, msgID string) context.Context {
 	return context.WithValue(ctx, ClientMessageID, msgID)
+}
+
+func ContextWithService(ctx context.Context, serviceName string) context.Context {
+	return context.WithValue(ctx, ServiceName, serviceName)
 }

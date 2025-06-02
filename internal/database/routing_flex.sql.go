@@ -15,7 +15,7 @@ const assignRoutingGroupToSpCredential = `-- name: AssignRoutingGroupToSpCredent
 UPDATE sp_credentials
 SET routing_group_id = $1, updated_at = NOW()
 WHERE id = $2
-RETURNING id, service_provider_id, protocol, status, system_id, password_hash, bind_type, api_key_hash, api_key_identifier, http_config, created_at, updated_at, routing_group_id
+RETURNING id, service_provider_id, protocol, status, system_id, password_hash, bind_type, api_key_hash, api_key_identifier, http_config, created_at, updated_at, routing_group_id, scope
 `
 
 type AssignRoutingGroupToSpCredentialParams struct {
@@ -40,6 +40,7 @@ func (q *Queries) AssignRoutingGroupToSpCredential(ctx context.Context, arg Assi
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.RoutingGroupID,
+		&i.Scope,
 	)
 	return i, err
 }
@@ -769,7 +770,7 @@ const removeRoutingGroupFromSpCredential = `-- name: RemoveRoutingGroupFromSpCre
 UPDATE sp_credentials
 SET routing_group_id = NULL, updated_at = NOW()
 WHERE id = $1
-RETURNING id, service_provider_id, protocol, status, system_id, password_hash, bind_type, api_key_hash, api_key_identifier, http_config, created_at, updated_at, routing_group_id
+RETURNING id, service_provider_id, protocol, status, system_id, password_hash, bind_type, api_key_hash, api_key_identifier, http_config, created_at, updated_at, routing_group_id, scope
 `
 
 func (q *Queries) RemoveRoutingGroupFromSpCredential(ctx context.Context, spCredentialID int32) (SpCredential, error) {
@@ -789,6 +790,7 @@ func (q *Queries) RemoveRoutingGroupFromSpCredential(ctx context.Context, spCred
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.RoutingGroupID,
+		&i.Scope,
 	)
 	return i, err
 }

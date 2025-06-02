@@ -70,3 +70,6 @@ RETURNING *;
 
 -- name: DeleteSPCredential :exec
 DELETE FROM sp_credentials WHERE id = $1;
+
+-- name: GetSpCredentialScope :one
+SELECT scope FROM sp_credentials WHERE id = $1;

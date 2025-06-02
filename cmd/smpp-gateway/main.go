@@ -28,7 +28,11 @@ import (
 
 func main() {
 	// --- Context and Basic Setup ---
-	appCtx, rootCancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	appCtx, rootCancel := signal.NotifyContext(
+		context.Background(),
+		syscall.SIGINT,
+		syscall.SIGTERM,
+	)
 	defer rootCancel()
 
 	// --- Configuration ---
@@ -43,7 +47,10 @@ func main() {
 	if cfg.LogLevel == "debug" {
 		logLevel = slog.LevelDebug
 	}
-	opts := &slog.HandlerOptions{Level: logLevel, AddSource: logLevel <= slog.LevelDebug} // Add source location for debug
+	opts := &slog.HandlerOptions{
+		Level:     logLevel,
+		AddSource: logLevel <= slog.LevelDebug,
+	} // Add source location for debug
 	baseHandler := slog.NewJSONHandler(os.Stdout, opts)
 	contextHandler := logging.NewContextHandler(baseHandler)
 	logger := slog.New(contextHandler)
@@ -70,7 +77,17 @@ func main() {
 	mainSegmenter := segmenter.NewDefaultSegmenter()
 	walletSvc := wallet.NewService(dbpool, dbQueries) // Use concrete impl for now
 	notifier := notification.NewLogNotifier()
-	incomingMessageHandler := sms.NewDefaultIncomingMessageHandler(dbQueries)
+
+	routingPreprocessor := sms.NewRoutingPreprocessor(dbQueries, "DefaultRoutingGroupRef")
+	otpPreprocessor := sms.NewOtpScopePreprocessor(dbQueries, cfg.OtpScopePreprocessorConfig)
+
+	incomingMessageHandler := sms.NewDefaultIncomingMessageHandler(
+		dbQueries,
+		[]sp.MessagePreprocessor{
+			routingPreprocessor,
+			otpPreprocessor,
+		},
+	)
 
 	// Create processor dependencies - forwarder factory creation is deferred
 	processorDeps := sms.ProcessorDependencies{
@@ -86,7 +103,10 @@ func main() {
 	smsProcessor := sms.NewProcessor(processorDeps) // smsProcessor now holds core logic
 
 	httpClient := &http.Client{Timeout: 20 * time.Second}
-	httpForwarder := sp.NewHTTPSPForwarder(sp.HTTPForwarderConfig{Timeout: 15 * time.Second}, httpClient)
+	httpForwarder := sp.NewHTTPSPForwarder(
+		sp.HTTPForwarderConfig{Timeout: 15 * time.Second},
+		httpClient,
+	)
 
 	// --- DLR Forwarder Factory (Needs initialized forwarders) ---
 	// We defer SMPSPForwarder initialization slightly
@@ -104,7 +124,12 @@ func main() {
 	smsProcessor.SetSender(sms.NewDefaultSender(dbQueries, mnoManager, mainSegmenter))
 
 	// --- Initialize SMPP Server (Implements Session Manager) ---
-	smppServer := smppserver.NewServer(appCtx, cfg.ServerConfig, dbQueries, incomingMessageHandler) // Pass core msg handler
+	smppServer := smppserver.NewServer(
+		appCtx,
+		cfg.ServerConfig,
+		dbQueries,
+		incomingMessageHandler,
+	) // Pass core msg handler
 
 	// --- Initialize DLR Forwarders & Factory (Now that Session Manager exists) ---
 	smppForwarder := smppserver.NewSMPSPForwarder(smppServer)
@@ -128,7 +153,11 @@ func main() {
 	)
 
 	// --- Initialize HTTP Server ---
-	httpServer := httpserver.NewServer(cfg.HttpConfig, dbQueries, incomingMessageHandler) // Pass core msg handler
+	httpServer := httpserver.NewServer(
+		cfg.HttpConfig,
+		dbQueries,
+		incomingMessageHandler,
+	) // Pass core msg handler
 
 	// --- Start Components Concurrently ---
 	var wg sync.WaitGroup // Use waitgroup for graceful shutdown

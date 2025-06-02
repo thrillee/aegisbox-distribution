@@ -38,7 +38,11 @@ type MnoRoutingDetails struct {
 	MnoSystemID     *string // SystemID of the specific MNO connection
 }
 
-func (r *DefaultRouter) Route(ctx context.Context, spCredentialID int32, msisdn string) (*mno.RoutingResult, error) {
+func (r *DefaultRouter) Route(
+	ctx context.Context,
+	spCredentialID int32,
+	msisdn string,
+) (*mno.RoutingResult, error) {
 	logCtx := logging.ContextWithMSISDN(ctx, msisdn)
 	// You might want a logging helper to add spCredentialID to context too
 	logCtx = logging.ContextWithSPCredentialID(logCtx, spCredentialID)
@@ -51,7 +55,10 @@ func (r *DefaultRouter) Route(ctx context.Context, spCredentialID int32, msisdn 
 
 	normalizedMSISDN := strings.TrimPrefix(msisdn, "+")
 	if normalizedMSISDN == "" {
-		outputResult.Error = fmt.Errorf("MSISDN is empty or invalid after normalization: %s", msisdn)
+		outputResult.Error = fmt.Errorf(
+			"MSISDN is empty or invalid after normalization: %s",
+			msisdn,
+		)
 		slog.WarnContext(logCtx, outputResult.Error.Error())
 		return outputResult, nil // Not an internal error, but a data error
 	}
@@ -63,23 +70,49 @@ func (r *DefaultRouter) Route(ctx context.Context, spCredentialID int32, msisdn 
 	spCredRoutingInfo, err := r.dbQueries.GetSpCredentialRoutingGroupId(logCtx, spCredentialID)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			slog.WarnContext(logCtx, "SP Credential not found, cannot determine routing group", slog.Int("sp_credential_id", int(spCredentialID)))
-			outputResult.Error = fmt.Errorf("service provider credential %d not found", spCredentialID)
+			slog.WarnContext(
+				logCtx,
+				"SP Credential not found, cannot determine routing group",
+				slog.Int("sp_credential_id", int(spCredentialID)),
+			)
+			outputResult.Error = fmt.Errorf(
+				"service provider credential %d not found",
+				spCredentialID,
+			)
 			return outputResult, nil // Or a different error type if SP cred must exist
 		}
-		slog.ErrorContext(logCtx, "Failed to get routing group ID for SP credential", slog.Any("error", err), slog.Int("sp_credential_id", int(spCredentialID)))
-		outputResult.Error = fmt.Errorf("database error fetching SP credential routing info: %w", err)
+		slog.ErrorContext(
+			logCtx,
+			"Failed to get routing group ID for SP credential",
+			slog.Any("error", err),
+			slog.Int("sp_credential_id", int(spCredentialID)),
+		)
+		outputResult.Error = fmt.Errorf(
+			"database error fetching SP credential routing info: %w",
+			err,
+		)
 		return outputResult, err // Internal DB error
 	}
 	currentRoutingGroupID = spCredRoutingInfo // This is routing_group_id which can be NULL (sql.NullInt32)
 
 	// If sp_credential has no specific routing_group_id, try to use the system default
 	if currentRoutingGroupID == nil && r.defaultRoutingGroupRef == nil {
-		slog.DebugContext(logCtx, "SP credential has no routing group, attempting system default", slog.Any("default_ref", r.defaultRoutingGroupRef))
-		defaultGroup, err := r.dbQueries.GetRoutingGroupByReference(logCtx, r.defaultRoutingGroupRef)
+		slog.DebugContext(
+			logCtx,
+			"SP credential has no routing group, attempting system default",
+			slog.Any("default_ref", r.defaultRoutingGroupRef),
+		)
+		defaultGroup, err := r.dbQueries.GetRoutingGroupByReference(
+			logCtx,
+			r.defaultRoutingGroupRef,
+		)
 		if err != nil {
 			if errors.Is(err, pgx.ErrNoRows) {
-				slog.WarnContext(logCtx, "System default routing group reference not found in DB", slog.Any("ref", r.defaultRoutingGroupRef))
+				slog.WarnContext(
+					logCtx,
+					"System default routing group reference not found in DB",
+					slog.Any("ref", r.defaultRoutingGroupRef),
+				)
 				// Proceed without a routing group, or error, depending on desired behavior
 			} else {
 				slog.ErrorContext(logCtx, "Failed to get system default routing group by reference", slog.Any("error", err))
@@ -92,21 +125,43 @@ func (r *DefaultRouter) Route(ctx context.Context, spCredentialID int32, msisdn 
 	}
 
 	if currentRoutingGroupID == nil {
-		slog.WarnContext(logCtx, "No applicable routing group found (SP specific or system default)", slog.Int("sp_credential_id", int(spCredentialID)))
-		outputResult.Error = fmt.Errorf("no routing group configured for credential %d and no system default applicable", spCredentialID)
+		slog.WarnContext(
+			logCtx,
+			"No applicable routing group found (SP specific or system default)",
+			slog.Int("sp_credential_id", int(spCredentialID)),
+		)
+		outputResult.Error = fmt.Errorf(
+			"no routing group configured for credential %d and no system default applicable",
+			spCredentialID,
+		)
 		return outputResult, nil
 	}
 
 	// 2. Find the MSISDN Prefix Group for the given MSISDN
-	slog.DebugContext(logCtx, "Finding MSISDN prefix group", slog.String("normalized_msisdn", normalizedMSISDN))
+	slog.DebugContext(
+		logCtx,
+		"Finding MSISDN prefix group",
+		slog.String("normalized_msisdn", normalizedMSISDN),
+	)
 	matchedPrefixInfo, err := r.dbQueries.FindMatchingPrefixGroupForMSISDN(logCtx, normalizedMSISDN)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			slog.InfoContext(logCtx, "No MSISDN prefix entry matched", slog.String("normalized_msisdn", normalizedMSISDN))
-			outputResult.Error = fmt.Errorf("no matching MSISDN prefix group for %s", normalizedMSISDN)
+			slog.InfoContext(
+				logCtx,
+				"No MSISDN prefix entry matched",
+				slog.String("normalized_msisdn", normalizedMSISDN),
+			)
+			outputResult.Error = fmt.Errorf(
+				"no matching MSISDN prefix group for %s",
+				normalizedMSISDN,
+			)
 			return outputResult, nil
 		}
-		slog.ErrorContext(logCtx, "Database error finding matching MSISDN prefix group", slog.Any("error", err))
+		slog.ErrorContext(
+			logCtx,
+			"Database error finding matching MSISDN prefix group",
+			slog.Any("error", err),
+		)
 		outputResult.Error = fmt.Errorf("database error finding prefix group: %w", err)
 		return outputResult, err // Internal DB error
 	}
@@ -129,11 +184,18 @@ func (r *DefaultRouter) Route(ctx context.Context, spCredentialID int32, msisdn 
 			slog.InfoContext(logCtx, "No active routing assignment found",
 				slog.Int("routing_group_id", int(routingParams.RoutingGroupID)),
 				slog.Int("msisdn_prefix_group_id", int(routingParams.MsisdnPrefixGroupID)))
-			outputResult.Error = fmt.Errorf("no route assignment for prefix group %d in routing group %d",
-				routingParams.MsisdnPrefixGroupID, routingParams.RoutingGroupID)
+			outputResult.Error = fmt.Errorf(
+				"no route assignment for prefix group %d in routing group %d",
+				routingParams.MsisdnPrefixGroupID,
+				routingParams.RoutingGroupID,
+			)
 			return outputResult, nil
 		}
-		slog.ErrorContext(logCtx, "Database error getting applicable MNO from routing assignments", slog.Any("error", err))
+		slog.ErrorContext(
+			logCtx,
+			"Database error getting applicable MNO from routing assignments",
+			slog.Any("error", err),
+		)
 		outputResult.Error = fmt.Errorf("database error in final route lookup: %w", err)
 		return outputResult, err // Internal DB error
 	}

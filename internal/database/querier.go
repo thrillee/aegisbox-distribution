@@ -36,6 +36,14 @@ type Querier interface {
 	CreateMsisdnPrefixEntry(ctx context.Context, arg CreateMsisdnPrefixEntryParams) (MsisdnPrefixEntry, error)
 	// Queries for MsisdnPrefixGroup
 	CreateMsisdnPrefixGroup(ctx context.Context, arg CreateMsisdnPrefixGroupParams) (MsisdnPrefixGroup, error)
+	// Allow global or SP-specific template
+	// ### OTP Alternative Senders ###
+	CreateOtpAlternativeSender(ctx context.Context, arg CreateOtpAlternativeSenderParams) (OtpAlternativeSender, error)
+	// ### OTP Message Templates ###
+	CreateOtpMessageTemplate(ctx context.Context, arg CreateOtpMessageTemplateParams) (OtpMessageTemplate, error)
+	// CRUD for otp_message_templates (List, Update, Delete) as needed...
+	// ### OTP Sender Template Assignments ###
+	CreateOtpSenderTemplateAssignment(ctx context.Context, arg CreateOtpSenderTemplateAssignmentParams) (OtpSenderTemplateAssignment, error)
 	CreatePricingRule(ctx context.Context, arg CreatePricingRuleParams) (PricingRule, error)
 	// Queries for RoutingAssignment (the new routing rules)
 	CreateRoutingAssignment(ctx context.Context, arg CreateRoutingAssignmentParams) (RoutingAssignment, error)
@@ -78,6 +86,8 @@ type Querier interface {
 	FindSegmentByMnoMessageID(ctx context.Context, mnoMessageID *string) (FindSegmentByMnoMessageIDRow, error)
 	// Selects all connections marked as 'active' in status
 	GetActiveMNOConnections(ctx context.Context) ([]GetActiveMNOConnectionsRow, error)
+	// Selects the highest priority active template for a given alternative sender and optionally MNO.
+	GetActiveOtpTemplateAssignment(ctx context.Context, arg GetActiveOtpTemplateAssignmentParams) (GetActiveOtpTemplateAssignmentRow, error)
 	// Core routing query:
 	// Given a routing_group_id (from sp_credential or a default) and an msisdn_prefix_group_id (from MSISDN lookup),
 	// find the active MNO to route to.
@@ -101,6 +111,8 @@ type Querier interface {
 	GetMsisdnPrefixEntryByPrefix(ctx context.Context, msisdnPrefix string) (MsisdnPrefixEntry, error)
 	GetMsisdnPrefixGroupByID(ctx context.Context, id int32) (MsisdnPrefixGroup, error)
 	GetMsisdnPrefixGroupByReference(ctx context.Context, reference *string) (MsisdnPrefixGroup, error)
+	GetOtpAlternativeSenderByID(ctx context.Context, id int32) (OtpAlternativeSender, error)
+	GetOtpMessageTemplateByID(ctx context.Context, id int32) (OtpMessageTemplate, error)
 	// Selects pending DLR jobs and locks them for processing.
 	GetPendingDLRsToForward(ctx context.Context, arg GetPendingDLRsToForwardParams) ([]GetPendingDLRsToForwardRow, error)
 	// Join MNO Name for display
@@ -127,13 +139,19 @@ type Querier interface {
 	GetSegmentStatusesForMessage(ctx context.Context, messageID int64) ([]GetSegmentStatusesForMessageRow, error)
 	GetServiceProviderByID(ctx context.Context, id int32) (ServiceProvider, error)
 	GetSpCredentialRoutingGroupId(ctx context.Context, id int32) (*int32, error)
+	GetSpCredentialScope(ctx context.Context, id int32) (string, error)
 	GetTemplateContent(ctx context.Context, arg GetTemplateContentParams) (string, error)
 	// Gets a specific wallet by its primary ID.
 	GetWalletByID(ctx context.Context, id int32) (Wallet, error)
 	GetWalletForUpdate(ctx context.Context, arg GetWalletForUpdateParams) (GetWalletForUpdateRow, error)
 	GetWalletForUpdateByID(ctx context.Context, id int32) (Wallet, error)
 	GetWalletsBelowThreshold(ctx context.Context) ([]GetWalletsBelowThresholdRow, error)
+	IncrementOtpAlternativeSenderUsage(ctx context.Context, id int32) (OtpAlternativeSender, error)
+	IncrementOtpAssignmentUsage(ctx context.Context, id int32) (IncrementOtpAssignmentUsageRow, error)
 	InsertMessageIn(ctx context.Context, arg InsertMessageInParams) (int64, error)
+	// Selects active senders that are not depleted, optionally for a specific MNO or global ones (MNO ID IS NULL).
+	// Orders by least recently used to attempt rotation.
+	ListGlobalOtpAlternativeSenders(ctx context.Context, arg ListGlobalOtpAlternativeSendersParams) ([]OtpAlternativeSender, error)
 	ListMNOConnectionsByMNO(ctx context.Context, arg ListMNOConnectionsByMNOParams) ([]MnoConnection, error)
 	ListMNOs(ctx context.Context, arg ListMNOsParams) ([]Mno, error)
 	// Lists detailed message information based on optional filters with pagination. Excludes message content.
@@ -151,6 +169,10 @@ type Querier interface {
 	// Lists credentials, optionally filtered by Service Provider ID
 	ListSPCredentials(ctx context.Context, arg ListSPCredentialsParams) ([]SpCredential, error)
 	ListServiceProviders(ctx context.Context, arg ListServiceProvidersParams) ([]ServiceProvider, error)
+	// Limit how many to fetch for selection in code
+	// Selects Service Provider-specific, active senders that are not depleted.
+	// Can filter by a specific MNO (if $2 is not NULL) OR select SP-specific senders that are MNO-agnostic (sender.mno_id IS NULL, if $2 is NULL).
+	ListSpSpecificOtpAlternativeSenders(ctx context.Context, arg ListSpSpecificOtpAlternativeSendersParams) ([]OtpAlternativeSender, error)
 	// Lists wallets for a specific Service Provider, paginated.
 	ListWalletsBySP(ctx context.Context, arg ListWalletsBySPParams) ([]Wallet, error)
 	// Marks a job as failed for this attempt, increments attempts, and potentially sets to permanent failure.

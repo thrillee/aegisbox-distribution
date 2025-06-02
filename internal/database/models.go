@@ -130,6 +130,44 @@ type MsisdnPrefixGroup struct {
 	UpdatedAt pgtype.Timestamptz `json:"updatedAt"`
 }
 
+type OtpAlternativeSender struct {
+	ID                 int32              `json:"id"`
+	SenderIDString     string             `json:"senderIdString"`
+	ServiceProviderID  *int32             `json:"serviceProviderId"`
+	MnoID              *int32             `json:"mnoId"`
+	Status             string             `json:"status"`
+	CurrentUsageCount  int32              `json:"currentUsageCount"`
+	MaxUsageCount      int32              `json:"maxUsageCount"`
+	ResetIntervalHours *int32             `json:"resetIntervalHours"`
+	LastResetAt        pgtype.Timestamptz `json:"lastResetAt"`
+	LastUsedAt         pgtype.Timestamptz `json:"lastUsedAt"`
+	Notes              *string            `json:"notes"`
+	CreatedAt          pgtype.Timestamptz `json:"createdAt"`
+	UpdatedAt          pgtype.Timestamptz `json:"updatedAt"`
+}
+
+type OtpMessageTemplate struct {
+	ID               int32              `json:"id"`
+	Name             string             `json:"name"`
+	ContentTemplate  string             `json:"contentTemplate"`
+	DefaultBrandName *string            `json:"defaultBrandName"`
+	Status           string             `json:"status"`
+	CreatedAt        pgtype.Timestamptz `json:"createdAt"`
+	UpdatedAt        pgtype.Timestamptz `json:"updatedAt"`
+}
+
+type OtpSenderTemplateAssignment struct {
+	ID                     int32              `json:"id"`
+	OtpAlternativeSenderID int32              `json:"otpAlternativeSenderId"`
+	OtpMessageTemplateID   int32              `json:"otpMessageTemplateId"`
+	MnoID                  *int32             `json:"mnoId"`
+	Priority               int32              `json:"priority"`
+	Status                 string             `json:"status"`
+	AssignmentUsageCount   int64              `json:"assignmentUsageCount"`
+	CreatedAt              pgtype.Timestamptz `json:"createdAt"`
+	UpdatedAt              pgtype.Timestamptz `json:"updatedAt"`
+}
+
 type PricingRule struct {
 	ID                int32              `json:"id"`
 	ServiceProviderID int32              `json:"serviceProviderId"`
@@ -209,6 +247,7 @@ type SpCredential struct {
 	UpdatedAt         pgtype.Timestamptz `json:"updatedAt"`
 	// The routing group assigned to this specific SP credential. NULL means system default may apply.
 	RoutingGroupID *int32 `json:"routingGroupId"`
+	Scope          string `json:"scope"`
 }
 
 type Template struct {

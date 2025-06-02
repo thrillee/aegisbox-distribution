@@ -7,7 +7,237 @@ package database
 
 import (
 	"context"
+
+	"github.com/jackc/pgx/v5/pgtype"
 )
+
+const createOtpAlternativeSender = `-- name: CreateOtpAlternativeSender :one
+
+
+INSERT INTO otp_alternative_senders (
+    sender_id_string, mno_id, status, max_usage_count, reset_interval_hours, notes
+) VALUES (
+    $1, $2, $3, $4, $5, $6
+) RETURNING id, sender_id_string, service_provider_id, mno_id, status, current_usage_count, max_usage_count, reset_interval_hours, last_reset_at, last_used_at, notes, created_at, updated_at
+`
+
+type CreateOtpAlternativeSenderParams struct {
+	SenderIDString     string  `json:"senderIdString"`
+	MnoID              *int32  `json:"mnoId"`
+	Status             string  `json:"status"`
+	MaxUsageCount      int32   `json:"maxUsageCount"`
+	ResetIntervalHours *int32  `json:"resetIntervalHours"`
+	Notes              *string `json:"notes"`
+}
+
+// Allow global or SP-specific template
+// ### OTP Alternative Senders ###
+func (q *Queries) CreateOtpAlternativeSender(ctx context.Context, arg CreateOtpAlternativeSenderParams) (OtpAlternativeSender, error) {
+	row := q.db.QueryRow(ctx, createOtpAlternativeSender,
+		arg.SenderIDString,
+		arg.MnoID,
+		arg.Status,
+		arg.MaxUsageCount,
+		arg.ResetIntervalHours,
+		arg.Notes,
+	)
+	var i OtpAlternativeSender
+	err := row.Scan(
+		&i.ID,
+		&i.SenderIDString,
+		&i.ServiceProviderID,
+		&i.MnoID,
+		&i.Status,
+		&i.CurrentUsageCount,
+		&i.MaxUsageCount,
+		&i.ResetIntervalHours,
+		&i.LastResetAt,
+		&i.LastUsedAt,
+		&i.Notes,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const createOtpMessageTemplate = `-- name: CreateOtpMessageTemplate :one
+
+INSERT INTO otp_message_templates (
+    name, content_template, default_brand_name, status
+) VALUES (
+    $1, $2, $3, $4
+) RETURNING id, name, content_template, default_brand_name, status, created_at, updated_at
+`
+
+type CreateOtpMessageTemplateParams struct {
+	Name             string  `json:"name"`
+	ContentTemplate  string  `json:"contentTemplate"`
+	DefaultBrandName *string `json:"defaultBrandName"`
+	Status           string  `json:"status"`
+}
+
+// ### OTP Message Templates ###
+func (q *Queries) CreateOtpMessageTemplate(ctx context.Context, arg CreateOtpMessageTemplateParams) (OtpMessageTemplate, error) {
+	row := q.db.QueryRow(ctx, createOtpMessageTemplate,
+		arg.Name,
+		arg.ContentTemplate,
+		arg.DefaultBrandName,
+		arg.Status,
+	)
+	var i OtpMessageTemplate
+	err := row.Scan(
+		&i.ID,
+		&i.Name,
+		&i.ContentTemplate,
+		&i.DefaultBrandName,
+		&i.Status,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const createOtpSenderTemplateAssignment = `-- name: CreateOtpSenderTemplateAssignment :one
+
+
+
+INSERT INTO otp_sender_template_assignments (
+    otp_alternative_sender_id, otp_message_template_id, mno_id, priority, status
+) VALUES (
+    $1, $2, $3, $4, $5
+) RETURNING id, otp_alternative_sender_id, otp_message_template_id, mno_id, priority, status, assignment_usage_count, created_at, updated_at
+`
+
+type CreateOtpSenderTemplateAssignmentParams struct {
+	OtpAlternativeSenderID int32  `json:"otpAlternativeSenderId"`
+	OtpMessageTemplateID   int32  `json:"otpMessageTemplateId"`
+	MnoID                  *int32 `json:"mnoId"`
+	Priority               int32  `json:"priority"`
+	Status                 string `json:"status"`
+}
+
+// CRUD for otp_message_templates (List, Update, Delete) as needed...
+// ### OTP Sender Template Assignments ###
+func (q *Queries) CreateOtpSenderTemplateAssignment(ctx context.Context, arg CreateOtpSenderTemplateAssignmentParams) (OtpSenderTemplateAssignment, error) {
+	row := q.db.QueryRow(ctx, createOtpSenderTemplateAssignment,
+		arg.OtpAlternativeSenderID,
+		arg.OtpMessageTemplateID,
+		arg.MnoID,
+		arg.Priority,
+		arg.Status,
+	)
+	var i OtpSenderTemplateAssignment
+	err := row.Scan(
+		&i.ID,
+		&i.OtpAlternativeSenderID,
+		&i.OtpMessageTemplateID,
+		&i.MnoID,
+		&i.Priority,
+		&i.Status,
+		&i.AssignmentUsageCount,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const getActiveOtpTemplateAssignment = `-- name: GetActiveOtpTemplateAssignment :one
+SELECT
+    osta.id, osta.otp_alternative_sender_id, osta.otp_message_template_id, osta.mno_id, osta.priority, osta.status, osta.assignment_usage_count, osta.created_at, osta.updated_at,
+    omt.content_template,
+    omt.default_brand_name
+FROM otp_sender_template_assignments osta
+JOIN otp_message_templates omt ON osta.otp_message_template_id = omt.id
+WHERE osta.otp_alternative_sender_id = $1
+  AND osta.status = 'active'
+  AND omt.status = 'active' -- Ensure template itself is active
+  AND (osta.mno_id = $2 OR ($2 IS NULL AND osta.mno_id IS NULL)) -- Matches specific MNO or global assignment
+ORDER BY osta.priority ASC, osta.id ASC -- Lower priority number is better
+LIMIT 1
+`
+
+type GetActiveOtpTemplateAssignmentParams struct {
+	OtpAlternativeSenderID int32  `json:"otpAlternativeSenderId"`
+	MnoID                  *int32 `json:"mnoId"`
+}
+
+type GetActiveOtpTemplateAssignmentRow struct {
+	ID                     int32              `json:"id"`
+	OtpAlternativeSenderID int32              `json:"otpAlternativeSenderId"`
+	OtpMessageTemplateID   int32              `json:"otpMessageTemplateId"`
+	MnoID                  *int32             `json:"mnoId"`
+	Priority               int32              `json:"priority"`
+	Status                 string             `json:"status"`
+	AssignmentUsageCount   int64              `json:"assignmentUsageCount"`
+	CreatedAt              pgtype.Timestamptz `json:"createdAt"`
+	UpdatedAt              pgtype.Timestamptz `json:"updatedAt"`
+	ContentTemplate        string             `json:"contentTemplate"`
+	DefaultBrandName       *string            `json:"defaultBrandName"`
+}
+
+// Selects the highest priority active template for a given alternative sender and optionally MNO.
+func (q *Queries) GetActiveOtpTemplateAssignment(ctx context.Context, arg GetActiveOtpTemplateAssignmentParams) (GetActiveOtpTemplateAssignmentRow, error) {
+	row := q.db.QueryRow(ctx, getActiveOtpTemplateAssignment, arg.OtpAlternativeSenderID, arg.MnoID)
+	var i GetActiveOtpTemplateAssignmentRow
+	err := row.Scan(
+		&i.ID,
+		&i.OtpAlternativeSenderID,
+		&i.OtpMessageTemplateID,
+		&i.MnoID,
+		&i.Priority,
+		&i.Status,
+		&i.AssignmentUsageCount,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.ContentTemplate,
+		&i.DefaultBrandName,
+	)
+	return i, err
+}
+
+const getOtpAlternativeSenderByID = `-- name: GetOtpAlternativeSenderByID :one
+SELECT id, sender_id_string, service_provider_id, mno_id, status, current_usage_count, max_usage_count, reset_interval_hours, last_reset_at, last_used_at, notes, created_at, updated_at FROM otp_alternative_senders WHERE id = $1
+`
+
+func (q *Queries) GetOtpAlternativeSenderByID(ctx context.Context, id int32) (OtpAlternativeSender, error) {
+	row := q.db.QueryRow(ctx, getOtpAlternativeSenderByID, id)
+	var i OtpAlternativeSender
+	err := row.Scan(
+		&i.ID,
+		&i.SenderIDString,
+		&i.ServiceProviderID,
+		&i.MnoID,
+		&i.Status,
+		&i.CurrentUsageCount,
+		&i.MaxUsageCount,
+		&i.ResetIntervalHours,
+		&i.LastResetAt,
+		&i.LastUsedAt,
+		&i.Notes,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const getOtpMessageTemplateByID = `-- name: GetOtpMessageTemplateByID :one
+SELECT id, name, content_template, default_brand_name, status, created_at, updated_at FROM otp_message_templates WHERE id = $1
+`
+
+func (q *Queries) GetOtpMessageTemplateByID(ctx context.Context, id int32) (OtpMessageTemplate, error) {
+	row := q.db.QueryRow(ctx, getOtpMessageTemplateByID, id)
+	var i OtpMessageTemplate
+	err := row.Scan(
+		&i.ID,
+		&i.Name,
+		&i.ContentTemplate,
+		&i.DefaultBrandName,
+		&i.Status,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
 
 const getTemplateContent = `-- name: GetTemplateContent :one
 SELECT content
@@ -26,6 +256,161 @@ func (q *Queries) GetTemplateContent(ctx context.Context, arg GetTemplateContent
 	var content string
 	err := row.Scan(&content)
 	return content, err
+}
+
+const incrementOtpAlternativeSenderUsage = `-- name: IncrementOtpAlternativeSenderUsage :one
+UPDATE otp_alternative_senders
+SET
+    current_usage_count = current_usage_count + 1,
+    last_used_at = NOW()
+WHERE id = $1
+RETURNING id, sender_id_string, service_provider_id, mno_id, status, current_usage_count, max_usage_count, reset_interval_hours, last_reset_at, last_used_at, notes, created_at, updated_at
+`
+
+func (q *Queries) IncrementOtpAlternativeSenderUsage(ctx context.Context, id int32) (OtpAlternativeSender, error) {
+	row := q.db.QueryRow(ctx, incrementOtpAlternativeSenderUsage, id)
+	var i OtpAlternativeSender
+	err := row.Scan(
+		&i.ID,
+		&i.SenderIDString,
+		&i.ServiceProviderID,
+		&i.MnoID,
+		&i.Status,
+		&i.CurrentUsageCount,
+		&i.MaxUsageCount,
+		&i.ResetIntervalHours,
+		&i.LastResetAt,
+		&i.LastUsedAt,
+		&i.Notes,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const incrementOtpAssignmentUsage = `-- name: IncrementOtpAssignmentUsage :one
+UPDATE otp_sender_template_assignments
+SET assignment_usage_count = assignment_usage_count + 1
+WHERE id = $1
+RETURNING id, assignment_usage_count
+`
+
+type IncrementOtpAssignmentUsageRow struct {
+	ID                   int32 `json:"id"`
+	AssignmentUsageCount int64 `json:"assignmentUsageCount"`
+}
+
+func (q *Queries) IncrementOtpAssignmentUsage(ctx context.Context, id int32) (IncrementOtpAssignmentUsageRow, error) {
+	row := q.db.QueryRow(ctx, incrementOtpAssignmentUsage, id)
+	var i IncrementOtpAssignmentUsageRow
+	err := row.Scan(&i.ID, &i.AssignmentUsageCount)
+	return i, err
+}
+
+const listGlobalOtpAlternativeSenders = `-- name: ListGlobalOtpAlternativeSenders :many
+SELECT id, sender_id_string, service_provider_id, mno_id, status, current_usage_count, max_usage_count, reset_interval_hours, last_reset_at, last_used_at, notes, created_at, updated_at
+FROM otp_alternative_senders
+WHERE status = 'active'
+  AND current_usage_count < max_usage_count
+  AND (mno_id = $2 OR ($2 IS NULL AND mno_id IS NULL)) -- Matches specific MNO or global
+ORDER BY last_used_at ASC NULLS FIRST, id ASC -- Prioritize those never used or least recently used
+LIMIT $1
+`
+
+type ListGlobalOtpAlternativeSendersParams struct {
+	Limit int32  `json:"limit"`
+	MnoID *int32 `json:"mnoId"`
+}
+
+// Selects active senders that are not depleted, optionally for a specific MNO or global ones (MNO ID IS NULL).
+// Orders by least recently used to attempt rotation.
+func (q *Queries) ListGlobalOtpAlternativeSenders(ctx context.Context, arg ListGlobalOtpAlternativeSendersParams) ([]OtpAlternativeSender, error) {
+	rows, err := q.db.Query(ctx, listGlobalOtpAlternativeSenders, arg.Limit, arg.MnoID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []OtpAlternativeSender
+	for rows.Next() {
+		var i OtpAlternativeSender
+		if err := rows.Scan(
+			&i.ID,
+			&i.SenderIDString,
+			&i.ServiceProviderID,
+			&i.MnoID,
+			&i.Status,
+			&i.CurrentUsageCount,
+			&i.MaxUsageCount,
+			&i.ResetIntervalHours,
+			&i.LastResetAt,
+			&i.LastUsedAt,
+			&i.Notes,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listSpSpecificOtpAlternativeSenders = `-- name: ListSpSpecificOtpAlternativeSenders :many
+
+SELECT id, sender_id_string, service_provider_id, mno_id, status, current_usage_count, max_usage_count, reset_interval_hours, last_reset_at, last_used_at, notes, created_at, updated_at
+FROM otp_alternative_senders
+WHERE service_provider_id = $1 -- Required: service_provider_id
+  AND status = 'active'
+  AND current_usage_count < max_usage_count
+  AND (mno_id = $3 OR ($3 IS NULL AND mno_id IS NULL))
+ORDER BY last_used_at ASC NULLS FIRST, id ASC -- Rotate by least recently used
+LIMIT $2
+`
+
+type ListSpSpecificOtpAlternativeSendersParams struct {
+	ServiceProviderID *int32 `json:"serviceProviderId"`
+	Limit             int32  `json:"limit"`
+	MnoID             *int32 `json:"mnoId"`
+}
+
+// Limit how many to fetch for selection in code
+// Selects Service Provider-specific, active senders that are not depleted.
+// Can filter by a specific MNO (if $2 is not NULL) OR select SP-specific senders that are MNO-agnostic (sender.mno_id IS NULL, if $2 is NULL).
+func (q *Queries) ListSpSpecificOtpAlternativeSenders(ctx context.Context, arg ListSpSpecificOtpAlternativeSendersParams) ([]OtpAlternativeSender, error) {
+	rows, err := q.db.Query(ctx, listSpSpecificOtpAlternativeSenders, arg.ServiceProviderID, arg.Limit, arg.MnoID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []OtpAlternativeSender
+	for rows.Next() {
+		var i OtpAlternativeSender
+		if err := rows.Scan(
+			&i.ID,
+			&i.SenderIDString,
+			&i.ServiceProviderID,
+			&i.MnoID,
+			&i.Status,
+			&i.CurrentUsageCount,
+			&i.MaxUsageCount,
+			&i.ResetIntervalHours,
+			&i.LastResetAt,
+			&i.LastUsedAt,
+			&i.Notes,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const validateSenderID = `-- name: ValidateSenderID :one

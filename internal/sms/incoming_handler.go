@@ -18,14 +18,16 @@ var _ sp.IncomingMessageHandler = (*DefaultIncomingMessageHandler)(nil)
 
 // DefaultIncomingMessageHandler provides the standard implementation for handling incoming messages.
 type DefaultIncomingMessageHandler struct {
-	dbQueries database.Querier
-	// Add Pool if transactions become needed here later
-	// dbPool *pgxpool.Pool
+	dbQueries     database.Querier
+	preprocessors []sp.MessagePreprocessor
 }
 
 // NewDefaultIncomingMessageHandler creates a new handler instance.
-func NewDefaultIncomingMessageHandler(q database.Querier) *DefaultIncomingMessageHandler {
-	return &DefaultIncomingMessageHandler{dbQueries: q}
+func NewDefaultIncomingMessageHandler(
+	q database.Querier,
+	preprocessors []sp.MessagePreprocessor,
+) *DefaultIncomingMessageHandler {
+	return &DefaultIncomingMessageHandler{dbQueries: q, preprocessors: preprocessors}
 }
 
 // HandleIncomingMessage implements the sp.IncomingMessageHandler interface.
@@ -66,6 +68,66 @@ func (h *DefaultIncomingMessageHandler) HandleIncomingMessage(
 			Error:  "Internal error: could not verify service provider",
 		}, fmt.Errorf("failed to get SP details %d: %w", msg.ServiceProviderID, err) // Return internal error
 	}
+
+	credDetails, err := h.dbQueries.GetSPCredentialByID(
+		ctx,
+		msg.CredentialID,
+	)
+	if err != nil {
+		slog.ErrorContext(
+			ctx,
+			"Failed to fetch SP credential details for preprocessing",
+			slog.Any("error", err),
+		)
+		return sp.Acknowledgement{
+				Status: "rejected",
+				Error:  "Internal error: Credential lookup failed",
+			}, fmt.Errorf(
+				"failed to get SP Credential details %d: %w",
+				msg.CredentialID,
+				err,
+			)
+	}
+
+	// --- Preprocessing Pipeline ---
+	// Create a mutable copy for preprocessors if they need to modify it.
+	processedMsg := msg
+	var messageModifiedByPipeline bool
+
+	for _, p := range h.preprocessors {
+		logCtxPreproc := logging.ContextWithService(
+			ctx,
+			p.Name(),
+		) // Add preprocessor name to context
+		slog.DebugContext(logCtxPreproc, "Applying preprocessor")
+		modified, err := p.Process(
+			logCtxPreproc,
+			&processedMsg,
+			spDetails,
+			credDetails,
+		) // Pass pointer to the copy
+		if err != nil {
+			slog.ErrorContext(logCtxPreproc, "Preprocessor failed", slog.Any("error", err))
+			return sp.Acknowledgement{
+				Status: "rejected",
+				Error:  fmt.Sprintf("Preprocessing error (%s): %s", p.Name(), err.Error()),
+			}, nil // Logical rejection due to preprocessing error
+		}
+		if modified {
+			messageModifiedByPipeline = true
+			slog.InfoContext(logCtxPreproc, "Message modified by preprocessor")
+		}
+	}
+	// --- End Preprocessing Pipeline ---
+
+	// Use 'processedMsg' from here on.
+	// Enrich context based on potentially modified message
+	if messageModifiedByPipeline {
+		slog.InfoContext(logCtx, "Message content after pipeline",
+			slog.String("final_sender", processedMsg.SenderID),
+			slog.String("final_content_preview", firstNChars(processedMsg.MessageContent, 30)))
+	}
+
 	currencyCode := spDetails.DefaultCurrencyCode
 	if currencyCode == "" {
 		slog.ErrorContext(
