@@ -17,6 +17,9 @@ type Querier interface {
 	CountMessageDetails(ctx context.Context, arg CountMessageDetailsParams) (int64, error)
 	CountMsisdnPrefixEntriesByGroup(ctx context.Context, msisdnPrefixGroupID int32) (int64, error)
 	CountMsisdnPrefixGroups(ctx context.Context) (int64, error)
+	CountOtpAlternativeSenders(ctx context.Context, arg CountOtpAlternativeSendersParams) (int64, error)
+	CountOtpMessageTemplates(ctx context.Context, status *string) (int64, error)
+	CountOtpSenderTemplateAssignments(ctx context.Context, arg CountOtpSenderTemplateAssignmentsParams) (int64, error)
 	// Counts pricing rules for a specific Service Provider.
 	CountPricingRulesBySP(ctx context.Context, serviceProviderID int32) (int64, error)
 	CountRoutingAssignmentsByRoutingGroup(ctx context.Context, routingGroupID int32) (int64, error)
@@ -36,13 +39,10 @@ type Querier interface {
 	CreateMsisdnPrefixEntry(ctx context.Context, arg CreateMsisdnPrefixEntryParams) (MsisdnPrefixEntry, error)
 	// Queries for MsisdnPrefixGroup
 	CreateMsisdnPrefixGroup(ctx context.Context, arg CreateMsisdnPrefixGroupParams) (MsisdnPrefixGroup, error)
-	// Allow global or SP-specific template
-	// ### OTP Alternative Senders ###
+	// Limit how many to fetch for selection in code
 	CreateOtpAlternativeSender(ctx context.Context, arg CreateOtpAlternativeSenderParams) (OtpAlternativeSender, error)
-	// ### OTP Message Templates ###
+	// Then by priority of assignment
 	CreateOtpMessageTemplate(ctx context.Context, arg CreateOtpMessageTemplateParams) (OtpMessageTemplate, error)
-	// CRUD for otp_message_templates (List, Update, Delete) as needed...
-	// ### OTP Sender Template Assignments ###
 	CreateOtpSenderTemplateAssignment(ctx context.Context, arg CreateOtpSenderTemplateAssignmentParams) (OtpSenderTemplateAssignment, error)
 	CreatePricingRule(ctx context.Context, arg CreatePricingRuleParams) (PricingRule, error)
 	// Queries for RoutingAssignment (the new routing rules)
@@ -67,6 +67,9 @@ type Querier interface {
 	// Note: This will fail if the group is referenced in routing_assignments due to ON DELETE RESTRICT.
 	// Handle this in application logic (e.g., unassign first or provide a force option).
 	DeleteMsisdnPrefixGroup(ctx context.Context, id int32) error
+	DeleteOtpAlternativeSender(ctx context.Context, id int32) error
+	DeleteOtpMessageTemplate(ctx context.Context, id int32) error
+	DeleteOtpSenderTemplateAssignment(ctx context.Context, id int32) error
 	DeletePricingRule(ctx context.Context, id int32) error
 	DeleteRoutingAssignment(ctx context.Context, id int32) error
 	// Note: This will fail if the group is referenced in routing_assignments or sp_credentials.
@@ -111,8 +114,9 @@ type Querier interface {
 	GetMsisdnPrefixEntryByPrefix(ctx context.Context, msisdnPrefix string) (MsisdnPrefixEntry, error)
 	GetMsisdnPrefixGroupByID(ctx context.Context, id int32) (MsisdnPrefixGroup, error)
 	GetMsisdnPrefixGroupByReference(ctx context.Context, reference *string) (MsisdnPrefixGroup, error)
-	GetOtpAlternativeSenderByID(ctx context.Context, id int32) (OtpAlternativeSender, error)
+	GetOtpAlternativeSenderByID(ctx context.Context, id int32) (GetOtpAlternativeSenderByIDRow, error)
 	GetOtpMessageTemplateByID(ctx context.Context, id int32) (OtpMessageTemplate, error)
+	GetOtpSenderTemplateAssignmentByID(ctx context.Context, id int32) (GetOtpSenderTemplateAssignmentByIDRow, error)
 	// Selects pending DLR jobs and locks them for processing.
 	GetPendingDLRsToForward(ctx context.Context, arg GetPendingDLRsToForwardParams) ([]GetPendingDLRsToForwardRow, error)
 	// Join MNO Name for display
@@ -149,6 +153,7 @@ type Querier interface {
 	IncrementOtpAlternativeSenderUsage(ctx context.Context, id int32) (OtpAlternativeSender, error)
 	IncrementOtpAssignmentUsage(ctx context.Context, id int32) (IncrementOtpAssignmentUsageRow, error)
 	InsertMessageIn(ctx context.Context, arg InsertMessageInParams) (int64, error)
+	ListAlternativeSendersWithAssignedTemplates(ctx context.Context, arg ListAlternativeSendersWithAssignedTemplatesParams) ([]ListAlternativeSendersWithAssignedTemplatesRow, error)
 	// Selects active senders that are not depleted, optionally for a specific MNO or global ones (MNO ID IS NULL).
 	// Orders by least recently used to attempt rotation.
 	ListGlobalOtpAlternativeSenders(ctx context.Context, arg ListGlobalOtpAlternativeSendersParams) ([]OtpAlternativeSender, error)
@@ -159,6 +164,9 @@ type Querier interface {
 	ListMessageDetails(ctx context.Context, arg ListMessageDetailsParams) ([]ListMessageDetailsRow, error)
 	ListMsisdnPrefixEntriesByGroup(ctx context.Context, arg ListMsisdnPrefixEntriesByGroupParams) ([]MsisdnPrefixEntry, error)
 	ListMsisdnPrefixGroups(ctx context.Context, arg ListMsisdnPrefixGroupsParams) ([]MsisdnPrefixGroup, error)
+	ListOtpAlternativeSenders(ctx context.Context, arg ListOtpAlternativeSendersParams) ([]ListOtpAlternativeSendersRow, error)
+	ListOtpMessageTemplates(ctx context.Context, arg ListOtpMessageTemplatesParams) ([]OtpMessageTemplate, error)
+	ListOtpSenderTemplateAssignments(ctx context.Context, arg ListOtpSenderTemplateAssignmentsParams) ([]ListOtpSenderTemplateAssignmentsRow, error)
 	// Lists pricing rules for a specific Service Provider, paginated.
 	ListPricingRulesBySP(ctx context.Context, arg ListPricingRulesBySPParams) ([]ListPricingRulesBySPRow, error)
 	// Lists assignments for a specific routing group.
@@ -169,7 +177,6 @@ type Querier interface {
 	// Lists credentials, optionally filtered by Service Provider ID
 	ListSPCredentials(ctx context.Context, arg ListSPCredentialsParams) ([]SpCredential, error)
 	ListServiceProviders(ctx context.Context, arg ListServiceProvidersParams) ([]ServiceProvider, error)
-	// Limit how many to fetch for selection in code
 	// Selects Service Provider-specific, active senders that are not depleted.
 	// Can filter by a specific MNO (if $2 is not NULL) OR select SP-specific senders that are MNO-agnostic (sender.mno_id IS NULL, if $2 is NULL).
 	ListSpSpecificOtpAlternativeSenders(ctx context.Context, arg ListSpSpecificOtpAlternativeSendersParams) ([]OtpAlternativeSender, error)
@@ -200,6 +207,9 @@ type Querier interface {
 	UpdateMessageValidatedRouted(ctx context.Context, arg UpdateMessageValidatedRoutedParams) error
 	UpdateMsisdnPrefixEntry(ctx context.Context, arg UpdateMsisdnPrefixEntryParams) (MsisdnPrefixEntry, error)
 	UpdateMsisdnPrefixGroup(ctx context.Context, arg UpdateMsisdnPrefixGroupParams) (MsisdnPrefixGroup, error)
+	UpdateOtpAlternativeSender(ctx context.Context, arg UpdateOtpAlternativeSenderParams) (OtpAlternativeSender, error)
+	UpdateOtpMessageTemplate(ctx context.Context, arg UpdateOtpMessageTemplateParams) (OtpMessageTemplate, error)
+	UpdateOtpSenderTemplateAssignment(ctx context.Context, arg UpdateOtpSenderTemplateAssignmentParams) (OtpSenderTemplateAssignment, error)
 	// Can also add routing_group_id to WHERE if updates are always scoped to a group passed in context
 	// WHERE id = sqlc.arg(id) AND routing_group_id = sqlc.arg(routing_group_id_context)
 	UpdateRoutingAssignment(ctx context.Context, arg UpdateRoutingAssignmentParams) (RoutingAssignment, error)
