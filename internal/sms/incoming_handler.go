@@ -151,6 +151,11 @@ func (h *DefaultIncomingMessageHandler) HandleIncomingMessage(
 		msg.TotalSegments = 1
 	}
 
+	processingStatus := processedMsg.ProcessingStatus
+	if processingStatus == "" {
+		processingStatus = "received"
+	}
+
 	clientMessageId := uuid.New().String()
 	params := database.InsertMessageInParams{
 		ServiceProviderID:       msg.ServiceProviderID,
@@ -161,7 +166,9 @@ func (h *DefaultIncomingMessageHandler) HandleIncomingMessage(
 		OriginalDestinationAddr: msg.DestinationMSISDN,
 		ShortMessage:            msg.MessageContent,
 		TotalSegments:           msg.TotalSegments,
+		RoutedMnoID:             processedMsg.MnoID,
 		CurrencyCode:            currencyCode,
+		ProcessingStatus:        processingStatus,
 		SubmittedAt: pgtype.Timestamptz{
 			Time:  msg.ReceivedAt,
 			Valid: true,
@@ -171,6 +178,8 @@ func (h *DefaultIncomingMessageHandler) HandleIncomingMessage(
 		concatRef := fmt.Sprintf("%d", msg.ConcatRef)
 		params.ClientRef = &concatRef
 	}
+
+	slog.InfoContext(logCtx, "New SMS", slog.Any("Params", params))
 
 	// 4. Insert into Database
 	insertedID, err := h.dbQueries.InsertMessageIn(logCtx, params)

@@ -27,7 +27,7 @@ type Config struct {
 	OtpScopePreprocessorConfig OtpScopePreprocessorConfig
 	DLRForwardInterval         time.Duration `envconfig:"WORKER_DLR_INTERVAL"                       default:"2s"`
 	DLRForwardBatchSize        int           `envconfig:"WORKER_DLR_BATCH_SIZE"                     default:"100"`
-	DefaultRoutingGroupRef     string        `envconfig:"DEFAULT_ROUTING_GROUP_REF"                 default:"001"`
+	DefaultRoutingGroupRef     string        `envconfig:"DEFAULT_ROUTING_GROUP_REF"                 default:"SYS_DEFAULT_ROUTE"`
 	ManagerAPI                 ManagerAPIConfig
 }
 

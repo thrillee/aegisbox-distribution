@@ -355,11 +355,12 @@ INSERT INTO messages (
     total_segments,
     currency_code,
     submitted_at,
-    received_at,
+    routed_mno_id,
     processing_status, -- Initial status
+    received_at,
     final_status       -- Initial status
 ) VALUES (
-    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, NOW(), 'received', 'pending'
+    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, NOW(), 'pending'
 ) RETURNING id
 `
 
@@ -374,6 +375,8 @@ type InsertMessageInParams struct {
 	TotalSegments           int32              `json:"totalSegments"`
 	CurrencyCode            string             `json:"currencyCode"`
 	SubmittedAt             pgtype.Timestamptz `json:"submittedAt"`
+	RoutedMnoID             *int32             `json:"routedMnoId"`
+	ProcessingStatus        string             `json:"processingStatus"`
 }
 
 func (q *Queries) InsertMessageIn(ctx context.Context, arg InsertMessageInParams) (int64, error) {
@@ -388,6 +391,8 @@ func (q *Queries) InsertMessageIn(ctx context.Context, arg InsertMessageInParams
 		arg.TotalSegments,
 		arg.CurrencyCode,
 		arg.SubmittedAt,
+		arg.RoutedMnoID,
+		arg.ProcessingStatus,
 	)
 	var id int64
 	err := row.Scan(&id)

@@ -78,7 +78,7 @@ func main() {
 	walletSvc := wallet.NewService(dbpool, dbQueries) // Use concrete impl for now
 	notifier := notification.NewLogNotifier()
 
-	routingPreprocessor := sms.NewRoutingPreprocessor(dbQueries, "DefaultRoutingGroupRef")
+	routingPreprocessor := sms.NewRoutingPreprocessor(dbQueries, cfg.DefaultRoutingGroupRef)
 	otpPreprocessor := sms.NewOtpScopePreprocessor(dbQueries, cfg.OtpScopePreprocessorConfig)
 
 	incomingMessageHandler := sms.NewDefaultIncomingMessageHandler(

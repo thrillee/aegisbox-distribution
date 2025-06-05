@@ -54,7 +54,6 @@ func (p *RoutingPreprocessor) Process(
 	spInfo database.ServiceProvider, // May not be directly used here but part of interface
 	credInfo database.SpCredential, // Used to get routing_group_id
 ) (modified bool, err error) {
-
 	logCtx := logging.ContextWithMSISDN(ctx, msg.DestinationMSISDN)
 	logCtx = logging.ContextWithSPCredentialID(logCtx, msg.CredentialID)
 	logCtx = logging.ContextWithService(logCtx, p.Name()) // Add preprocessor name
@@ -186,13 +185,14 @@ func (p *RoutingPreprocessor) Process(
 	}
 
 	// Route found! Populate msg.MnoID
-	msg.MnoID = mnoDetails.MnoID // mnoDetails.MnoID is int32
+	msg.MnoID = &mnoDetails.MnoID // mnoDetails.MnoID is int32
+	msg.ProcessingStatus = "routed"
 	modified = true
 
 	slog.InfoContext(
 		logCtx,
 		"Routing preprocessor determined MNO successfully",
-		slog.Int("mno_id", int(msg.MnoID)),
+		slog.Int("mno_id", int(*msg.MnoID)),
 		slog.Any(
 			"mno_name",
 			mnoDetails.MnoName,

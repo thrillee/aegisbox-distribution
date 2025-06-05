@@ -91,7 +91,7 @@ func (p *OtpScopePreprocessor) Process(
 		ctx,
 		database.ListSpSpecificOtpAlternativeSendersParams{
 			ServiceProviderID: &spInfo.ID, // Pass the actual SP ID
-			MnoID:             &msg.MnoID, // pgtype.Int4, can be invalid for MNO-agnostic
+			MnoID:             msg.MnoID,  // pgtype.Int4, can be invalid for MNO-agnostic
 			Limit:             fetchLimit,
 		},
 	)
@@ -115,7 +115,7 @@ func (p *OtpScopePreprocessor) Process(
 		// Fallback to global senders (service_provider_id IS NULL)
 		slog.DebugContext(logCtx, "No SP-specific sender found, attempting global OTP alternative sender")
 		globalSenders, errGlobal := p.dbQueries.ListGlobalOtpAlternativeSenders(ctx, database.ListGlobalOtpAlternativeSendersParams{
-			MnoID: &msg.MnoID, // pgtype.Int4, can be invalid for MNO-agnostic
+			MnoID: msg.MnoID, // pgtype.Int4, can be invalid for MNO-agnostic
 			Limit: fetchLimit,
 		})
 		if errGlobal != nil && !errors.Is(errGlobal, pgx.ErrNoRows) {
@@ -146,7 +146,7 @@ func (p *OtpScopePreprocessor) Process(
 		ctx,
 		database.GetActiveOtpTemplateAssignmentParams{
 			OtpAlternativeSenderID: selectedSender.ID,
-			MnoID:                  &msg.MnoID, // Use the same MNO context for template assignment
+			MnoID:                  msg.MnoID, // Use the same MNO context for template assignment
 		},
 	)
 	if err != nil {

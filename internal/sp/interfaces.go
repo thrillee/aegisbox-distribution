@@ -22,7 +22,8 @@ type IncomingSPMessage struct {
 	IsFlash           bool
 	RequestDLR        bool
 	ReceivedAt        time.Time
-	MnoID             int32
+	MnoID             *int32
+	ProcessingStatus  string
 	// Add other fields: DataCoding, ESMClass if available from SP request
 }
 

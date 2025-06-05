@@ -10,11 +10,12 @@ INSERT INTO messages (
     total_segments,
     currency_code,
     submitted_at,
-    received_at,
+    routed_mno_id,
     processing_status, -- Initial status
+    received_at,
     final_status       -- Initial status
 ) VALUES (
-    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, NOW(), 'received', 'pending'
+    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, NOW(), 'pending'
 ) RETURNING id;
 
 -- name: UpdateMessageRoutingInfo :exec

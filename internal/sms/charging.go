@@ -166,7 +166,7 @@ func (p *DefaultPricer) PriceAndDebit(ctx context.Context, msgID int64) (result 
 	})
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			err = fmt.Errorf("no applicable pricing rule found for SP %d, Currency %s, MNO %v", spID, currency, *mnoID)
+			err = fmt.Errorf("no applicable pricing rule found for SP %d, Currency %s, MNO %v", spID, currency, mnoID)
 		} else {
 			err = fmt.Errorf("failed to get price: %w", err)
 		}
