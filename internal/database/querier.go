@@ -206,7 +206,7 @@ type Querier interface {
 	UpdateRoutingGroup(ctx context.Context, arg UpdateRoutingGroupParams) (RoutingGroup, error)
 	// Optional MNO ID filter
 	UpdateRoutingRule(ctx context.Context, arg UpdateRoutingRuleParams) (RoutingRule, error)
-	// Updates status, password hash, http_config for a credential.
+	// Updates status, password hash, scope, http_config for a credential.
 	UpdateSPCredential(ctx context.Context, arg UpdateSPCredentialParams) (SpCredential, error)
 	// Updates segment status based on received DLR
 	UpdateSegmentDLR(ctx context.Context, arg UpdateSegmentDLRParams) error

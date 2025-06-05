@@ -242,6 +242,7 @@ func (h *SPCredentialHandler) UpdateSPCredential(c *gin.Context) {
 	// Prepare params for update
 	params := database.UpdateSPCredentialParams{
 		ID:         id,
+		Scope:      req.Scope,
 		Status:     req.Status,
 		HttpConfig: req.HTTPConfig, // Directly assign []byte (if req.HTTPConfig is json.RawMessage)
 	}

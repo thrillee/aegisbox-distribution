@@ -58,9 +58,10 @@ SELECT count(*) FROM sp_credentials
 WHERE ($1::INT IS NULL OR service_provider_id = $1);
 
 -- name: UpdateSPCredential :one
--- Updates status, password hash, http_config for a credential.
+-- Updates status, password hash, scope, http_config for a credential.
 UPDATE sp_credentials
 SET
+    scope = COALESCE(sqlc.narg(scope), scope),
     status = COALESCE(sqlc.narg(status), status),
     password_hash = COALESCE(sqlc.narg(password_hash), password_hash), -- Only for SMPP if password reset
     http_config = COALESCE(sqlc.narg(http_config), http_config),     -- Only for HTTP

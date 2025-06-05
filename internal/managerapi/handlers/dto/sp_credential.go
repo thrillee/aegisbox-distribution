@@ -44,5 +44,6 @@ type CreateSPCredentialRequest struct {
 type UpdateSPCredentialRequest struct {
 	Status     *string         `json:"status" binding:"omitempty,oneof=active inactive"`
 	Password   *string         `json:"password"`    // Optional: To reset password (for SMPP)
+	Scope      *string         `json:"scope"`       // Optional: To reset password (for SMPP)
 	HTTPConfig json.RawMessage `json:"http_config"` // Optional: To update HTTP settings
 }

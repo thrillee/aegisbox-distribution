@@ -261,24 +261,27 @@ func (q *Queries) ListSPCredentials(ctx context.Context, arg ListSPCredentialsPa
 const updateSPCredential = `-- name: UpdateSPCredential :one
 UPDATE sp_credentials
 SET
-    status = COALESCE($1, status),
-    password_hash = COALESCE($2, password_hash), -- Only for SMPP if password reset
-    http_config = COALESCE($3, http_config),     -- Only for HTTP
+    scope = COALESCE($1, scope),
+    status = COALESCE($2, status),
+    password_hash = COALESCE($3, password_hash), -- Only for SMPP if password reset
+    http_config = COALESCE($4, http_config),     -- Only for HTTP
     updated_at = NOW()
-WHERE id = $4
+WHERE id = $5
 RETURNING id, service_provider_id, protocol, status, system_id, password_hash, bind_type, api_key_hash, api_key_identifier, http_config, created_at, updated_at, routing_group_id, scope
 `
 
 type UpdateSPCredentialParams struct {
+	Scope        *string `json:"scope"`
 	Status       *string `json:"status"`
 	PasswordHash *string `json:"passwordHash"`
 	HttpConfig   []byte  `json:"httpConfig"`
 	ID           int32   `json:"id"`
 }
 
-// Updates status, password hash, http_config for a credential.
+// Updates status, password hash, scope, http_config for a credential.
 func (q *Queries) UpdateSPCredential(ctx context.Context, arg UpdateSPCredentialParams) (SpCredential, error) {
 	row := q.db.QueryRow(ctx, updateSPCredential,
+		arg.Scope,
 		arg.Status,
 		arg.PasswordHash,
 		arg.HttpConfig,
