@@ -52,7 +52,7 @@ func (p *OtpScopePreprocessor) Process(
 ) (bool, error) {
 	logCtx := logging.ContextWithService(ctx, p.Name())
 
-	if credInfo.Scope != OtpScope || credInfo.Scope == "" {
+	if strings.ToUpper(credInfo.Scope) != OtpScope || credInfo.Scope == "" {
 		return false, nil // Not an OTP scope
 	}
 

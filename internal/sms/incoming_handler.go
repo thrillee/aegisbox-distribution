@@ -99,7 +99,7 @@ func (h *DefaultIncomingMessageHandler) HandleIncomingMessage(
 			ctx,
 			p.Name(),
 		) // Add preprocessor name to context
-		slog.DebugContext(logCtxPreproc, "Applying preprocessor")
+		slog.InfoContext(logCtxPreproc, "Applying preprocessor", slog.String("Preprocessor name", p.Name()), slog.Any("Credentials", credDetails))
 		modified, err := p.Process(
 			logCtxPreproc,
 			&processedMsg,
@@ -179,7 +179,7 @@ func (h *DefaultIncomingMessageHandler) HandleIncomingMessage(
 		params.ClientRef = &concatRef
 	}
 
-	slog.InfoContext(logCtx, "New SMS", slog.Any("Params", params))
+	slog.DebugContext(logCtx, "New SMS", slog.Any("Params", params))
 
 	// 4. Insert into Database
 	insertedID, err := h.dbQueries.InsertMessageIn(logCtx, params)

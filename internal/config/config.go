@@ -42,9 +42,9 @@ type ServerConfig struct {
 }
 
 type OtpScopePreprocessorConfig struct {
-	OtpExtractionRegex string `envconfig:"SERVER_HOST"`
-	DefaultAppName     string `envconfig:"SERVER_HOST" default:""`
-	DefaultValidityMin string `envconfig:"SERVER_HOST" default:""`
+	DefaultAppName     string `envconfig:"DEFAULT_APP_NAME" default:""`
+	OtpExtractionRegex string `envconfig:"OTP_EXTRACTION_REGEX" default:""`
+	DefaultValidityMin string `envconfig:"DEFAULT_VALIDITY_MIN" default:""`
 }
 
 // MNOClientConfig placeholder (define actual fields needed)
