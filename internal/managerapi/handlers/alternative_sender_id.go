@@ -181,7 +181,7 @@ func (h *OtpAlternativeSenderHandler) List(c *gin.Context) {
 			listParams.MnoID = &mnoID
 		}
 	}
-	if spIDStr := c.Query("service_provider_id"); spIDStr != "" {
+	if spIDStr := c.Query("sp_id"); spIDStr != "" {
 		if spIDVal, err := strconv.ParseInt(spIDStr, 10, 32); err == nil {
 			spID := int32(spIDVal)
 			listParams.ServiceProviderID = &spID
