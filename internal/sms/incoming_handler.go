@@ -162,7 +162,7 @@ func (h *DefaultIncomingMessageHandler) HandleIncomingMessage(
 		SpCredentialID:          msg.CredentialID, // Use correct FK name from schema/sqlc
 		ClientMessageID:         &clientMessageId, // Map ClientRef to client_message_id
 		ClientRef:               nil,              // If UDH/concat ref is parsed, put it here
-		OriginalSourceAddr:      msg.SenderID,
+		OriginalSourceAddr:      processedMsg.SenderID,
 		OriginalDestinationAddr: msg.DestinationMSISDN,
 		ShortMessage:            msg.MessageContent,
 		TotalSegments:           msg.TotalSegments,
