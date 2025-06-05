@@ -26,9 +26,10 @@ const createSPCredential = `-- name: CreateSPCredential :one
 INSERT INTO sp_credentials (
     service_provider_id, protocol, status,
     system_id, password_hash, bind_type, -- SMPP
-    api_key_identifier, api_key_hash, http_config -- HTTP
+    api_key_identifier, api_key_hash, http_config, -- HTTP
+    routing_group_id, scope
 ) VALUES (
-    $1, $2, $3, $4, $5, $6, $7, $8, $9
+    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11
 ) RETURNING id, service_provider_id, protocol, status, system_id, password_hash, bind_type, api_key_hash, api_key_identifier, http_config, created_at, updated_at, routing_group_id, scope
 `
 
@@ -42,6 +43,8 @@ type CreateSPCredentialParams struct {
 	ApiKeyIdentifier  *string `json:"apiKeyIdentifier"`
 	ApiKeyHash        *string `json:"apiKeyHash"`
 	HttpConfig        []byte  `json:"httpConfig"`
+	RoutingGroupID    *int32  `json:"routingGroupId"`
+	Scope             string  `json:"scope"`
 }
 
 // Creates an SP credential (SMPP or HTTP)
@@ -56,6 +59,8 @@ func (q *Queries) CreateSPCredential(ctx context.Context, arg CreateSPCredential
 		arg.ApiKeyIdentifier,
 		arg.ApiKeyHash,
 		arg.HttpConfig,
+		arg.RoutingGroupID,
+		arg.Scope,
 	)
 	var i SpCredential
 	err := row.Scan(
@@ -263,19 +268,21 @@ UPDATE sp_credentials
 SET
     scope = COALESCE($1, scope),
     status = COALESCE($2, status),
-    password_hash = COALESCE($3, password_hash), -- Only for SMPP if password reset
-    http_config = COALESCE($4, http_config),     -- Only for HTTP
+    http_config = COALESCE($3, http_config),     -- Only for HTTP
+    password_hash = COALESCE($4, password_hash), -- Only for SMPP if password reset
+    routing_group_id = COALESCE($5, routing_group_id),
     updated_at = NOW()
-WHERE id = $5
+WHERE id = $6
 RETURNING id, service_provider_id, protocol, status, system_id, password_hash, bind_type, api_key_hash, api_key_identifier, http_config, created_at, updated_at, routing_group_id, scope
 `
 
 type UpdateSPCredentialParams struct {
-	Scope        *string `json:"scope"`
-	Status       *string `json:"status"`
-	PasswordHash *string `json:"passwordHash"`
-	HttpConfig   []byte  `json:"httpConfig"`
-	ID           int32   `json:"id"`
+	Scope          *string `json:"scope"`
+	Status         *string `json:"status"`
+	HttpConfig     []byte  `json:"httpConfig"`
+	PasswordHash   *string `json:"passwordHash"`
+	RoutingGroupID *int32  `json:"routingGroupId"`
+	ID             int32   `json:"id"`
 }
 
 // Updates status, password hash, scope, http_config for a credential.
@@ -283,8 +290,9 @@ func (q *Queries) UpdateSPCredential(ctx context.Context, arg UpdateSPCredential
 	row := q.db.QueryRow(ctx, updateSPCredential,
 		arg.Scope,
 		arg.Status,
-		arg.PasswordHash,
 		arg.HttpConfig,
+		arg.PasswordHash,
+		arg.RoutingGroupID,
 		arg.ID,
 	)
 	var i SpCredential

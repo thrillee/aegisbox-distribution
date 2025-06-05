@@ -18,8 +18,10 @@ type BaseSPCredential struct {
 // SPCredentialResponse combines base with protocol-specific fields (excluding sensitive data).
 type SPCredentialResponse struct {
 	BaseSPCredential
-	SystemID         *string         `json:"system_id,omitempty"`          // SMPP
-	BindType         *string         `json:"bind_type,omitempty"`          // SMPP
+	SystemID         *string         `json:"system_id,omitempty"` // SMPP
+	BindType         *string         `json:"bind_type,omitempty"` // SMPP
+	Scope            *string         `json:"scope,omitempty"`
+	RouteGroupID     *int32          `json:"routeGroupID,omitempty"`
 	APIKeyIdentifier *string         `json:"api_key_identifier,omitempty"` // HTTP
 	HTTPConfig       json.RawMessage `json:"http_config,omitempty"`        // HTTP (Raw JSON)
 }

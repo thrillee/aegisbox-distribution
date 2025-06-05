@@ -37,9 +37,10 @@ LIMIT 1;
 INSERT INTO sp_credentials (
     service_provider_id, protocol, status,
     system_id, password_hash, bind_type, -- SMPP
-    api_key_identifier, api_key_hash, http_config -- HTTP
+    api_key_identifier, api_key_hash, http_config, -- HTTP
+    routing_group_id, scope
 ) VALUES (
-    $1, $2, $3, $4, $5, $6, $7, $8, $9
+    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11
 ) RETURNING *;
 
 -- name: GetSPCredentialByID :one
@@ -63,8 +64,9 @@ UPDATE sp_credentials
 SET
     scope = COALESCE(sqlc.narg(scope), scope),
     status = COALESCE(sqlc.narg(status), status),
-    password_hash = COALESCE(sqlc.narg(password_hash), password_hash), -- Only for SMPP if password reset
     http_config = COALESCE(sqlc.narg(http_config), http_config),     -- Only for HTTP
+    password_hash = COALESCE(sqlc.narg(password_hash), password_hash), -- Only for SMPP if password reset
+    routing_group_id = COALESCE(sqlc.narg(routing_group_id), routing_group_id),
     updated_at = NOW()
 WHERE id = sqlc.arg(id)
 RETURNING *;
