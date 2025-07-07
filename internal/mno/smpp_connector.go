@@ -577,6 +577,7 @@ func (c *SMPPMNOConnector) onRebindingError(err error) {
 	logCtx = logging.ContextWithMNOConnID(logCtx, c.ConnectionID())
 	slog.ErrorContext(logCtx, "gosmpp OnRebindingError callback triggered", slog.Any("error", err))
 	// Maybe update status to disconnected if rebind fails persistently?
+	c.ConnectAndBind(logCtx)
 }
 
 func (c *SMPPMNOConnector) onClosed(state gosmpp.State) {
