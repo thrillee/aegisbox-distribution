@@ -49,10 +49,10 @@ type OtpScopePreprocessorConfig struct {
 
 // MNOClientConfig placeholder (define actual fields needed)
 type MNOClientConfig struct {
-	// Example:
 	SyncInterval       time.Duration `envconfig:"MNO_SYNC_INTERVAL"   default:"2s"`
 	ConnectTimeout     time.Duration `envconfig:"MNO_CONNECT_TIMEOUT" default:"5s"`
 	DefaultEnquireLink time.Duration `envconfig:"MNO_ENQUIRE_LINK"    default:"30s"`
+	DLRAddr            string        `envconfig:"API_DLR_ADDR"  default:"9001"`
 }
 
 // workers.Config placeholder (define actual fields needed)

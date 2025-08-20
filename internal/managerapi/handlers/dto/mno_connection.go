@@ -62,6 +62,18 @@ type CreateMNOConnectionRequest struct {
 	HTTPConfig json.RawMessage `json:"http_config" binding:"required_if=Protocol http"` // Requires valid JSON object
 }
 
+type HTTPMnoConfigRetryPolicy struct {
+	MaxRetries     int64 `json:"max_retries"`
+	BackoffSeconds int64 `json:"backoff_seconds"`
+}
+
+type HTTPMnoConfig struct {
+	Endpoint    string                   `json:"endpoint"`
+	AuthToken   string                   `json:"auth_token"`
+	TimeoutSecs string                   `json:"timeout_secs"`
+	RetryPolicy HTTPMnoConfigRetryPolicy `json:"retry_policy"`
+}
+
 // UpdateMNOConnectionRequest defines the body for PUT /mno-connections/:conn_id
 // Cannot change MNO ID or Protocol easily.
 type UpdateMNOConnectionRequest struct {

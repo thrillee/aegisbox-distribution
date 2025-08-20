@@ -202,6 +202,18 @@ func main() {
 		slog.Info("HTTP Server stopped.")
 	}()
 
+	// Start DLR Server (listens for SPs)
+	var dlrServer *mno.DLRServer
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		if dlrServer, err = mno.StartDLRServer(smsProcessor.UpdateSegmentDLRStatus, cfg.MNOClientConfig.DLRAddr); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			slog.Error("DLR HTTP Server failed", slog.Any("error", err))
+			rootCancel() // Signal other components to stop
+		}
+		slog.Info("DLR HTTP Server stopped.")
+	}()
+
 	// --- Wait for Shutdown Signal ---
 	<-appCtx.Done() // Wait for context cancellation (SIGINT/SIGTERM)
 	slog.Info("Shutdown signal received, initiating graceful shutdown...")
@@ -238,7 +250,19 @@ func main() {
 	}()
 
 	// Wait for servers to stop accepting new requests
+	shutdownWg.Add(1)
+	go func() {
+		defer shutdownWg.Done()
+		slog.Info("Shutting down HTTP DLR Server...")
+		if err := dlrServer.Shutdown(shutdownCtx); err != nil {
+			slog.Warn("Error during HTTP DLR Server shutdown", slog.Any("error", err))
+		} else {
+			slog.Info("HTTP DLR Server shutdown complete.")
+		}
+	}()
+	// Wait for servers to stop accepting new requests
 	shutdownWg.Wait()
+
 	slog.Info("Servers stopped accepting new connections.")
 
 	// Shutdown other components (Workers, MNO Manager)

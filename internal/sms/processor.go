@@ -646,7 +646,7 @@ func (p *Processor) UpdateSegmentDLRStatus(
 	segmentInfo, err := p.dbQueries.FindSegmentByMnoMessageID(logCtx, &dlrInfo.MnoMessageID)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			slog.WarnContext(logCtx, "Received DLR for unknown/unmatched MNO message ID")
+			slog.WarnContext(logCtx, "Received DLR for unknown/unmatched MNO message ID", "messageID", dlrInfo.MnoMessageID)
 			return nil // Ignore DLR for unknown ID
 		}
 		slog.ErrorContext(logCtx, "DB error finding segment for DLR", slog.Any("error", err))

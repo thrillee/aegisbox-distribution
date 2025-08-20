@@ -126,13 +126,18 @@ func (s *DefaultSender) Send(ctx context.Context, msg database.GetMessageDetails
 	for _, segResult := range submitResult.Segments {
 		// Find the corresponding DB segment ID (using Seqn assumes order is preserved)
 		// A map might be safer if order isn't guaranteed.
-		if segResult.Seqn <= 0 || int(segResult.Seqn) > len(submitResult.Segments) {
-			slog.ErrorContext(logCtx, "Invalid segment sequence number received from connector result", slog.Int("seqn", int(segResult.Seqn)))
-			updateErrors = true
-			continue
-		}
+		var dbSegmentID int64
+		if segResult.DBSegID == nil {
+			if segResult.Seqn <= 0 || int(segResult.Seqn) > len(submitResult.Segments) {
+				slog.ErrorContext(logCtx, "Invalid segment sequence number received from connector result", slog.Int("seqn", int(segResult.Seqn)))
+				updateErrors = true
+				continue
+			}
 
-		dbSegmentID := submitResult.Segments[segResult.Seqn-1].Seqn
+			dbSegmentID = int64(submitResult.Segments[segResult.Seqn-1].Seqn)
+		} else {
+			dbSegmentID = int64(*segResult.DBSegID)
+		}
 		segLogCtx := logging.ContextWithSegmentID(logCtx, int64(dbSegmentID)) // Add Segment ID
 
 		mnoConnID := connector.ConnectionID()
