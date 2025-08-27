@@ -2,7 +2,6 @@ package mno
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"log/slog"
 	"math/rand"
@@ -48,6 +47,10 @@ func NewManager(pool *pgxpool.Pool, q database.Querier, seg segmenter.Segmenter,
 		syncInterval: syncInterval,
 		stopCh:       make(chan struct{}),
 	}
+}
+
+func (m *Manager) GetDLRHandler() DLRHandlerFunc {
+	return m.dlrHandler
 }
 
 // Start initiates the manager's main loop for syncing connectors with DB config.
@@ -132,33 +135,33 @@ func (m *Manager) loadAndSyncConnectors(ctx context.Context) error {
 			continue
 		}
 
-		// --- Create New Connector ---
 		slog.InfoContext(logCtx, "Creating new MNO connector", slog.String("protocol", dbConn.Protocol))
 		var newConn Connector
 		var creationErr error
 
 		switch strings.ToLower(dbConn.Protocol) {
 		case "smpp":
-			smppCfg, err := NewSMPPConfigFromDB(dbConn) // Use helper
+			smppCfg, err := NewSMPPConfigFromDB(dbConn)
 			if err != nil {
 				creationErr = fmt.Errorf("invalid SMPP config for conn %d: %w", connID, err)
 			} else {
 				newConn, creationErr = NewSMPPMNOConnector(smppCfg, m.segmenter, m.dbQueries)
 			}
 		case "http":
-			// TODO: Implement HTTP Connector creation
-			// httpCfg, err := NewHTTPConfigFromDB(dbConn)
-			// if err == nil {
-			//     newConn, creationErr = NewHTTPMNOConnector(httpCfg, m.dbQueries)
-			// } else { creationErr = err }
-			creationErr = errors.New("http MNO connector not yet implemented")
+			httpCfg, err := NewHTTPConfigFromDB(dbConn)
+			if err == nil {
+				newConn = NewHTTPMNOConnector(httpCfg)
+			} else {
+				creationErr = err
+			}
+			// creationErr = errors.New("http MNO connector not yet implemented")
 		default:
 			creationErr = fmt.Errorf("unknown protocol '%s' for conn %d", dbConn.Protocol, connID)
 		}
 
 		if creationErr != nil {
 			slog.ErrorContext(logCtx, "Failed to create MNO connector", slog.Any("error", creationErr))
-			continue // Skip this connection
+			continue
 		}
 
 		// Register the central DLR handler
@@ -197,7 +200,6 @@ func (m *Manager) loadAndSyncConnectors(ctx context.Context) error {
 					}
 				}
 			} else if httpConn, ok := conn.(*HTTPMNOConnector); ok {
-				// TODO: Start HTTP connector background tasks if any (e.g., health checks)
 				_ = httpConn // Placeholder
 			}
 		}(newConn)
@@ -205,7 +207,7 @@ func (m *Manager) loadAndSyncConnectors(ctx context.Context) error {
 	} // End DB config loop
 
 	// Remove connectors that are no longer active in the DB
-	m.connectors.Range(func(key, value interface{}) bool {
+	m.connectors.Range(func(key, value any) bool {
 		connID := key.(int32)
 		if !activeDBConnIDs[connID] {
 			slog.InfoContext(ctx, "Removing connector no longer active in database", slog.Int("conn_id", int(connID)))
@@ -284,7 +286,7 @@ func (m *Manager) Shutdown(ctx context.Context) error {
 	var errors []error
 	var errMu sync.Mutex
 
-	m.connectors.Range(func(key, value interface{}) bool {
+	m.connectors.Range(func(key, value any) bool {
 		connID := key.(int32)
 		conn := value.(Connector)
 		shutdownWg.Add(1)
@@ -311,15 +313,3 @@ func (m *Manager) Shutdown(ctx context.Context) error {
 	}
 	return nil
 }
-
-// --- Placeholder for HTTP Connector ---
-type HTTPMNOConnector struct{}
-
-func (c *HTTPMNOConnector) SubmitMessage(ctx context.Context, msg PreparedMessage) (SubmitResult, error) {
-	panic("not implemented")
-}
-func (c *HTTPMNOConnector) RegisterDLRHandler(handler DLRHandlerFunc) { panic("not implemented") }
-func (c *HTTPMNOConnector) Shutdown(ctx context.Context) error        { panic("not implemented") }
-func (c *HTTPMNOConnector) Status() string                            { panic("not implemented") }
-func (c *HTTPMNOConnector) ConnectionID() int32                       { panic("not implemented") }
-func (c *HTTPMNOConnector) MnoID() int32                              { panic("not implemented") }

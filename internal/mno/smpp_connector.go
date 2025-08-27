@@ -53,7 +53,7 @@ type SMPPConnectorConfig struct {
 
 // Helper function to create config from DB model
 // Assumes sqlc model `database.MnoConnection` has fields matching the ALTER TABLE additions
-func NewSMPPConfigFromDB(dbConn database.MnoConnection) (SMPPConnectorConfig, error) {
+func NewSMPPConfigFromDB(dbConn database.GetActiveMNOConnectionsRow) (SMPPConnectorConfig, error) {
 	cfg := SMPPConnectorConfig{
 		ConnectionID: dbConn.ID,
 		MNOID:        dbConn.MnoID,
@@ -577,6 +577,7 @@ func (c *SMPPMNOConnector) onRebindingError(err error) {
 	logCtx = logging.ContextWithMNOConnID(logCtx, c.ConnectionID())
 	slog.ErrorContext(logCtx, "gosmpp OnRebindingError callback triggered", slog.Any("error", err))
 	// Maybe update status to disconnected if rebind fails persistently?
+	c.ConnectAndBind(logCtx)
 }
 
 func (c *SMPPMNOConnector) onClosed(state gosmpp.State) {

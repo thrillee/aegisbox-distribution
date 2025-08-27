@@ -242,6 +242,7 @@ func (h *SPCredentialHandler) UpdateSPCredential(c *gin.Context) {
 	// Prepare params for update
 	params := database.UpdateSPCredentialParams{
 		ID:         id,
+		Scope:      req.Scope,
 		Status:     req.Status,
 		HttpConfig: req.HTTPConfig, // Directly assign []byte (if req.HTTPConfig is json.RawMessage)
 	}
@@ -333,6 +334,8 @@ func mapDBCredToResponse(cred database.SpCredential) dto.SPCredentialResponse {
 		},
 		SystemID:         cred.SystemID, // sql.NullString maps ok to *string via omitempty? Check marshal. Assign pointers explicitly if needed.
 		BindType:         cred.BindType,
+		Scope:            &cred.Scope,
+		RouteGroupID:     cred.RoutingGroupID,
 		APIKeyIdentifier: cred.ApiKeyIdentifier,
 		HTTPConfig:       cred.HttpConfig, // Assign []byte to json.RawMessage
 	}

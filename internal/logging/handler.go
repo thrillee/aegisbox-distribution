@@ -17,6 +17,7 @@ const (
 	MNOMsgIDKey         contextKey = "mno_msg_id"
 	SegMsgIDKey         contextKey = "seg_msg_id"
 	MSISDNKey           contextKey = "msisdn"
+	SpCredentialID      contextKey = "sp_credential_id"
 	WalletIDKey         contextKey = "wallet_id"
 	CallBackKey         contextKey = "callback_url"
 	WorkerID            contextKey = "worker_id"
@@ -31,6 +32,7 @@ const (
 	MangerAPIHandlerKey contextKey = "manager_api_handler"
 	SpEMailKey          contextKey = "sp_email"
 	PricingRuleID       contextKey = "pricing_rule_id"
+	ServiceName         contextKey = "serivce_name"
 	// Add other keys as needed
 )
 
@@ -96,6 +98,10 @@ func ContextWithMSISDN(ctx context.Context, msisdn string) context.Context {
 	return context.WithValue(ctx, MSISDNKey, msisdn)
 }
 
+func ContextWithSPCredentialID(ctx context.Context, spCredentialID int32) context.Context {
+	return context.WithValue(ctx, SpCredentialID, spCredentialID)
+}
+
 func ContextWithSenderID(ctx context.Context, senderID string) context.Context {
 	return context.WithValue(ctx, MSISDNKey, senderID)
 }
@@ -155,4 +161,8 @@ func ContextWithPricingRuleID(ctx context.Context, createdRuleID int32) context.
 
 func ContextWithClientMessageID(ctx context.Context, msgID string) context.Context {
 	return context.WithValue(ctx, ClientMessageID, msgID)
+}
+
+func ContextWithService(ctx context.Context, serviceName string) context.Context {
+	return context.WithValue(ctx, ServiceName, serviceName)
 }

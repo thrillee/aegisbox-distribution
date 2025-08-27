@@ -20,11 +20,43 @@ func SetupRoutes(router gin.IRouter, q database.Querier, pool *pgxpool.Pool) {
 	pricingHandler := NewPricingRuleHandler(q, pool)
 	walletHandler := NewWalletHandler(q, pool)
 
+	altSenderHandler := NewOtpAlternativeSenderHandler(q)
+	templateHandler := NewOtpMessageTemplateHandler(q)
+	assignmentHandler := NewOtpSenderTemplateAssignmentHandler(q)
+
 	// ... other handlers ...
 
 	// --- Middleware (Example Placeholder) ---
 	// authMiddleware := NewAuthMiddleware(...)
 	// router.Use(authMiddleware)
+
+	otpSenders := router.Group("/otp-alternative-senders")
+	{
+		otpSenders.POST("", altSenderHandler.Create)
+		otpSenders.GET("", altSenderHandler.List)
+		otpSenders.GET("/:id", altSenderHandler.GetByID)
+		otpSenders.PUT("/:id", altSenderHandler.Update)
+		otpSenders.DELETE("/:id", altSenderHandler.Delete)
+		otpSenders.GET("/senders-with-templates", altSenderHandler.ListSendersWithTemplates)
+	}
+
+	otpTemplates := router.Group("/otp-message-templates")
+	{
+		otpTemplates.POST("", templateHandler.Create)
+		otpTemplates.GET("", templateHandler.List)
+		otpTemplates.GET("/:id", templateHandler.GetByID)
+		otpTemplates.PUT("/:id", templateHandler.Update)
+		otpTemplates.DELETE("/:id", templateHandler.Delete)
+	}
+
+	otpAssignments := router.Group("/otp-sender-template-assignments")
+	{
+		otpAssignments.POST("", assignmentHandler.Create)
+		otpAssignments.GET("", assignmentHandler.List) // Add query params for filtering if needed
+		otpAssignments.GET("/:id", assignmentHandler.GetByID)
+		otpAssignments.PUT("/:id", assignmentHandler.Update)
+		otpAssignments.DELETE("/:id", assignmentHandler.Delete)
+	}
 
 	// --- Service Provider Routes ---
 	spGroup := router.Group("/service-providers")

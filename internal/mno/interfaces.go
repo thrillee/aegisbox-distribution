@@ -46,6 +46,7 @@ type SegmentSubmitInfo struct {
 	ErrorCode    *string // Protocol-specific error code on submission failure (nullable)
 	Error        error   // Go error if submission failed
 	IsSuccess    bool
+	DBSegID      *int64
 }
 
 // SubmitResult holds the outcome of submitting a logical message (potentially multiple segments).

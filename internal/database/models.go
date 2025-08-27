@@ -106,6 +106,66 @@ type MnoConnection struct {
 	HttpConfig              []byte             `json:"httpConfig"`
 	CreatedAt               pgtype.Timestamptz `json:"createdAt"`
 	UpdatedAt               pgtype.Timestamptz `json:"updatedAt"`
+	Priority                *int32             `json:"priority"`
+}
+
+// Individual MSISDN prefixes belonging to a specific msisdn_prefix_group.
+type MsisdnPrefixEntry struct {
+	ID                  int32 `json:"id"`
+	MsisdnPrefixGroupID int32 `json:"msisdnPrefixGroupId"`
+	// The MSISDN prefix string, e.g., "234703".
+	MsisdnPrefix string             `json:"msisdnPrefix"`
+	CreatedAt    pgtype.Timestamptz `json:"createdAt"`
+	UpdatedAt    pgtype.Timestamptz `json:"updatedAt"`
+}
+
+// Groups of MSISDN prefixes, e.g., "MTN Nigeria Prefixes".
+type MsisdnPrefixGroup struct {
+	ID          int32   `json:"id"`
+	Name        string  `json:"name"`
+	Description *string `json:"description"`
+	// A unique, user-friendly reference for the prefix group.
+	Reference *string            `json:"reference"`
+	CreatedAt pgtype.Timestamptz `json:"createdAt"`
+	UpdatedAt pgtype.Timestamptz `json:"updatedAt"`
+}
+
+type OtpAlternativeSender struct {
+	ID                 int32              `json:"id"`
+	SenderIDString     string             `json:"senderIdString"`
+	ServiceProviderID  *int32             `json:"serviceProviderId"`
+	MnoID              *int32             `json:"mnoId"`
+	Status             string             `json:"status"`
+	CurrentUsageCount  int32              `json:"currentUsageCount"`
+	MaxUsageCount      int32              `json:"maxUsageCount"`
+	ResetIntervalHours *int32             `json:"resetIntervalHours"`
+	LastResetAt        pgtype.Timestamptz `json:"lastResetAt"`
+	LastUsedAt         pgtype.Timestamptz `json:"lastUsedAt"`
+	Notes              *string            `json:"notes"`
+	CreatedAt          pgtype.Timestamptz `json:"createdAt"`
+	UpdatedAt          pgtype.Timestamptz `json:"updatedAt"`
+}
+
+type OtpMessageTemplate struct {
+	ID               int32              `json:"id"`
+	Name             string             `json:"name"`
+	ContentTemplate  string             `json:"contentTemplate"`
+	DefaultBrandName *string            `json:"defaultBrandName"`
+	Status           string             `json:"status"`
+	CreatedAt        pgtype.Timestamptz `json:"createdAt"`
+	UpdatedAt        pgtype.Timestamptz `json:"updatedAt"`
+}
+
+type OtpSenderTemplateAssignment struct {
+	ID                     int32              `json:"id"`
+	OtpAlternativeSenderID int32              `json:"otpAlternativeSenderId"`
+	OtpMessageTemplateID   int32              `json:"otpMessageTemplateId"`
+	MnoID                  *int32             `json:"mnoId"`
+	Priority               int32              `json:"priority"`
+	Status                 string             `json:"status"`
+	AssignmentUsageCount   int64              `json:"assignmentUsageCount"`
+	CreatedAt              pgtype.Timestamptz `json:"createdAt"`
+	UpdatedAt              pgtype.Timestamptz `json:"updatedAt"`
 }
 
 type PricingRule struct {
@@ -116,6 +176,32 @@ type PricingRule struct {
 	PricePerSms       decimal.Decimal    `json:"pricePerSms"`
 	CreatedAt         pgtype.Timestamptz `json:"createdAt"`
 	UpdatedAt         pgtype.Timestamptz `json:"updatedAt"`
+}
+
+// Assigns an MNO to a specific MSISDN prefix group within a given routing group.
+type RoutingAssignment struct {
+	ID                  int32 `json:"id"`
+	RoutingGroupID      int32 `json:"routingGroupId"`
+	MsisdnPrefixGroupID int32 `json:"msisdnPrefixGroupId"`
+	MnoID               int32 `json:"mnoId"`
+	// Status of the routing assignment (e.g., active, inactive, testing).
+	Status string `json:"status"`
+	// Priority of this rule within the routing group for the same prefix group (lower is higher).
+	Priority  int32              `json:"priority"`
+	Comment   *string            `json:"comment"`
+	CreatedAt pgtype.Timestamptz `json:"createdAt"`
+	UpdatedAt pgtype.Timestamptz `json:"updatedAt"`
+}
+
+// Defines a collection of routing rules forming a specific routing strategy.
+type RoutingGroup struct {
+	ID          int32   `json:"id"`
+	Name        string  `json:"name"`
+	Description *string `json:"description"`
+	// A unique, user-friendly reference for the routing group.
+	Reference *string            `json:"reference"`
+	CreatedAt pgtype.Timestamptz `json:"createdAt"`
+	UpdatedAt pgtype.Timestamptz `json:"updatedAt"`
 }
 
 type RoutingRule struct {
@@ -159,6 +245,9 @@ type SpCredential struct {
 	HttpConfig        []byte             `json:"httpConfig"`
 	CreatedAt         pgtype.Timestamptz `json:"createdAt"`
 	UpdatedAt         pgtype.Timestamptz `json:"updatedAt"`
+	// The routing group assigned to this specific SP credential. NULL means system default may apply.
+	RoutingGroupID *int32 `json:"routingGroupId"`
+	Scope          string `json:"scope"`
 }
 
 type Template struct {

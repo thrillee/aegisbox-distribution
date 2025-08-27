@@ -3,6 +3,8 @@ package sp
 import (
 	"context"
 	"time"
+
+	"github.com/thrillee/aegisbox/internal/database"
 )
 
 // IncomingSPMessage holds details received from an SP (Client).
@@ -20,6 +22,8 @@ type IncomingSPMessage struct {
 	IsFlash           bool
 	RequestDLR        bool
 	ReceivedAt        time.Time
+	MnoID             *int32
+	ProcessingStatus  string
 	// Add other fields: DataCoding, ESMClass if available from SP request
 }
 
@@ -34,6 +38,18 @@ type Acknowledgement struct {
 // Both the SMPP Server and HTTP Server will delegate to an implementation of this.
 type IncomingMessageHandler interface {
 	HandleIncomingMessage(ctx context.Context, msg IncomingSPMessage) (Acknowledgement, error)
+}
+
+// MessagePreprocessor defines an interface for modules that can modify
+// an IncomingSPMessage before it's fully processed by the main handler.
+type MessagePreprocessor interface {
+	Process(
+		ctx context.Context,
+		msg *IncomingSPMessage,
+		spDetails database.ServiceProvider,
+		credDetails database.SpCredential,
+	) (modified bool, err error)
+	Name() string
 }
 
 // --- DLR Forwarding ---

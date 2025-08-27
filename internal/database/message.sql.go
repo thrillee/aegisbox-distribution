@@ -203,7 +203,7 @@ func (q *Queries) GetMessageTotalSegments(ctx context.Context, id int64) (int32,
 }
 
 const getMessagesByStatus = `-- name: GetMessagesByStatus :many
-SELECT id, service_provider_id, original_destination_addr, original_source_addr 
+SELECT id, service_provider_id, sp_credential_id, original_destination_addr, original_source_addr 
 FROM messages
 WHERE processing_status = $1 -- e.g., 'received', 'routed', 'queued_for_send'
 ORDER BY received_at -- Process in FIFO order
@@ -219,6 +219,7 @@ type GetMessagesByStatusParams struct {
 type GetMessagesByStatusRow struct {
 	ID                      int64  `json:"id"`
 	ServiceProviderID       int32  `json:"serviceProviderId"`
+	SpCredentialID          int32  `json:"spCredentialId"`
 	OriginalDestinationAddr string `json:"originalDestinationAddr"`
 	OriginalSourceAddr      string `json:"originalSourceAddr"`
 }
@@ -235,6 +236,7 @@ func (q *Queries) GetMessagesByStatus(ctx context.Context, arg GetMessagesByStat
 		if err := rows.Scan(
 			&i.ID,
 			&i.ServiceProviderID,
+			&i.SpCredentialID,
 			&i.OriginalDestinationAddr,
 			&i.OriginalSourceAddr,
 		); err != nil {
@@ -353,11 +355,12 @@ INSERT INTO messages (
     total_segments,
     currency_code,
     submitted_at,
-    received_at,
+    routed_mno_id,
     processing_status, -- Initial status
+    received_at,
     final_status       -- Initial status
 ) VALUES (
-    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, NOW(), 'received', 'pending'
+    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, NOW(), 'pending'
 ) RETURNING id
 `
 
@@ -372,6 +375,8 @@ type InsertMessageInParams struct {
 	TotalSegments           int32              `json:"totalSegments"`
 	CurrencyCode            string             `json:"currencyCode"`
 	SubmittedAt             pgtype.Timestamptz `json:"submittedAt"`
+	RoutedMnoID             *int32             `json:"routedMnoId"`
+	ProcessingStatus        string             `json:"processingStatus"`
 }
 
 func (q *Queries) InsertMessageIn(ctx context.Context, arg InsertMessageInParams) (int64, error) {
@@ -386,6 +391,8 @@ func (q *Queries) InsertMessageIn(ctx context.Context, arg InsertMessageInParams
 		arg.TotalSegments,
 		arg.CurrencyCode,
 		arg.SubmittedAt,
+		arg.RoutedMnoID,
+		arg.ProcessingStatus,
 	)
 	var id int64
 	err := row.Scan(&id)
