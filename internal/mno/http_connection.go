@@ -184,13 +184,14 @@ func (h *HTTPMNOConnector) SubmitMessage(ctx context.Context, msgDetails Prepare
 	defer resp.Body.Close()
 
 	// Parse response
+	errorCode := "HTTP_ERR"
 	if resp.StatusCode != http.StatusOK {
 		errorMsg := fmt.Sprintf("HTTP API returned status %d [%s]", resp.StatusCode, url)
 		segments[0] = SegmentSubmitInfo{
 			Seqn:      1,
 			IsSuccess: false,
 			Error:     fmt.Errorf(errorMsg),
-			ErrorCode: &errorMsg,
+			ErrorCode: &errorCode,
 			DBSegID:   &dbSegmentID,
 		}
 		return SubmitResult{
@@ -201,9 +202,11 @@ func (h *HTTPMNOConnector) SubmitMessage(ctx context.Context, msgDetails Prepare
 
 	var sendResp HTTPSendResponse
 	if err := json.NewDecoder(resp.Body).Decode(&sendResp); err != nil {
+		errorCode = "JSON_ERR"
 		segments[0] = SegmentSubmitInfo{
 			Seqn:      1,
 			IsSuccess: false,
+			ErrorCode: &errorCode,
 			Error:     fmt.Errorf("failed to decode response: %w", err),
 			DBSegID:   &dbSegmentID,
 		}
