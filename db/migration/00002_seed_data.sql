@@ -10,28 +10,28 @@ ON CONFLICT (id) DO NOTHING;
 
 -- Seed HTTP MNO Connections (from talk-thrill-http providers)
 -- SIMPU Provider
-INSERT INTO mno_connections (id, mno_id, protocol, status, name, base_url, api_key, rate_limit, supports_webhook) VALUES
-(1, 1, 'http', 'active', 'SIMPU', 'https://api.simpu.co', '', 100, true)
+INSERT INTO mno_connections (id, mno_id, protocol, status, base_url, api_key, rate_limit, supports_webhook) VALUES
+(1, 1, 'http', 'active', 'https://api.simpu.co', '', 100, true)
 ON CONFLICT (id) DO NOTHING;
 
 -- TERMII Provider
-INSERT INTO mno_connections (id, mno_id, protocol, status, name, base_url, api_key, rate_limit, supports_webhook) VALUES
-(2, 1, 'http', 'active', 'TERMII', 'https://api.termii.com', '', 150, true)
+INSERT INTO mno_connections (id, mno_id, protocol, status, base_url, api_key, rate_limit, supports_webhook) VALUES
+(2, 1, 'http', 'active', 'https://api.termii.com', '', 150, true)
 ON CONFLICT (id) DO NOTHING;
 
 -- MULTITEXTER Provider
-INSERT INTO mno_connections (id, mno_id, protocol, status, name, base_url, username, password, rate_limit, supports_webhook) VALUES
-(3, 1, 'http', 'active', 'MULTITEXTER', 'https://app.multitexter.com/v2', '', '', 100, false)
+INSERT INTO mno_connections (id, mno_id, protocol, status, base_url, username, http_password, rate_limit, supports_webhook) VALUES
+(3, 1, 'http', 'active', 'https://app.multitexter.com/v2', '', '', 100, false)
 ON CONFLICT (id) DO NOTHING;
 
 -- AFRICATALKING Provider (restricted networks)
-INSERT INTO mno_connections (id, mno_id, protocol, status, name, base_url, api_key, rate_limit, supports_webhook) VALUES
-(4, 1, 'http', 'active', 'AFRICATALKING', 'https://api.africastalking.com', '', 120, true)
+INSERT INTO mno_connections (id, mno_id, protocol, status, base_url, api_key, rate_limit, supports_webhook) VALUES
+(4, 1, 'http', 'active', 'https://api.africastalking.com', '', 120, true)
 ON CONFLICT (id) DO NOTHING;
 
 -- EBULKSMS Provider
-INSERT INTO mno_connections (id, mno_id, protocol, status, name, base_url, rate_limit, supports_webhook) VALUES
-(5, 1, 'http', 'active', 'EBULKSMS', 'https://api.ebulksms.com', 200, true)
+INSERT INTO mno_connections (id, mno_id, protocol, status, base_url, rate_limit, supports_webhook) VALUES
+(5, 1, 'http', 'active', 'https://api.ebulksms.com', 200, true)
 ON CONFLICT (id) DO NOTHING;
 
 -- Seed Sender IDs (from talk-thrill-http senders)
@@ -183,11 +183,37 @@ INSERT INTO otp_message_templates (name, content_template, default_brand_name, s
 ON CONFLICT (name) DO NOTHING;
 
 -- Seed Routing Assignments (System Default)
-INSERT INTO routing_assignments (routing_group_id, msisdn_prefix_group_id, mno_id, priority)
-SELECT rg.id, mpg.id, 1, 0
-FROM routing_groups rg, msisdn_prefix_groups mpg
-WHERE rg.reference = 'SYS_DEFAULT_ROUTE' AND mpg.reference IN ('MTN_NG_PFX', 'GLO_NG_PFX', 'AIRTEL_NG_PFX', '9MOBILE_NG_PFX')
-ON CONFLICT (routing_group_id, msisdn_prefix_group_id) DO NOTHING;
+-- Get the routing group ID
+DO $$
+DECLARE
+    routing_group_id_val INT;
+    mtn_prefix_id INT;
+    glo_prefix_id INT;
+    airtel_prefix_id INT;
+    mobile_prefix_id INT;
+BEGIN
+    SELECT id INTO routing_group_id_val FROM routing_groups WHERE reference = 'SYS_DEFAULT_ROUTE';
+    SELECT id INTO mtn_prefix_id FROM msisdn_prefix_groups WHERE reference = 'MTN_NG_PFX';
+    SELECT id INTO glo_prefix_id FROM msisdn_prefix_groups WHERE reference = 'GLO_NG_PFX';
+    SELECT id INTO airtel_prefix_id FROM msisdn_prefix_groups WHERE reference = 'AIRTEL_NG_PFX';
+    SELECT id INTO mobile_prefix_id FROM msisdn_prefix_groups WHERE reference = '9MOBILE_NG_PFX';
+    
+    INSERT INTO routing_assignments (routing_group_id, msisdn_prefix_group_id, mno_id, priority)
+    VALUES (routing_group_id_val, mtn_prefix_id, 1, 0)
+    ON CONFLICT (routing_group_id, msisdn_prefix_group_id) DO NOTHING;
+    
+    INSERT INTO routing_assignments (routing_group_id, msisdn_prefix_group_id, mno_id, priority)
+    VALUES (routing_group_id_val, glo_prefix_id, 1, 0)
+    ON CONFLICT (routing_group_id, msisdn_prefix_group_id) DO NOTHING;
+    
+    INSERT INTO routing_assignments (routing_group_id, msisdn_prefix_group_id, mno_id, priority)
+    VALUES (routing_group_id_val, airtel_prefix_id, 1, 0)
+    ON CONFLICT (routing_group_id, msisdn_prefix_group_id) DO NOTHING;
+    
+    INSERT INTO routing_assignments (routing_group_id, msisdn_prefix_group_id, mno_id, priority)
+    VALUES (routing_group_id_val, mobile_prefix_id, 1, 0)
+    ON CONFLICT (routing_group_id, msisdn_prefix_group_id) DO NOTHING;
+END $$;
 
 -- +goose StatementEnd
 
