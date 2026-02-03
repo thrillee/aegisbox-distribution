@@ -22,11 +22,6 @@ import (
 // Interfaces this Processor relies on (Implementations should be injected)
 // ========================================================================================
 
-// Router finds the appropriate MNO for a destination MSISDN.
-type Router interface {
-	Route(ctx context.Context, spCredentialID int32, msisdn string) (*mno.RoutingResult, error)
-}
-
 // Validator checks SenderID, templates, etc.
 type Validator interface {
 	Validate(ctx context.Context, spID int32, senderID string) (*ValidationResult, error)
@@ -255,11 +250,11 @@ func (p *Processor) validateAndRouteMessage(
 	var routingRes *mno.RoutingResult
 	var routeErr error
 	if validationRes.IsValid {
-		routingRes, routeErr = p.router.Route(
-			ctx,
-			msg.ServiceProviderID,
-			msg.OriginalDestinationAddr,
-		)
+		routingRes, routeErr = p.router.Route(ctx, RoutingRequest{
+			SPCredentialID: msg.SpCredentialID,
+			MSISDN:         msg.OriginalDestinationAddr,
+			SenderID:       msg.OriginalSourceAddr,
+		})
 		if routeErr != nil {
 			if internalError == nil {
 				internalError = fmt.Errorf("routing internal error: %w", routeErr)

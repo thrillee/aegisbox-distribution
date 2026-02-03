@@ -7,8 +7,6 @@ package database
 
 import (
 	"context"
-
-	"github.com/jackc/pgx/v5/pgtype"
 )
 
 const countMNOConnectionsByMNO = `-- name: CountMNOConnectionsByMNO :one
@@ -25,26 +23,33 @@ func (q *Queries) CountMNOConnectionsByMNO(ctx context.Context, mnoID int32) (in
 
 const createMNOConnection = `-- name: CreateMNOConnection :one
 INSERT INTO mno_connections (
-    mno_id, protocol, status,
+    mno_id, protocol, status, priority,
+    -- SMPP Fields
     system_id, password, host, port, use_tls, bind_type, system_type,
     enquire_link_interval_secs, request_timeout_secs, connect_retry_delay_secs,
     max_window_size, default_data_coding, source_addr_ton, source_addr_npi,
     dest_addr_ton, dest_addr_npi,
-    http_config
+    -- HTTP Fields
+    api_key, base_url, username, http_password, secret_key, default_sender,
+    rate_limit, email, supports_webhook, webhook_path, timeout_secs,
+    provider_config
 ) VALUES (
-    $1, $2, COALESCE($3, 'active'),
-    $4, $5, $6, $7, $8, $9, $10,
-    $11, $12, $13,
-    $14, $15, $16, $17,
-    $18, $19,
-    $20
-) RETURNING id, mno_id, protocol, status, system_id, password, host, port, use_tls, bind_type, system_type, enquire_link_interval_secs, request_timeout_secs, connect_retry_delay_secs, max_window_size, default_data_coding, source_addr_ton, source_addr_npi, dest_addr_ton, dest_addr_npi, http_config, created_at, updated_at, priority
+    $1, $2, COALESCE($3, 'active'), COALESCE($4, 1),
+    $5, $6, $7, $8, $9, $10, $11,
+    $12, $13, $14,
+    $15, $16, $17, $18,
+    $19, $20,
+    $21, $22, $23, $24, $25, $26,
+    $27, $28, $29, $30, $31,
+    $32
+) RETURNING id, mno_id, protocol, status, priority, system_id, password, host, port, use_tls, bind_type, system_type, enquire_link_interval_secs, request_timeout_secs, connect_retry_delay_secs, max_window_size, default_data_coding, source_addr_ton, source_addr_npi, dest_addr_ton, dest_addr_npi, api_key, base_url, username, http_password, secret_key, default_sender, rate_limit, email, supports_webhook, webhook_path, timeout_secs, provider_config, created_at, updated_at
 `
 
 type CreateMNOConnectionParams struct {
 	MnoID                   int32       `json:"mnoId"`
 	Protocol                string      `json:"protocol"`
 	Column3                 interface{} `json:"column3"`
+	Column4                 interface{} `json:"column4"`
 	SystemID                *string     `json:"systemId"`
 	Password                *string     `json:"password"`
 	Host                    *string     `json:"host"`
@@ -61,7 +66,18 @@ type CreateMNOConnectionParams struct {
 	SourceAddrNpi           *int32      `json:"sourceAddrNpi"`
 	DestAddrTon             *int32      `json:"destAddrTon"`
 	DestAddrNpi             *int32      `json:"destAddrNpi"`
-	HttpConfig              []byte      `json:"httpConfig"`
+	ApiKey                  *string     `json:"apiKey"`
+	BaseUrl                 string      `json:"baseUrl"`
+	Username                *string     `json:"username"`
+	HttpPassword            *string     `json:"httpPassword"`
+	SecretKey               *string     `json:"secretKey"`
+	DefaultSender           *string     `json:"defaultSender"`
+	RateLimit               *int32      `json:"rateLimit"`
+	Email                   *string     `json:"email"`
+	SupportsWebhook         *bool       `json:"supportsWebhook"`
+	WebhookPath             *string     `json:"webhookPath"`
+	TimeoutSecs             *int32      `json:"timeoutSecs"`
+	ProviderConfig          []byte      `json:"providerConfig"`
 }
 
 func (q *Queries) CreateMNOConnection(ctx context.Context, arg CreateMNOConnectionParams) (MnoConnection, error) {
@@ -69,6 +85,7 @@ func (q *Queries) CreateMNOConnection(ctx context.Context, arg CreateMNOConnecti
 		arg.MnoID,
 		arg.Protocol,
 		arg.Column3,
+		arg.Column4,
 		arg.SystemID,
 		arg.Password,
 		arg.Host,
@@ -85,7 +102,18 @@ func (q *Queries) CreateMNOConnection(ctx context.Context, arg CreateMNOConnecti
 		arg.SourceAddrNpi,
 		arg.DestAddrTon,
 		arg.DestAddrNpi,
-		arg.HttpConfig,
+		arg.ApiKey,
+		arg.BaseUrl,
+		arg.Username,
+		arg.HttpPassword,
+		arg.SecretKey,
+		arg.DefaultSender,
+		arg.RateLimit,
+		arg.Email,
+		arg.SupportsWebhook,
+		arg.WebhookPath,
+		arg.TimeoutSecs,
+		arg.ProviderConfig,
 	)
 	var i MnoConnection
 	err := row.Scan(
@@ -93,6 +121,7 @@ func (q *Queries) CreateMNOConnection(ctx context.Context, arg CreateMNOConnecti
 		&i.MnoID,
 		&i.Protocol,
 		&i.Status,
+		&i.Priority,
 		&i.SystemID,
 		&i.Password,
 		&i.Host,
@@ -109,10 +138,20 @@ func (q *Queries) CreateMNOConnection(ctx context.Context, arg CreateMNOConnecti
 		&i.SourceAddrNpi,
 		&i.DestAddrTon,
 		&i.DestAddrNpi,
-		&i.HttpConfig,
+		&i.ApiKey,
+		&i.BaseUrl,
+		&i.Username,
+		&i.HttpPassword,
+		&i.SecretKey,
+		&i.DefaultSender,
+		&i.RateLimit,
+		&i.Email,
+		&i.SupportsWebhook,
+		&i.WebhookPath,
+		&i.TimeoutSecs,
+		&i.ProviderConfig,
 		&i.CreatedAt,
 		&i.UpdatedAt,
-		&i.Priority,
 	)
 	return i, err
 }
@@ -128,76 +167,63 @@ func (q *Queries) DeleteMNOConnection(ctx context.Context, id int32) error {
 
 const getActiveMNOConnections = `-- name: GetActiveMNOConnections :many
 SELECT
-    id,
-    mno_id,
-    protocol,
-    status,
+    mc.id,
+    mc.mno_id,
+    mc.protocol,
+    mc.status,
+    mc.priority,
     -- SMPP Fields
-    system_id,
-    password,
-    host,
-    port,
-    use_tls,
-    bind_type,
-    system_type,
-    enquire_link_interval_secs,
-    request_timeout_secs,
-    connect_retry_delay_secs,
-    max_window_size,
-    default_data_coding,
-    source_addr_ton,
-    source_addr_npi,
-    dest_addr_ton,
-    dest_addr_npi,
+    mc.system_id,
+    mc.password,
+    mc.host,
+    mc.port,
+    mc.use_tls,
+    mc.bind_type,
+    mc.system_type,
+    mc.enquire_link_interval_secs,
+    mc.request_timeout_secs,
+    mc.connect_retry_delay_secs,
+    mc.max_window_size,
+    mc.default_data_coding,
+    mc.source_addr_ton,
+    mc.source_addr_npi,
+    mc.dest_addr_ton,
+    mc.dest_addr_npi,
     -- HTTP Fields
-    http_config,
-    created_at,
-    updated_at
-FROM mno_connections
-WHERE status = 'active'
+    mc.api_key,
+    mc.base_url,
+    mc.username,
+    mc.http_password,
+    mc.secret_key,
+    mc.default_sender,
+    mc.rate_limit,
+    mc.email,
+    mc.supports_webhook,
+    mc.webhook_path,
+    mc.timeout_secs,
+    mc.provider_config,
+    mc.created_at,
+    mc.updated_at
+FROM mno_connections mc
+WHERE mc.status = 'active'
 `
 
-type GetActiveMNOConnectionsRow struct {
-	ID                      int32              `json:"id"`
-	MnoID                   int32              `json:"mnoId"`
-	Protocol                string             `json:"protocol"`
-	Status                  string             `json:"status"`
-	SystemID                *string            `json:"systemId"`
-	Password                *string            `json:"password"`
-	Host                    *string            `json:"host"`
-	Port                    *int32             `json:"port"`
-	UseTls                  *bool              `json:"useTls"`
-	BindType                *string            `json:"bindType"`
-	SystemType              *string            `json:"systemType"`
-	EnquireLinkIntervalSecs *int32             `json:"enquireLinkIntervalSecs"`
-	RequestTimeoutSecs      *int32             `json:"requestTimeoutSecs"`
-	ConnectRetryDelaySecs   *int32             `json:"connectRetryDelaySecs"`
-	MaxWindowSize           *int32             `json:"maxWindowSize"`
-	DefaultDataCoding       *int32             `json:"defaultDataCoding"`
-	SourceAddrTon           *int32             `json:"sourceAddrTon"`
-	SourceAddrNpi           *int32             `json:"sourceAddrNpi"`
-	DestAddrTon             *int32             `json:"destAddrTon"`
-	DestAddrNpi             *int32             `json:"destAddrNpi"`
-	HttpConfig              []byte             `json:"httpConfig"`
-	CreatedAt               pgtype.Timestamptz `json:"createdAt"`
-	UpdatedAt               pgtype.Timestamptz `json:"updatedAt"`
-}
-
 // Selects all connections marked as 'active' in status
-func (q *Queries) GetActiveMNOConnections(ctx context.Context) ([]GetActiveMNOConnectionsRow, error) {
+func (q *Queries) GetActiveMNOConnections(ctx context.Context) ([]MnoConnection, error) {
 	rows, err := q.db.Query(ctx, getActiveMNOConnections)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []GetActiveMNOConnectionsRow
+	var items []MnoConnection
 	for rows.Next() {
-		var i GetActiveMNOConnectionsRow
+		var i MnoConnection
 		if err := rows.Scan(
 			&i.ID,
 			&i.MnoID,
 			&i.Protocol,
 			&i.Status,
+			&i.Priority,
 			&i.SystemID,
 			&i.Password,
 			&i.Host,
@@ -214,7 +240,18 @@ func (q *Queries) GetActiveMNOConnections(ctx context.Context) ([]GetActiveMNOCo
 			&i.SourceAddrNpi,
 			&i.DestAddrTon,
 			&i.DestAddrNpi,
-			&i.HttpConfig,
+			&i.ApiKey,
+			&i.BaseUrl,
+			&i.Username,
+			&i.HttpPassword,
+			&i.SecretKey,
+			&i.DefaultSender,
+			&i.RateLimit,
+			&i.Email,
+			&i.SupportsWebhook,
+			&i.WebhookPath,
+			&i.TimeoutSecs,
+			&i.ProviderConfig,
 			&i.CreatedAt,
 			&i.UpdatedAt,
 		); err != nil {
@@ -229,7 +266,7 @@ func (q *Queries) GetActiveMNOConnections(ctx context.Context) ([]GetActiveMNOCo
 }
 
 const getMNOConnectionByID = `-- name: GetMNOConnectionByID :one
-SELECT id, mno_id, protocol, status, system_id, password, host, port, use_tls, bind_type, system_type, enquire_link_interval_secs, request_timeout_secs, connect_retry_delay_secs, max_window_size, default_data_coding, source_addr_ton, source_addr_npi, dest_addr_ton, dest_addr_npi, http_config, created_at, updated_at, priority FROM mno_connections WHERE id = $1 LIMIT 1
+SELECT id, mno_id, protocol, status, priority, system_id, password, host, port, use_tls, bind_type, system_type, enquire_link_interval_secs, request_timeout_secs, connect_retry_delay_secs, max_window_size, default_data_coding, source_addr_ton, source_addr_npi, dest_addr_ton, dest_addr_npi, api_key, base_url, username, http_password, secret_key, default_sender, rate_limit, email, supports_webhook, webhook_path, timeout_secs, provider_config, created_at, updated_at FROM mno_connections WHERE id = $1 LIMIT 1
 `
 
 func (q *Queries) GetMNOConnectionByID(ctx context.Context, id int32) (MnoConnection, error) {
@@ -240,6 +277,7 @@ func (q *Queries) GetMNOConnectionByID(ctx context.Context, id int32) (MnoConnec
 		&i.MnoID,
 		&i.Protocol,
 		&i.Status,
+		&i.Priority,
 		&i.SystemID,
 		&i.Password,
 		&i.Host,
@@ -256,16 +294,26 @@ func (q *Queries) GetMNOConnectionByID(ctx context.Context, id int32) (MnoConnec
 		&i.SourceAddrNpi,
 		&i.DestAddrTon,
 		&i.DestAddrNpi,
-		&i.HttpConfig,
+		&i.ApiKey,
+		&i.BaseUrl,
+		&i.Username,
+		&i.HttpPassword,
+		&i.SecretKey,
+		&i.DefaultSender,
+		&i.RateLimit,
+		&i.Email,
+		&i.SupportsWebhook,
+		&i.WebhookPath,
+		&i.TimeoutSecs,
+		&i.ProviderConfig,
 		&i.CreatedAt,
 		&i.UpdatedAt,
-		&i.Priority,
 	)
 	return i, err
 }
 
 const listMNOConnectionsByMNO = `-- name: ListMNOConnectionsByMNO :many
-SELECT id, mno_id, protocol, status, system_id, password, host, port, use_tls, bind_type, system_type, enquire_link_interval_secs, request_timeout_secs, connect_retry_delay_secs, max_window_size, default_data_coding, source_addr_ton, source_addr_npi, dest_addr_ton, dest_addr_npi, http_config, created_at, updated_at, priority FROM mno_connections
+SELECT id, mno_id, protocol, status, priority, system_id, password, host, port, use_tls, bind_type, system_type, enquire_link_interval_secs, request_timeout_secs, connect_retry_delay_secs, max_window_size, default_data_coding, source_addr_ton, source_addr_npi, dest_addr_ton, dest_addr_npi, api_key, base_url, username, http_password, secret_key, default_sender, rate_limit, email, supports_webhook, webhook_path, timeout_secs, provider_config, created_at, updated_at FROM mno_connections
 WHERE mno_id = $1
 ORDER BY created_at DESC
 LIMIT $2 OFFSET $3
@@ -291,6 +339,7 @@ func (q *Queries) ListMNOConnectionsByMNO(ctx context.Context, arg ListMNOConnec
 			&i.MnoID,
 			&i.Protocol,
 			&i.Status,
+			&i.Priority,
 			&i.SystemID,
 			&i.Password,
 			&i.Host,
@@ -307,10 +356,20 @@ func (q *Queries) ListMNOConnectionsByMNO(ctx context.Context, arg ListMNOConnec
 			&i.SourceAddrNpi,
 			&i.DestAddrTon,
 			&i.DestAddrNpi,
-			&i.HttpConfig,
+			&i.ApiKey,
+			&i.BaseUrl,
+			&i.Username,
+			&i.HttpPassword,
+			&i.SecretKey,
+			&i.DefaultSender,
+			&i.RateLimit,
+			&i.Email,
+			&i.SupportsWebhook,
+			&i.WebhookPath,
+			&i.TimeoutSecs,
+			&i.ProviderConfig,
 			&i.CreatedAt,
 			&i.UpdatedAt,
-			&i.Priority,
 		); err != nil {
 			return nil, err
 		}
@@ -326,30 +385,43 @@ const updateMNOConnection = `-- name: UpdateMNOConnection :one
 UPDATE mno_connections
 SET
     status = COALESCE($1, status),
-    system_id = COALESCE($2, system_id),
-    password = COALESCE($3, password), -- Update password directly if provided
-    host = COALESCE($4, host),
-    port = COALESCE($5, port),
-    use_tls = COALESCE($6, use_tls),
-    bind_type = COALESCE($7, bind_type),
-    system_type = COALESCE($8, system_type),
-    enquire_link_interval_secs = COALESCE($9, enquire_link_interval_secs),
-    request_timeout_secs = COALESCE($10, request_timeout_secs),
-    connect_retry_delay_secs = COALESCE($11, connect_retry_delay_secs),
-    max_window_size = COALESCE($12, max_window_size),
-    default_data_coding = COALESCE($13, default_data_coding),
-    source_addr_ton = COALESCE($14, source_addr_ton),
-    source_addr_npi = COALESCE($15, source_addr_npi),
-    dest_addr_ton = COALESCE($16, dest_addr_ton),
-    dest_addr_npi = COALESCE($17, dest_addr_npi),
-    http_config = COALESCE($18, http_config),
+    priority = COALESCE($2, priority),
+    system_id = COALESCE($3, system_id),
+    password = COALESCE($4, password),
+    host = COALESCE($5, host),
+    port = COALESCE($6, port),
+    use_tls = COALESCE($7, use_tls),
+    bind_type = COALESCE($8, bind_type),
+    system_type = COALESCE($9, system_type),
+    enquire_link_interval_secs = COALESCE($10, enquire_link_interval_secs),
+    request_timeout_secs = COALESCE($11, request_timeout_secs),
+    connect_retry_delay_secs = COALESCE($12, connect_retry_delay_secs),
+    max_window_size = COALESCE($13, max_window_size),
+    default_data_coding = COALESCE($14, default_data_coding),
+    source_addr_ton = COALESCE($15, source_addr_ton),
+    source_addr_npi = COALESCE($16, source_addr_npi),
+    dest_addr_ton = COALESCE($17, dest_addr_ton),
+    dest_addr_npi = COALESCE($18, dest_addr_npi),
+    api_key = COALESCE($19, api_key),
+    base_url = COALESCE($20, base_url),
+    username = COALESCE($21, username),
+    http_password = COALESCE($22, http_password),
+    secret_key = COALESCE($23, secret_key),
+    default_sender = COALESCE($24, default_sender),
+    rate_limit = COALESCE($25, rate_limit),
+    email = COALESCE($26, email),
+    supports_webhook = COALESCE($27, supports_webhook),
+    webhook_path = COALESCE($28, webhook_path),
+    timeout_secs = COALESCE($29, timeout_secs),
+    provider_config = COALESCE($30, provider_config),
     updated_at = NOW()
-WHERE id = $19
-RETURNING id, mno_id, protocol, status, system_id, password, host, port, use_tls, bind_type, system_type, enquire_link_interval_secs, request_timeout_secs, connect_retry_delay_secs, max_window_size, default_data_coding, source_addr_ton, source_addr_npi, dest_addr_ton, dest_addr_npi, http_config, created_at, updated_at, priority
+WHERE id = $31
+RETURNING id, mno_id, protocol, status, priority, system_id, password, host, port, use_tls, bind_type, system_type, enquire_link_interval_secs, request_timeout_secs, connect_retry_delay_secs, max_window_size, default_data_coding, source_addr_ton, source_addr_npi, dest_addr_ton, dest_addr_npi, api_key, base_url, username, http_password, secret_key, default_sender, rate_limit, email, supports_webhook, webhook_path, timeout_secs, provider_config, created_at, updated_at
 `
 
 type UpdateMNOConnectionParams struct {
 	Status                  *string `json:"status"`
+	Priority                *int32  `json:"priority"`
 	SystemID                *string `json:"systemId"`
 	Password                *string `json:"password"`
 	Host                    *string `json:"host"`
@@ -366,13 +438,25 @@ type UpdateMNOConnectionParams struct {
 	SourceAddrNpi           *int32  `json:"sourceAddrNpi"`
 	DestAddrTon             *int32  `json:"destAddrTon"`
 	DestAddrNpi             *int32  `json:"destAddrNpi"`
-	HttpConfig              []byte  `json:"httpConfig"`
+	ApiKey                  *string `json:"apiKey"`
+	BaseUrl                 *string `json:"baseUrl"`
+	Username                *string `json:"username"`
+	HttpPassword            *string `json:"httpPassword"`
+	SecretKey               *string `json:"secretKey"`
+	DefaultSender           *string `json:"defaultSender"`
+	RateLimit               *int32  `json:"rateLimit"`
+	Email                   *string `json:"email"`
+	SupportsWebhook         *bool   `json:"supportsWebhook"`
+	WebhookPath             *string `json:"webhookPath"`
+	TimeoutSecs             *int32  `json:"timeoutSecs"`
+	ProviderConfig          []byte  `json:"providerConfig"`
 	ID                      int32   `json:"id"`
 }
 
 func (q *Queries) UpdateMNOConnection(ctx context.Context, arg UpdateMNOConnectionParams) (MnoConnection, error) {
 	row := q.db.QueryRow(ctx, updateMNOConnection,
 		arg.Status,
+		arg.Priority,
 		arg.SystemID,
 		arg.Password,
 		arg.Host,
@@ -389,7 +473,18 @@ func (q *Queries) UpdateMNOConnection(ctx context.Context, arg UpdateMNOConnecti
 		arg.SourceAddrNpi,
 		arg.DestAddrTon,
 		arg.DestAddrNpi,
-		arg.HttpConfig,
+		arg.ApiKey,
+		arg.BaseUrl,
+		arg.Username,
+		arg.HttpPassword,
+		arg.SecretKey,
+		arg.DefaultSender,
+		arg.RateLimit,
+		arg.Email,
+		arg.SupportsWebhook,
+		arg.WebhookPath,
+		arg.TimeoutSecs,
+		arg.ProviderConfig,
 		arg.ID,
 	)
 	var i MnoConnection
@@ -398,6 +493,7 @@ func (q *Queries) UpdateMNOConnection(ctx context.Context, arg UpdateMNOConnecti
 		&i.MnoID,
 		&i.Protocol,
 		&i.Status,
+		&i.Priority,
 		&i.SystemID,
 		&i.Password,
 		&i.Host,
@@ -414,10 +510,20 @@ func (q *Queries) UpdateMNOConnection(ctx context.Context, arg UpdateMNOConnecti
 		&i.SourceAddrNpi,
 		&i.DestAddrTon,
 		&i.DestAddrNpi,
-		&i.HttpConfig,
+		&i.ApiKey,
+		&i.BaseUrl,
+		&i.Username,
+		&i.HttpPassword,
+		&i.SecretKey,
+		&i.DefaultSender,
+		&i.RateLimit,
+		&i.Email,
+		&i.SupportsWebhook,
+		&i.WebhookPath,
+		&i.TimeoutSecs,
+		&i.ProviderConfig,
 		&i.CreatedAt,
 		&i.UpdatedAt,
-		&i.Priority,
 	)
 	return i, err
 }

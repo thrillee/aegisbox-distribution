@@ -1,7 +1,6 @@
 package handlers
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -96,16 +95,15 @@ func (h *MNOConnectionHandler) CreateMNOConnection(c *gin.Context) {
 		SourceAddrNpi:           req.SourceAddrNPI,
 		DestAddrTon:             req.DestAddrTON,
 		DestAddrNpi:             req.DestAddrNPI,
-		// HTTP fields
-		HttpConfig: req.HTTPConfig, // Assign []byte directly
-	}
-
-	// Validate http_config if present and protocol is http
-	if req.Protocol == "http" && req.HTTPConfig != nil {
-		if !json.Valid(req.HTTPConfig) {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid JSON format for http_config"})
-			return
-		}
+		// HTTP fields (flattened)
+		ApiKey:          req.ApiKey,
+		BaseUrl:         *req.BaseUrl,
+		Username:        req.Username,
+		HttpPassword:    req.HttpPassword,
+		SecretKey:       req.SecretKey,
+		TimeoutSecs:     req.TimeoutSecs,
+		SupportsWebhook: req.SupportsWebhook,
+		WebhookPath:     req.WebhookPath,
 	}
 
 	// Create Connection
@@ -198,14 +196,6 @@ func (h *MNOConnectionHandler) UpdateMNOConnection(c *gin.Context) {
 		return
 	}
 
-	// Validate http_config if present
-	if req.HTTPConfig != nil {
-		if !json.Valid(req.HTTPConfig) {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid JSON format for http_config"})
-			return
-		}
-	}
-
 	// Prepare update params
 	params := database.UpdateMNOConnectionParams{
 		ID:                      connID,
@@ -226,7 +216,15 @@ func (h *MNOConnectionHandler) UpdateMNOConnection(c *gin.Context) {
 		SourceAddrNpi:           req.SourceAddrNPI,
 		DestAddrTon:             req.DestAddrTON,
 		DestAddrNpi:             req.DestAddrNPI,
-		HttpConfig:              req.HTTPConfig, // Assign []byte directly
+		// HTTP fields (flattened)
+		ApiKey:          req.ApiKey,
+		BaseUrl:         req.BaseUrl,
+		Username:        req.Username,
+		HttpPassword:    req.HttpPassword,
+		SecretKey:       req.SecretKey,
+		TimeoutSecs:     req.TimeoutSecs,
+		SupportsWebhook: req.SupportsWebhook,
+		WebhookPath:     req.WebhookPath,
 	}
 
 	updatedConn, err := h.dbQueries.UpdateMNOConnection(logCtx, params)
@@ -293,8 +291,16 @@ func mapDBMNOConnToResponse(conn database.MnoConnection) dto.MNOConnectionRespon
 		SourceAddrNPI:           conn.SourceAddrNpi,
 		DestAddrTON:             conn.DestAddrTon,
 		DestAddrNPI:             conn.DestAddrNpi,
-		HTTPConfig:              conn.HttpConfig, // Assign []byte to json.RawMessage
-		CreatedAt:               conn.CreatedAt.Time,
-		UpdatedAt:               conn.UpdatedAt.Time,
+		// HTTP fields (flattened)
+		ApiKey:          conn.ApiKey,
+		BaseUrl:         &conn.BaseUrl,
+		Username:        conn.Username,
+		HttpPassword:    conn.HttpPassword,
+		SecretKey:       conn.SecretKey,
+		TimeoutSecs:     conn.TimeoutSecs,
+		SupportsWebhook: conn.SupportsWebhook,
+		WebhookPath:     conn.WebhookPath,
+		CreatedAt:       conn.CreatedAt.Time,
+		UpdatedAt:       conn.UpdatedAt.Time,
 	}
 }

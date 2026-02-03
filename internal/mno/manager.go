@@ -354,6 +354,10 @@ func (m *Manager) loadAndSyncConnectors(ctx context.Context) error {
 }
 
 func (m *Manager) GetConnector(ctx context.Context, mnoID int32) (Connector, error) {
+	return m.GetConnectorWithProtocol(ctx, mnoID, "")
+}
+
+func (m *Manager) GetConnectorWithProtocol(ctx context.Context, mnoID int32, preferredProtocol string) (Connector, error) {
 	logCtx := logging.ContextWithMNOID(ctx, mnoID)
 
 	cb := m.GetCircuitBreaker(mnoID)
@@ -376,7 +380,9 @@ func (m *Manager) GetConnector(ctx context.Context, mnoID int32) (Connector, err
 		return nil, fmt.Errorf("no connectors available for MNO ID %d", mnoID)
 	}
 
-	var activeConnectors []Connector
+	var preferredConnectors []Connector
+	var fallbackConnectors []Connector
+
 	for _, connID := range connIDs {
 		connVal, ok := m.connectors.Load(connID)
 		if !ok {
@@ -384,22 +390,54 @@ func (m *Manager) GetConnector(ctx context.Context, mnoID int32) (Connector, err
 		}
 		conn := connVal.(Connector)
 		status := conn.Status()
-		if status == codes.StatusBound || status == codes.StatusHttpOk {
-			activeConnectors = append(activeConnectors, conn)
+		if status != codes.StatusBound && status != codes.StatusHttpOk {
+			continue
+		}
+
+		connProtocol := m.getConnectorProtocol(conn)
+		if preferredProtocol != "" && strings.EqualFold(connProtocol, preferredProtocol) {
+			preferredConnectors = append(preferredConnectors, conn)
+		} else {
+			fallbackConnectors = append(fallbackConnectors, conn)
 		}
 	}
 
-	if len(activeConnectors) == 0 {
-		slog.WarnContext(logCtx, "No currently active connectors found for MNO", slog.Int("total_configured", len(connIDs)))
+	var selected []Connector
+	if len(preferredConnectors) > 0 {
+		selected = preferredConnectors
+		slog.DebugContext(logCtx, "Using preferred protocol connectors", slog.String("protocol", preferredProtocol))
+	} else if len(fallbackConnectors) > 0 {
+		selected = fallbackConnectors
+		slog.DebugContext(logCtx, "No preferred protocol connectors available, using fallback")
+	}
+
+	if len(selected) == 0 {
+		slog.WarnContext(logCtx, "No active connectors found for MNO",
+			slog.Int("total_configured", len(connIDs)),
+			slog.String("preferred_protocol", preferredProtocol))
 		cb.RecordFailure()
 		return nil, fmt.Errorf("no active connectors available for MNO ID %d", mnoID)
 	}
 
-	selected := activeConnectors[rand.Intn(len(activeConnectors))]
-	slog.DebugContext(logCtx, "Selected active connector", slog.Int("conn_id", int(selected.ConnectionID())), slog.String("status", selected.Status()))
+	selectedConnector := selected[rand.Intn(len(selected))]
+	slog.DebugContext(logCtx, "Selected active connector",
+		slog.Int("conn_id", int(selectedConnector.ConnectionID())),
+		slog.String("status", selectedConnector.Status()),
+		slog.String("protocol", m.getConnectorProtocol(selectedConnector)))
 
 	cb.RecordSuccess()
-	return selected, nil
+	return selectedConnector, nil
+}
+
+func (m *Manager) getConnectorProtocol(conn Connector) string {
+	switch conn.(type) {
+	case *SMPPMNOConnector:
+		return "smpp"
+	case *HTTPMNOConnector:
+		return "http"
+	default:
+		return ""
+	}
 }
 
 func (m *Manager) RecordConnectionFailure(mnoID int32) {

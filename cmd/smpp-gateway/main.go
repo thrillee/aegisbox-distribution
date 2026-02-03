@@ -4,8 +4,8 @@ import (
 	"context"
 	"errors"
 	"log"
-	"log/slog" // Use slog
-	"net/http" // Needed for http.Client injection maybe
+	"log/slog"
+	"net/http"
 	"os"
 	"os/signal"
 	"sync"
@@ -108,10 +108,6 @@ func main() {
 		httpClient,
 	)
 
-	// --- DLR Forwarder Factory (Needs initialized forwarders) ---
-	// We defer SMPSPForwarder initialization slightly
-	var forwarderFactory sms.DLRForwarderFactory
-
 	// --- Initialize MNO Connection Manager ---
 	mnoManager := mno.NewManager(
 		dbpool,
@@ -132,7 +128,8 @@ func main() {
 		incomingMessageHandler,
 	) // Pass core msg handler
 
-	// --- Initialize DLR Forwarders & Factory (Now that Session Manager exists) ---
+	// --- Initialize DLR Forwarders & Factory ---
+	var forwarderFactory sms.DLRForwarderFactory
 	smppForwarder := smppserver.NewSMPSPForwarder(smppServer)
 	forwarderFactoryImpl, err := sms.NewMapDLRForwarderFactory(smppForwarder, httpForwarder)
 	if err != nil {
@@ -285,4 +282,8 @@ func main() {
 	slog.Info("Closing database pool...")
 	dbpool.Close()
 	slog.Info("Application gracefully stopped.")
+}
+
+func getHTTPProviderConfig(dbQueries database.Querier, providerName string) *mno.HTTPProviderConfig {
+	return nil
 }

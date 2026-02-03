@@ -224,24 +224,25 @@ DELETE FROM routing_assignments WHERE id = $1;
 -- name: GetApplicableMnoForRouting :one
 -- Core routing query:
 -- Given a routing_group_id (from sp_credential or a default) and an msisdn_prefix_group_id (from MSISDN lookup),
--- find the active MNO to route to.
+-- find the active MNO to route to. Returns MNO with protocol preference.
 -- $1: routing_group_id
 -- $2: msisdn_prefix_group_id
 SELECT
     ra.mno_id,
     m.name AS mno_name,
-    mc.id AS mno_connection_id, -- Assuming you want the first active connection for that MNO
-    mc.system_id AS mno_system_id -- Example field from mno_connections
+    mc.id AS mno_connection_id,
+    mc.system_id AS mno_system_id,
+    mc.protocol AS mno_protocol
 FROM routing_assignments ra
 JOIN mnos m ON ra.mno_id = m.id
-LEFT JOIN mno_connections mc ON m.id = mc.mno_id AND mc.status = 'active' -- or 'bound'
+LEFT JOIN mno_connections mc ON m.id = mc.mno_id AND mc.status = 'active'
 WHERE ra.routing_group_id = $1
   AND ra.msisdn_prefix_group_id = $2
   AND ra.status = 'active'
 ORDER BY
-    ra.priority ASC, -- Routing assignment priority
-    mc.priority ASC NULLS LAST, -- If you add priority to mno_connections
-    mc.updated_at DESC -- Pick latest updated active connection as a tie-breaker
+    ra.priority ASC,
+    mc.priority ASC NULLS LAST,
+    mc.updated_at DESC
 LIMIT 1;
 
 -- name: GetSpCredentialRoutingGroupId :one

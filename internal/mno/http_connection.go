@@ -55,36 +55,30 @@ type HTTPConfig struct {
 }
 
 // NewHTTPConfigFromDB creates HTTPConfig from database connection
-func NewHTTPConfigFromDB(dbConn database.GetActiveMNOConnectionsRow) (*HTTPConfig, error) {
-	var httpConfigParams map[string]any
-
-	if err := json.Unmarshal(dbConn.HttpConfig, &httpConfigParams); err != nil {
-		return nil, err
+func NewHTTPConfigFromDB(dbConn database.MnoConnection) (*HTTPConfig, error) {
+	baseURL := dbConn.BaseUrl
+	if baseURL == "" {
+		return nil, fmt.Errorf("base_url is required for HTTP connections")
 	}
 
-	slog.Info("HTTP Config", "httpConfigParams", httpConfigParams)
+	timeoutSecs := int32(30)
+	if dbConn.TimeoutSecs != nil {
+		timeoutSecs = *dbConn.TimeoutSecs
+	}
 
-	baseURL := httpConfigParams["endpoint_url"].(string)
-	callbackURL := httpConfigParams["callback_url"].(string)
-	apiKey := httpConfigParams["auth_token"].(string)
-	timeoutSecs := httpConfigParams["timeout_secs"].(float64)
+	apiKey := ""
+	if dbConn.ApiKey != nil {
+		apiKey = *dbConn.ApiKey
+	}
 
-	config := HTTPConfig{
-		MnoID:       dbConn.MnoID,
+	return &HTTPConfig{
 		ID:          dbConn.ID,
+		MnoID:       dbConn.MnoID,
 		BaseURL:     baseURL,
-		CallbackURL: callbackURL,
 		APIKey:      apiKey,
-		Timeout:     time.Duration(timeoutSecs),
-	}
-	var timeoutSeconds int
-
-	config.Timeout = time.Duration(timeoutSeconds) * time.Second
-	if config.Timeout <= 0 {
-		config.Timeout = 30 * time.Second // default timeout
-	}
-
-	return &config, nil
+		CallbackURL: "",
+		Timeout:     time.Duration(timeoutSecs) * time.Second,
+	}, nil
 }
 
 // NewHTTPMNOConnector creates a new HTTP MNO connector

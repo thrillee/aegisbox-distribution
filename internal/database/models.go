@@ -25,7 +25,7 @@ type DeliveryReportsRaw struct {
 	ID               int64              `json:"id"`
 	MessageSegmentID *int64             `json:"messageSegmentId"`
 	MnoConnectionID  int32              `json:"mnoConnectionId"`
-	RawPdu           *string            `json:"rawPdu"`
+	RawPayload       *string            `json:"rawPayload"`
 	ReceivedAt       pgtype.Timestamptz `json:"receivedAt"`
 	ProcessedAt      pgtype.Timestamptz `json:"processedAt"`
 	ProcessingStatus string             `json:"processingStatus"`
@@ -39,11 +39,11 @@ type DlrForwardingQueue struct {
 	Attempts      int32              `json:"attempts"`
 	MaxAttempts   int32              `json:"maxAttempts"`
 	LastAttemptAt pgtype.Timestamptz `json:"lastAttemptAt"`
+	NextRetryAt   pgtype.Timestamptz `json:"nextRetryAt"`
 	ErrorMessage  *string            `json:"errorMessage"`
 	CreatedAt     pgtype.Timestamptz `json:"createdAt"`
 	LockedAt      pgtype.Timestamptz `json:"lockedAt"`
 	LockedBy      *string            `json:"lockedBy"`
-	NextRetryAt   pgtype.Timestamptz `json:"nextRetryAt"`
 }
 
 type Message struct {
@@ -102,6 +102,7 @@ type MnoConnection struct {
 	MnoID                   int32              `json:"mnoId"`
 	Protocol                string             `json:"protocol"`
 	Status                  string             `json:"status"`
+	Priority                *int32             `json:"priority"`
 	SystemID                *string            `json:"systemId"`
 	Password                *string            `json:"password"`
 	Host                    *string            `json:"host"`
@@ -118,31 +119,39 @@ type MnoConnection struct {
 	SourceAddrNpi           *int32             `json:"sourceAddrNpi"`
 	DestAddrTon             *int32             `json:"destAddrTon"`
 	DestAddrNpi             *int32             `json:"destAddrNpi"`
-	HttpConfig              []byte             `json:"httpConfig"`
+	ApiKey                  *string            `json:"apiKey"`
+	BaseUrl                 string             `json:"baseUrl"`
+	Username                *string            `json:"username"`
+	HttpPassword            *string            `json:"httpPassword"`
+	SecretKey               *string            `json:"secretKey"`
+	DefaultSender           *string            `json:"defaultSender"`
+	RateLimit               *int32             `json:"rateLimit"`
+	Email                   *string            `json:"email"`
+	SupportsWebhook         *bool              `json:"supportsWebhook"`
+	WebhookPath             *string            `json:"webhookPath"`
+	TimeoutSecs             *int32             `json:"timeoutSecs"`
+	ProviderConfig          []byte             `json:"providerConfig"`
 	CreatedAt               pgtype.Timestamptz `json:"createdAt"`
 	UpdatedAt               pgtype.Timestamptz `json:"updatedAt"`
-	Priority                *int32             `json:"priority"`
 }
 
 // Individual MSISDN prefixes belonging to a specific msisdn_prefix_group.
 type MsisdnPrefixEntry struct {
-	ID                  int32 `json:"id"`
-	MsisdnPrefixGroupID int32 `json:"msisdnPrefixGroupId"`
-	// The MSISDN prefix string, e.g., "234703".
-	MsisdnPrefix string             `json:"msisdnPrefix"`
-	CreatedAt    pgtype.Timestamptz `json:"createdAt"`
-	UpdatedAt    pgtype.Timestamptz `json:"updatedAt"`
+	ID                  int32              `json:"id"`
+	MsisdnPrefixGroupID int32              `json:"msisdnPrefixGroupId"`
+	MsisdnPrefix        string             `json:"msisdnPrefix"`
+	CreatedAt           pgtype.Timestamptz `json:"createdAt"`
+	UpdatedAt           pgtype.Timestamptz `json:"updatedAt"`
 }
 
 // Groups of MSISDN prefixes, e.g., "MTN Nigeria Prefixes".
 type MsisdnPrefixGroup struct {
-	ID          int32   `json:"id"`
-	Name        string  `json:"name"`
-	Description *string `json:"description"`
-	// A unique, user-friendly reference for the prefix group.
-	Reference *string            `json:"reference"`
-	CreatedAt pgtype.Timestamptz `json:"createdAt"`
-	UpdatedAt pgtype.Timestamptz `json:"updatedAt"`
+	ID          int32              `json:"id"`
+	Name        string             `json:"name"`
+	Description *string            `json:"description"`
+	Reference   *string            `json:"reference"`
+	CreatedAt   pgtype.Timestamptz `json:"createdAt"`
+	UpdatedAt   pgtype.Timestamptz `json:"updatedAt"`
 }
 
 type OtpAlternativeSender struct {
@@ -195,46 +204,42 @@ type PricingRule struct {
 
 // Assigns an MNO to a specific MSISDN prefix group within a given routing group.
 type RoutingAssignment struct {
-	ID                  int32 `json:"id"`
-	RoutingGroupID      int32 `json:"routingGroupId"`
-	MsisdnPrefixGroupID int32 `json:"msisdnPrefixGroupId"`
-	MnoID               int32 `json:"mnoId"`
-	// Status of the routing assignment (e.g., active, inactive, testing).
-	Status string `json:"status"`
-	// Priority of this rule within the routing group for the same prefix group (lower is higher).
-	Priority  int32              `json:"priority"`
-	Comment   *string            `json:"comment"`
-	CreatedAt pgtype.Timestamptz `json:"createdAt"`
-	UpdatedAt pgtype.Timestamptz `json:"updatedAt"`
+	ID                  int32              `json:"id"`
+	RoutingGroupID      int32              `json:"routingGroupId"`
+	MsisdnPrefixGroupID int32              `json:"msisdnPrefixGroupId"`
+	MnoID               int32              `json:"mnoId"`
+	Status              string             `json:"status"`
+	Priority            int32              `json:"priority"`
+	Comment             *string            `json:"comment"`
+	CreatedAt           pgtype.Timestamptz `json:"createdAt"`
+	UpdatedAt           pgtype.Timestamptz `json:"updatedAt"`
 }
 
 // Defines a collection of routing rules forming a specific routing strategy.
 type RoutingGroup struct {
-	ID          int32   `json:"id"`
-	Name        string  `json:"name"`
-	Description *string `json:"description"`
-	// A unique, user-friendly reference for the routing group.
-	Reference *string            `json:"reference"`
-	CreatedAt pgtype.Timestamptz `json:"createdAt"`
-	UpdatedAt pgtype.Timestamptz `json:"updatedAt"`
-}
-
-type RoutingRule struct {
-	ID        int32              `json:"id"`
-	Prefix    string             `json:"prefix"`
-	MnoID     int32              `json:"mnoId"`
-	Priority  int32              `json:"priority"`
-	CreatedAt pgtype.Timestamptz `json:"createdAt"`
-	UpdatedAt pgtype.Timestamptz `json:"updatedAt"`
+	ID          int32              `json:"id"`
+	Name        string             `json:"name"`
+	Description *string            `json:"description"`
+	Reference   *string            `json:"reference"`
+	CreatedAt   pgtype.Timestamptz `json:"createdAt"`
+	UpdatedAt   pgtype.Timestamptz `json:"updatedAt"`
 }
 
 type SenderID struct {
-	ID                int32              `json:"id"`
-	ServiceProviderID int32              `json:"serviceProviderId"`
-	SenderIDString    string             `json:"senderIdString"`
-	Status            string             `json:"status"`
-	CreatedAt         pgtype.Timestamptz `json:"createdAt"`
-	UpdatedAt         pgtype.Timestamptz `json:"updatedAt"`
+	ID                 int32              `json:"id"`
+	ServiceProviderID  *int32             `json:"serviceProviderId"`
+	SenderIDString     string             `json:"senderIdString"`
+	MnoConnectionID    *int32             `json:"mnoConnectionId"`
+	Status             string             `json:"status"`
+	ProviderID         *int32             `json:"providerId"`
+	RateLimit          *int32             `json:"rateLimit"`
+	OtpTemplate        *string            `json:"otpTemplate"`
+	Networks           []string           `json:"networks"`
+	MaxUsageCount      *int32             `json:"maxUsageCount"`
+	CurrentUsageCount  *int32             `json:"currentUsageCount"`
+	ResetIntervalHours *int32             `json:"resetIntervalHours"`
+	CreatedAt          pgtype.Timestamptz `json:"createdAt"`
+	UpdatedAt          pgtype.Timestamptz `json:"updatedAt"`
 }
 
 type ServiceProvider struct {
@@ -258,11 +263,10 @@ type SpCredential struct {
 	ApiKeyHash        *string            `json:"apiKeyHash"`
 	ApiKeyIdentifier  *string            `json:"apiKeyIdentifier"`
 	HttpConfig        []byte             `json:"httpConfig"`
+	Scope             string             `json:"scope"`
+	RoutingGroupID    *int32             `json:"routingGroupId"`
 	CreatedAt         pgtype.Timestamptz `json:"createdAt"`
 	UpdatedAt         pgtype.Timestamptz `json:"updatedAt"`
-	// The routing group assigned to this specific SP credential. NULL means system default may apply.
-	RoutingGroupID *int32 `json:"routingGroupId"`
-	Scope          string `json:"scope"`
 }
 
 type Template struct {

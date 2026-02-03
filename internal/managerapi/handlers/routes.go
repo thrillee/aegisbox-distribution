@@ -15,7 +15,7 @@ func SetupRoutes(router gin.IRouter, q database.Querier, pool *pgxpool.Pool) {
 
 	mnoHandler := NewMNOHandler(q, pool)
 	connHandler := NewMNOConnectionHandler(q, pool)
-	routingHandler := NewRoutingRuleHandler(q, pool)
+	routingHandler := NewRoutingAssignmentHandler(q, pool)
 
 	pricingHandler := NewPricingRuleHandler(q, pool)
 	walletHandler := NewWalletHandler(q, pool)
@@ -101,14 +101,14 @@ func SetupRoutes(router gin.IRouter, q database.Querier, pool *pgxpool.Pool) {
 
 	}
 
-	// --- Routing Rule Routes ---
-	ruleGroup := router.Group("/routing-rules")
+	// --- Routing Assignment Routes ---
+	routingGroup := router.Group("/routing-assignments")
 	{
-		ruleGroup.POST("", routingHandler.CreateRule)
-		ruleGroup.GET("", routingHandler.ListRules) // Optional filter ?mno_id=...
-		ruleGroup.GET("/:id", routingHandler.GetRule)
-		ruleGroup.PUT("/:id", routingHandler.UpdateRule)
-		ruleGroup.DELETE("/:id", routingHandler.DeleteRule)
+		routingGroup.POST("", routingHandler.Create)
+		routingGroup.GET("", routingHandler.List)
+		routingGroup.GET("/:id", routingHandler.GetByID)
+		routingGroup.PUT("/:id", routingHandler.Update)
+		routingGroup.DELETE("/:id", routingHandler.Delete)
 	}
 
 	// --- Sender ID Routes ---
