@@ -532,6 +532,7 @@ func (p *Processor) ProcessSendingStep(
 				failureReason,
 				&errorCode,
 			)
+			p.markSendAttempted(ctx, msg.ID)
 			continue // Next message
 		}
 
