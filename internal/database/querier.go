@@ -109,6 +109,8 @@ type Querier interface {
 	GetMessageFinalStatus(ctx context.Context, id int64) (string, error)
 	GetMessageTotalSegments(ctx context.Context, id int64) (int32, error)
 	GetMessagesByStatus(ctx context.Context, arg GetMessagesByStatusParams) ([]GetMessagesByStatusRow, error)
+	// Fetches messages that are ready for retry (next_retry_at <= NOW())
+	GetMessagesReadyForRetry(ctx context.Context, limit int32) ([]GetMessagesReadyForRetryRow, error)
 	GetMessagesToPrice(ctx context.Context, limit int32) ([]GetMessagesToPriceRow, error)
 	GetMsisdnPrefixEntryByID(ctx context.Context, id int32) (MsisdnPrefixEntry, error)
 	GetMsisdnPrefixEntryByPrefix(ctx context.Context, msisdnPrefix string) (MsisdnPrefixEntry, error)
@@ -119,6 +121,8 @@ type Querier interface {
 	GetOtpSenderTemplateAssignmentByID(ctx context.Context, id int32) (GetOtpSenderTemplateAssignmentByIDRow, error)
 	// Selects pending DLR jobs and locks them for processing.
 	GetPendingDLRsToForward(ctx context.Context, arg GetPendingDLRsToForwardParams) ([]GetPendingDLRsToForwardRow, error)
+	// Selects pending DLR jobs that are due for retry (next_retry_at <= NOW()).
+	GetPendingDLRsToForwardWithBackoff(ctx context.Context, arg GetPendingDLRsToForwardWithBackoffParams) ([]GetPendingDLRsToForwardWithBackoffRow, error)
 	// Join MNO Name for display
 	GetPricingRuleByID(ctx context.Context, id int32) (GetPricingRuleByIDRow, error)
 	GetRoutingAssignmentByID(ctx context.Context, id int32) (GetRoutingAssignmentByIDRow, error)
@@ -182,14 +186,19 @@ type Querier interface {
 	ListSpSpecificOtpAlternativeSenders(ctx context.Context, arg ListSpSpecificOtpAlternativeSendersParams) ([]OtpAlternativeSender, error)
 	// Lists wallets for a specific Service Provider, paginated.
 	ListWalletsBySP(ctx context.Context, arg ListWalletsBySPParams) ([]Wallet, error)
-	// Marks a job as failed for this attempt, increments attempts, and potentially sets to permanent failure.
+	// Marks a job as failed for this attempt, increments attempts, sets next_retry_at for exponential backoff.
+	// Calculates backoff: least(greatest(5 * 2^(attempts), 5 seconds), 5 minutes) seconds
 	MarkDLRForwardingAttemptFailed(ctx context.Context, arg MarkDLRForwardingAttemptFailedParams) error
 	// Marks a job as successfully completed.
 	MarkDLRForwardingSuccess(ctx context.Context, id int64) error
+	// Marks a message for retry with exponential backoff
+	MarkMessageForRetry(ctx context.Context, arg MarkMessageForRetryParams) error
 	// Use this if the Sender.Send fails catastrophically *before* MNO gets involved,
 	// or potentially as the final aggregated status if needed.
 	MarkMessageSendFailed(ctx context.Context, arg MarkMessageSendFailedParams) error
 	MarkMessageSent(ctx context.Context, id int64) error
+	// Moves a message to the dead letter queue for manual intervention
+	MoveToDeadLetterQueue(ctx context.Context, id int64) error
 	RemoveRoutingGroupFromSpCredential(ctx context.Context, spCredentialID int32) (SpCredential, error)
 	// Optional: Periodically run to unlock jobs held by dead workers.
 	UnlockStaleDLRs(ctx context.Context) error
@@ -201,6 +210,8 @@ type Querier interface {
 	// Updates the final aggregated status and error info
 	UpdateMessageFinalStatus(ctx context.Context, arg UpdateMessageFinalStatusParams) error
 	UpdateMessagePriced(ctx context.Context, arg UpdateMessagePricedParams) error
+	// Updates message status and cost within a transaction context
+	UpdateMessagePricedWithStatusTx(ctx context.Context, arg UpdateMessagePricedWithStatusTxParams) error
 	UpdateMessageRoutingInfo(ctx context.Context, arg UpdateMessageRoutingInfoParams) error
 	// Updates status after Sender.Send finishes (regardless of segment success/failure)
 	UpdateMessageSendAttempted(ctx context.Context, id int64) error

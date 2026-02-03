@@ -7,12 +7,20 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"time"
 
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5" // For ErrNoRows check
+	"github.com/jackc/pgx/v5"
 	"github.com/thrillee/aegisbox/internal/database"
 	"github.com/thrillee/aegisbox/internal/logging"
 	"github.com/thrillee/aegisbox/internal/sp"
+)
+
+const (
+	DLRBaseBackoff  = 5 * time.Second
+	DLRMaxBackoff   = 5 * time.Minute
+	DLRMaxRetries   = 10
+	DLRJitterFactor = 0.3
 )
 
 type DLRForwarderFactory interface {
@@ -41,13 +49,13 @@ func NewDLRWorker(q database.Querier, factory DLRForwarderFactory) *DLRWorker {
 
 // ProcessDLRForwardingBatch is the WorkerFunc compatible function.
 func (w *DLRWorker) ProcessDLRForwardingBatch(ctx context.Context, batchSize int) (processedCount int, err error) {
-	logCtx := logging.ContextWithWorkerID(ctx, w.workerID) // Add worker ID if helper exists
+	logCtx := logging.ContextWithWorkerID(ctx, w.workerID)
 	slog.DebugContext(logCtx, "Checking for pending DLR forwarding jobs...")
 
-	// 1. Get and Lock Pending Jobs
+	// Use the backoff-aware query
 	jobs, err := w.dbQueries.GetPendingDLRsToForward(logCtx, database.GetPendingDLRsToForwardParams{
 		Limit:    int32(batchSize),
-		LockedBy: &w.workerID, // Lock with our unique ID
+		LockedBy: &w.workerID,
 	})
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -131,12 +139,18 @@ func (w *DLRWorker) ProcessDLRForwardingBatch(ctx context.Context, batchSize int
 				ID:           job.ID,
 			})
 		} else {
-			slog.InfoContext(jobCtx, "Successfully forwarded DLR job")
-			// Mark success
+			slog.InfoContext(jobCtx, "Successfully forwarded DLR job",
+				slog.String("status", dlrInfo.Status),
+				slog.String("destination", dlrInfo.DestAddr))
 			_ = w.dbQueries.MarkDLRForwardingSuccess(jobCtx, job.ID)
-			processedCount++ // Count successful processing attempts
+			processedCount++
 		}
 	}
 
-	return processedCount, nil // Return count processed in this batch
+	slog.InfoContext(logCtx, "DLR forwarding batch completed",
+		slog.Int("total", len(jobs)),
+		slog.Int("processed", processedCount),
+	)
+
+	return processedCount, nil
 }

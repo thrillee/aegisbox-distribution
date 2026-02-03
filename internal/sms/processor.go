@@ -757,7 +757,22 @@ func (p *Processor) aggregateMessageStatus(ctx context.Context, messageID int64)
 		finalStatus = "failed"
 	} else if deliveredCount > 0 && deliveredCount >= int(totalSegmentsDB) {
 		finalStatus = "delivered"
-	} // Add warning/handling for mismatch if desired
+	}
+
+	// Trigger wallet reversal if message failed
+	if finalStatus == "failed" {
+		reverseErr := p.walletService.ReverseDebit(ctx, messageID, "Message delivery failed - DLR received with failure status")
+		if reverseErr != nil {
+			slog.ErrorContext(ctx, "CRITICAL: Failed to reverse wallet debit on DLR failure",
+				slog.Any("error", reverseErr),
+				slog.Int64("message_id", messageID),
+			)
+		} else {
+			slog.InfoContext(ctx, "Wallet debit reversed due to DLR failure",
+				slog.Int64("message_id", messageID),
+			)
+		}
+	}
 
 	// Update only if a terminal state is reached and status changed
 	if finalStatus == "delivered" || finalStatus == "failed" {

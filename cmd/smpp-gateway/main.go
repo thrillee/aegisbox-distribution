@@ -118,7 +118,8 @@ func main() {
 		dbQueries,
 		mainSegmenter,
 		smsProcessor.UpdateSegmentDLRStatus,
-		cfg.MNOClientConfig.SyncInterval) // Pass DLR handler func from sms.Processor
+		cfg.MNOClientConfig.SyncInterval,
+		logger)
 
 	// --- Initialize SMS Processor (Needs initialized dependencies) ---
 	smsProcessor.SetSender(sms.NewDefaultSender(dbQueries, mnoManager, mainSegmenter))

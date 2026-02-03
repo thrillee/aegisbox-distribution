@@ -250,6 +250,52 @@ func (q *Queries) GetMessagesByStatus(ctx context.Context, arg GetMessagesByStat
 	return items, nil
 }
 
+const getMessagesReadyForRetry = `-- name: GetMessagesReadyForRetry :many
+SELECT id, service_provider_id, sp_credential_id, original_destination_addr, original_source_addr
+FROM messages
+WHERE processing_status = 'retry_pending'
+  AND next_retry_at <= NOW()
+  AND retry_count < 5
+ORDER BY next_retry_at ASC
+LIMIT $1
+FOR UPDATE SKIP LOCKED
+`
+
+type GetMessagesReadyForRetryRow struct {
+	ID                      int64  `json:"id"`
+	ServiceProviderID       int32  `json:"serviceProviderId"`
+	SpCredentialID          int32  `json:"spCredentialId"`
+	OriginalDestinationAddr string `json:"originalDestinationAddr"`
+	OriginalSourceAddr      string `json:"originalSourceAddr"`
+}
+
+// Fetches messages that are ready for retry (next_retry_at <= NOW())
+func (q *Queries) GetMessagesReadyForRetry(ctx context.Context, limit int32) ([]GetMessagesReadyForRetryRow, error) {
+	rows, err := q.db.Query(ctx, getMessagesReadyForRetry, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []GetMessagesReadyForRetryRow
+	for rows.Next() {
+		var i GetMessagesReadyForRetryRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.ServiceProviderID,
+			&i.SpCredentialID,
+			&i.OriginalDestinationAddr,
+			&i.OriginalSourceAddr,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const getMessagesToPrice = `-- name: GetMessagesToPrice :many
 SELECT id, service_provider_id, routed_mno_id
 FROM messages
@@ -553,6 +599,29 @@ func (q *Queries) ListMessageDetails(ctx context.Context, arg ListMessageDetails
 	return items, nil
 }
 
+const markMessageForRetry = `-- name: MarkMessageForRetry :exec
+UPDATE messages
+SET
+    processing_status = 'retry_pending',
+    retry_count = retry_count + 1,
+    next_retry_at = NOW() + (LEAST(GREATEST(5 * (2 ^ (retry_count)), 5), 300) || ' seconds')::interval,
+    error_code = $1,
+    error_description = $2
+WHERE id = $3
+`
+
+type MarkMessageForRetryParams struct {
+	ErrorCode        *string `json:"errorCode"`
+	ErrorDescription *string `json:"errorDescription"`
+	ID               int64   `json:"id"`
+}
+
+// Marks a message for retry with exponential backoff
+func (q *Queries) MarkMessageForRetry(ctx context.Context, arg MarkMessageForRetryParams) error {
+	_, err := q.db.Exec(ctx, markMessageForRetry, arg.ErrorCode, arg.ErrorDescription, arg.ID)
+	return err
+}
+
 const markMessageSendFailed = `-- name: MarkMessageSendFailed :exec
 UPDATE messages
 SET
@@ -587,6 +656,28 @@ WHERE id = $1
 
 func (q *Queries) MarkMessageSent(ctx context.Context, id int64) error {
 	_, err := q.db.Exec(ctx, markMessageSent, id)
+	return err
+}
+
+const moveToDeadLetterQueue = `-- name: MoveToDeadLetterQueue :exec
+INSERT INTO dead_letter_queue (
+    message_id, original_status, error_code, error_description, metadata
+)
+SELECT
+    m.id, m.final_status, m.error_code, m.error_description,
+    jsonb_build_object(
+        'retry_count', m.retry_count,
+        'routed_mno_id', m.routed_mno_id,
+        'service_provider_id', m.service_provider_id
+    )
+FROM messages m
+WHERE m.id = $1
+ON CONFLICT DO NOTHING
+`
+
+// Moves a message to the dead letter queue for manual intervention
+func (q *Queries) MoveToDeadLetterQueue(ctx context.Context, id int64) error {
+	_, err := q.db.Exec(ctx, moveToDeadLetterQueue, id)
 	return err
 }
 
@@ -672,6 +763,37 @@ func (q *Queries) UpdateMessagePriced(ctx context.Context, arg UpdateMessagePric
 		arg.ErrorCode,
 		arg.ErrorDescription,
 		arg.Column5,
+		arg.ID,
+	)
+	return err
+}
+
+const updateMessagePricedWithStatusTx = `-- name: UpdateMessagePricedWithStatusTx :exec
+UPDATE messages
+SET
+    processing_status = $1,
+    cost = $2::numeric,
+    error_code = $3,
+    error_description = $4,
+    processed_for_queue_at = CASE WHEN $1 = 'queued_for_send' THEN NOW() ELSE processed_for_queue_at END
+WHERE id = $5
+`
+
+type UpdateMessagePricedWithStatusTxParams struct {
+	ProcessingStatus string          `json:"processingStatus"`
+	Column2          decimal.Decimal `json:"column2"`
+	ErrorCode        *string         `json:"errorCode"`
+	ErrorDescription *string         `json:"errorDescription"`
+	ID               int64           `json:"id"`
+}
+
+// Updates message status and cost within a transaction context
+func (q *Queries) UpdateMessagePricedWithStatusTx(ctx context.Context, arg UpdateMessagePricedWithStatusTxParams) error {
+	_, err := q.db.Exec(ctx, updateMessagePricedWithStatusTx,
+		arg.ProcessingStatus,
+		arg.Column2,
+		arg.ErrorCode,
+		arg.ErrorDescription,
 		arg.ID,
 	)
 	return err

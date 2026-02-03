@@ -9,6 +9,18 @@ import (
 	"github.com/shopspring/decimal"
 )
 
+type DeadLetterQueue struct {
+	ID               int32              `json:"id"`
+	MessageID        int64              `json:"messageId"`
+	OriginalStatus   *string            `json:"originalStatus"`
+	ErrorCode        *string            `json:"errorCode"`
+	ErrorDescription *string            `json:"errorDescription"`
+	RetryCount       *int32             `json:"retryCount"`
+	FailedAt         pgtype.Timestamptz `json:"failedAt"`
+	CreatedAt        pgtype.Timestamptz `json:"createdAt"`
+	Metadata         []byte             `json:"metadata"`
+}
+
 type DeliveryReportsRaw struct {
 	ID               int64              `json:"id"`
 	MessageSegmentID *int64             `json:"messageSegmentId"`
@@ -31,6 +43,7 @@ type DlrForwardingQueue struct {
 	CreatedAt     pgtype.Timestamptz `json:"createdAt"`
 	LockedAt      pgtype.Timestamptz `json:"lockedAt"`
 	LockedBy      *string            `json:"lockedBy"`
+	NextRetryAt   pgtype.Timestamptz `json:"nextRetryAt"`
 }
 
 type Message struct {
@@ -56,6 +69,8 @@ type Message struct {
 	ErrorDescription        *string            `json:"errorDescription"`
 	ProcessedForQueueAt     pgtype.Timestamptz `json:"processedForQueueAt"`
 	CompletedAt             pgtype.Timestamptz `json:"completedAt"`
+	RetryCount              int32              `json:"retryCount"`
+	NextRetryAt             pgtype.Timestamptz `json:"nextRetryAt"`
 }
 
 type MessageSegment struct {
