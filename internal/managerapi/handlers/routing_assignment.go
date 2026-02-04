@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"strconv"
 
 	"github.com/gin-gonic/gin"
 	"github.com/jackc/pgx/v5"
@@ -101,24 +102,24 @@ func (h *RoutingAssignmentHandler) Create(c *gin.Context) {
 
 func (h *RoutingAssignmentHandler) List(c *gin.Context) {
 	logCtx := logging.ContextWithHandler(c.Request.Context(), "ListRoutingAssignments")
-	var req dto.ListRoutingAssignmentsRequest
-
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request body: " + err.Error()})
-		return
-	}
 
 	limit, offset := parsePagination(c)
 	limitVal := limit
 	offsetVal := offset
-	if req.Limit > 0 {
-		limitVal = req.Limit
-	}
-	if req.Offset > 0 {
-		offsetVal = req.Offset
+
+	routingGroupIDStr := c.Query("routing_group_id")
+	if routingGroupIDStr == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "routing_group_id is required"})
+		return
 	}
 
-	total, err := h.dbQueries.CountRoutingAssignmentsByRoutingGroup(logCtx, req.RoutingGroupID)
+	routingGroupID, err := strconv.ParseInt(routingGroupIDStr, 10, 32)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid routing_group_id format"})
+		return
+	}
+
+	total, err := h.dbQueries.CountRoutingAssignmentsByRoutingGroup(logCtx, int32(routingGroupID))
 	if err != nil {
 		slog.ErrorContext(logCtx, "Failed to count assignments", slog.Any("error", err))
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to count assignments"})
@@ -126,7 +127,7 @@ func (h *RoutingAssignmentHandler) List(c *gin.Context) {
 	}
 
 	assignments, err := h.dbQueries.ListRoutingAssignmentsByRoutingGroup(logCtx, database.ListRoutingAssignmentsByRoutingGroupParams{
-		RoutingGroupID: req.RoutingGroupID,
+		RoutingGroupID: int32(routingGroupID),
 		Limit:          &limitVal,
 		Offset:         &offsetVal,
 	})
