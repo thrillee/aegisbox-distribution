@@ -30,7 +30,7 @@ INSERT INTO sp_credentials (
     routing_group_id, scope
 ) VALUES (
     $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11
-) RETURNING id, service_provider_id, protocol, status, system_id, password_hash, bind_type, api_key_hash, api_key_identifier, http_config, created_at, updated_at, routing_group_id, scope
+) RETURNING id, service_provider_id, protocol, status, system_id, password_hash, bind_type, api_key_hash, api_key_identifier, http_config, scope, routing_group_id, created_at, updated_at
 `
 
 type CreateSPCredentialParams struct {
@@ -74,10 +74,10 @@ func (q *Queries) CreateSPCredential(ctx context.Context, arg CreateSPCredential
 		&i.ApiKeyHash,
 		&i.ApiKeyIdentifier,
 		&i.HttpConfig,
+		&i.Scope,
+		&i.RoutingGroupID,
 		&i.CreatedAt,
 		&i.UpdatedAt,
-		&i.RoutingGroupID,
-		&i.Scope,
 	)
 	return i, err
 }
@@ -135,7 +135,7 @@ func (q *Queries) GetSPCredentialByAPIKey(ctx context.Context, apiKeyHash *strin
 }
 
 const getSPCredentialByID = `-- name: GetSPCredentialByID :one
-SELECT id, service_provider_id, protocol, status, system_id, password_hash, bind_type, api_key_hash, api_key_identifier, http_config, created_at, updated_at, routing_group_id, scope FROM sp_credentials WHERE id = $1 LIMIT 1
+SELECT id, service_provider_id, protocol, status, system_id, password_hash, bind_type, api_key_hash, api_key_identifier, http_config, scope, routing_group_id, created_at, updated_at FROM sp_credentials WHERE id = $1 LIMIT 1
 `
 
 func (q *Queries) GetSPCredentialByID(ctx context.Context, id int32) (SpCredential, error) {
@@ -152,10 +152,10 @@ func (q *Queries) GetSPCredentialByID(ctx context.Context, id int32) (SpCredenti
 		&i.ApiKeyHash,
 		&i.ApiKeyIdentifier,
 		&i.HttpConfig,
+		&i.Scope,
+		&i.RoutingGroupID,
 		&i.CreatedAt,
 		&i.UpdatedAt,
-		&i.RoutingGroupID,
-		&i.Scope,
 	)
 	return i, err
 }
@@ -215,7 +215,7 @@ func (q *Queries) GetSpCredentialScope(ctx context.Context, id int32) (string, e
 }
 
 const listSPCredentials = `-- name: ListSPCredentials :many
-SELECT id, service_provider_id, protocol, status, system_id, password_hash, bind_type, api_key_hash, api_key_identifier, http_config, created_at, updated_at, routing_group_id, scope FROM sp_credentials
+SELECT id, service_provider_id, protocol, status, system_id, password_hash, bind_type, api_key_hash, api_key_identifier, http_config, scope, routing_group_id, created_at, updated_at FROM sp_credentials
 WHERE ($1::INT IS NULL OR service_provider_id = $1)
 ORDER BY created_at DESC
 LIMIT $2 OFFSET $3
@@ -248,10 +248,10 @@ func (q *Queries) ListSPCredentials(ctx context.Context, arg ListSPCredentialsPa
 			&i.ApiKeyHash,
 			&i.ApiKeyIdentifier,
 			&i.HttpConfig,
+			&i.Scope,
+			&i.RoutingGroupID,
 			&i.CreatedAt,
 			&i.UpdatedAt,
-			&i.RoutingGroupID,
-			&i.Scope,
 		); err != nil {
 			return nil, err
 		}
@@ -273,7 +273,7 @@ SET
     routing_group_id = COALESCE($5, routing_group_id),
     updated_at = NOW()
 WHERE id = $6
-RETURNING id, service_provider_id, protocol, status, system_id, password_hash, bind_type, api_key_hash, api_key_identifier, http_config, created_at, updated_at, routing_group_id, scope
+RETURNING id, service_provider_id, protocol, status, system_id, password_hash, bind_type, api_key_hash, api_key_identifier, http_config, scope, routing_group_id, created_at, updated_at
 `
 
 type UpdateSPCredentialParams struct {
@@ -307,10 +307,10 @@ func (q *Queries) UpdateSPCredential(ctx context.Context, arg UpdateSPCredential
 		&i.ApiKeyHash,
 		&i.ApiKeyIdentifier,
 		&i.HttpConfig,
+		&i.Scope,
+		&i.RoutingGroupID,
 		&i.CreatedAt,
 		&i.UpdatedAt,
-		&i.RoutingGroupID,
-		&i.Scope,
 	)
 	return i, err
 }

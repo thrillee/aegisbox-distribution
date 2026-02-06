@@ -28,76 +28,58 @@ func NewDefaultPricer(pool *pgxpool.Pool) *DefaultPricer {
 
 // PriceAndDebit handles pricing and debiting within a transaction using decimal types.
 func (p *DefaultPricer) PriceAndDebit(ctx context.Context, msgID int64) (result *PricingResult, err error) {
-	// Add message ID to context for logging
 	logCtx := logging.ContextWithMessageID(ctx, msgID)
 	slog.DebugContext(logCtx, "Starting price and debit process")
 
 	var totalCost decimal.Decimal
 	result = &PricingResult{Debited: false}
-	finalStatus := "failed_pricing" // Pessimistic default
-	var logMsg string               // Message for critical status update log
+	finalStatus := "failed_pricing"
 
-	// --- Start Transaction ---
-	tx, err := p.dbPool.BeginTx(logCtx, pgx.TxOptions{}) // Use logCtx
+	tx, err := p.dbPool.BeginTx(logCtx, pgx.TxOptions{})
 	if err != nil {
 		result.Error = fmt.Errorf("failed to begin transaction: %w", err)
 		slog.ErrorContext(logCtx, "Failed to begin transaction", slog.Any("error", err))
-		return result, err // Return internal DB error
+		return result, err
 	}
 
-	// --- Get Querier operating within the transaction ---
-	qtx := database.New(tx) // Create sqlc querier attached to the transaction
+	qtx := database.New(tx)
 
-	// Defer rollback/commit logic
 	defer func() {
 		if p := recover(); p != nil {
-			_ = tx.Rollback(logCtx) // Use logCtx for rollback logging if needed
-			panic(p)                // Re-panic after rollback attempt
+			_ = tx.Rollback(logCtx)
+			panic(p)
 		}
 
-		// Decide whether to commit or rollback based on the 'err' variable
 		if err != nil {
 			slog.WarnContext(logCtx, "Rolling back pricing transaction", slog.Any("error", err))
 			if rbErr := tx.Rollback(logCtx); rbErr != nil {
 				slog.ErrorContext(logCtx, "Error rolling back pricing transaction", slog.Any("rollback_error", rbErr), slog.Any("original_error", err))
-				// Store original error in result if not already set
 				if result.Error == nil {
 					result.Error = err
 				}
 			}
-			// Ensure the result error reflects the actual issue if rollback succeeded
 			if result.Error == nil {
 				result.Error = err
 			}
 		} else {
-			// Commit if err is nil (meaning all steps succeeded)
 			if cmErr := tx.Commit(logCtx); cmErr != nil {
 				slog.ErrorContext(logCtx, "Error committing pricing transaction", slog.Any("error", cmErr))
-				result.Error = cmErr          // Surface the commit error
-				err = cmErr                   // Set outer 'err' to prevent incorrect status update
-				result.Debited = false        // Commit failed, so debit effectively failed
-				finalStatus = "failed_commit" // Specific status for commit failure
+				result.Error = cmErr
+				err = cmErr
+				result.Debited = false
+				finalStatus = "failed_commit"
 			} else {
-				// --- SUCCESS ---
 				slog.InfoContext(logCtx, "Successfully priced and debited message")
 				result.Debited = true
-				finalStatus = "queued_for_send" // Set final status only on successful commit
+				finalStatus = "queued_for_send"
 			}
 		}
 
-		// --- Update status AFTER commit/rollback attempt ---
-		// This runs regardless of transaction outcome to record the final state.
-		dbQueriesFromPool := database.New(p.dbPool) // Use main pool querier for this update
+		dbQueriesFromPool := database.New(p.dbPool)
 
 		var errMsgForDB string
 		if result.Error != nil {
 			errMsgForDB = result.Error.Error()
-			logMsg = fmt.Sprintf("Updating message status to %s after transaction failure", finalStatus)
-		} else if result.Debited {
-			logMsg = fmt.Sprintf("Updating message status to %s after successful transaction", finalStatus)
-		} else {
-			// Should not happen often - Commit failed?
-			logMsg = fmt.Sprintf("Updating message status to %s after commit failure", finalStatus)
 		}
 
 		statusUpdateErr := dbQueriesFromPool.UpdateMessagePriced(logCtx, database.UpdateMessagePricedParams{
@@ -108,19 +90,17 @@ func (p *DefaultPricer) PriceAndDebit(ctx context.Context, msgID int64) (result 
 			ID:               msgID,
 		})
 		if statusUpdateErr != nil {
-			// This is bad - failed to record the outcome. Log critically.
-			slog.ErrorContext(logging.ContextWithMessageID(context.Background(), msgID), // Use fresh context with ID for critical log
+			slog.ErrorContext(logging.ContextWithMessageID(context.Background(), msgID),
 				"CRITICAL: Failed to update message status AFTER pricing transaction",
 				slog.String("attempted_status", finalStatus),
 				slog.Any("update_error", statusUpdateErr),
 				slog.Any("totalCost", totalCost),
-				slog.Any("original_tx_error", result.Error), // Log original error for context
+				slog.Any("original_tx_error", result.Error),
 			)
-			// Potentially add to a retry queue or alert.
 		} else {
-			slog.InfoContext(logCtx, logMsg, slog.Any("Cost", totalCost)) // Log the outcome using original context
+			slog.InfoContext(logCtx, fmt.Sprintf("Updated message status to %s", finalStatus), slog.Any("Cost", totalCost))
 		}
-	}() // End of defer func
+	}()
 
 	// --- Transactional Logic ---
 

@@ -15,7 +15,7 @@ const assignRoutingGroupToSpCredential = `-- name: AssignRoutingGroupToSpCredent
 UPDATE sp_credentials
 SET routing_group_id = $1, updated_at = NOW()
 WHERE id = $2
-RETURNING id, service_provider_id, protocol, status, system_id, password_hash, bind_type, api_key_hash, api_key_identifier, http_config, created_at, updated_at, routing_group_id, scope
+RETURNING id, service_provider_id, protocol, status, system_id, password_hash, bind_type, api_key_hash, api_key_identifier, http_config, scope, routing_group_id, created_at, updated_at
 `
 
 type AssignRoutingGroupToSpCredentialParams struct {
@@ -37,10 +37,10 @@ func (q *Queries) AssignRoutingGroupToSpCredential(ctx context.Context, arg Assi
 		&i.ApiKeyHash,
 		&i.ApiKeyIdentifier,
 		&i.HttpConfig,
+		&i.Scope,
+		&i.RoutingGroupID,
 		&i.CreatedAt,
 		&i.UpdatedAt,
-		&i.RoutingGroupID,
-		&i.Scope,
 	)
 	return i, err
 }
@@ -300,18 +300,19 @@ const getApplicableMnoForRouting = `-- name: GetApplicableMnoForRouting :one
 SELECT
     ra.mno_id,
     m.name AS mno_name,
-    mc.id AS mno_connection_id, -- Assuming you want the first active connection for that MNO
-    mc.system_id AS mno_system_id -- Example field from mno_connections
+    mc.id AS mno_connection_id,
+    mc.system_id AS mno_system_id,
+    mc.protocol AS mno_protocol
 FROM routing_assignments ra
 JOIN mnos m ON ra.mno_id = m.id
-LEFT JOIN mno_connections mc ON m.id = mc.mno_id AND mc.status = 'active' -- or 'bound'
+LEFT JOIN mno_connections mc ON m.id = mc.mno_id AND mc.status = 'active'
 WHERE ra.routing_group_id = $1
   AND ra.msisdn_prefix_group_id = $2
   AND ra.status = 'active'
 ORDER BY
-    ra.priority ASC, -- Routing assignment priority
-    mc.priority ASC NULLS LAST, -- If you add priority to mno_connections
-    mc.updated_at DESC -- Pick latest updated active connection as a tie-breaker
+    ra.priority ASC,
+    mc.priority ASC NULLS LAST,
+    mc.updated_at DESC
 LIMIT 1
 `
 
@@ -325,11 +326,12 @@ type GetApplicableMnoForRoutingRow struct {
 	MnoName         string  `json:"mnoName"`
 	MnoConnectionID *int32  `json:"mnoConnectionId"`
 	MnoSystemID     *string `json:"mnoSystemId"`
+	MnoProtocol     *string `json:"mnoProtocol"`
 }
 
 // Core routing query:
 // Given a routing_group_id (from sp_credential or a default) and an msisdn_prefix_group_id (from MSISDN lookup),
-// find the active MNO to route to.
+// find the active MNO to route to. Returns MNO with protocol preference.
 // $1: routing_group_id
 // $2: msisdn_prefix_group_id
 func (q *Queries) GetApplicableMnoForRouting(ctx context.Context, arg GetApplicableMnoForRoutingParams) (GetApplicableMnoForRoutingRow, error) {
@@ -340,6 +342,7 @@ func (q *Queries) GetApplicableMnoForRouting(ctx context.Context, arg GetApplica
 		&i.MnoName,
 		&i.MnoConnectionID,
 		&i.MnoSystemID,
+		&i.MnoProtocol,
 	)
 	return i, err
 }
@@ -770,7 +773,7 @@ const removeRoutingGroupFromSpCredential = `-- name: RemoveRoutingGroupFromSpCre
 UPDATE sp_credentials
 SET routing_group_id = NULL, updated_at = NOW()
 WHERE id = $1
-RETURNING id, service_provider_id, protocol, status, system_id, password_hash, bind_type, api_key_hash, api_key_identifier, http_config, created_at, updated_at, routing_group_id, scope
+RETURNING id, service_provider_id, protocol, status, system_id, password_hash, bind_type, api_key_hash, api_key_identifier, http_config, scope, routing_group_id, created_at, updated_at
 `
 
 func (q *Queries) RemoveRoutingGroupFromSpCredential(ctx context.Context, spCredentialID int32) (SpCredential, error) {
@@ -787,10 +790,10 @@ func (q *Queries) RemoveRoutingGroupFromSpCredential(ctx context.Context, spCred
 		&i.ApiKeyHash,
 		&i.ApiKeyIdentifier,
 		&i.HttpConfig,
+		&i.Scope,
+		&i.RoutingGroupID,
 		&i.CreatedAt,
 		&i.UpdatedAt,
-		&i.RoutingGroupID,
-		&i.Scope,
 	)
 	return i, err
 }

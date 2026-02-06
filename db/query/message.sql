@@ -254,3 +254,52 @@ ORDER BY
     m.id DESC -- Order must match DISTINCT ON column first for predictable results
     -- m.submitted_at DESC -- Cannot easily use submitted_at with DISTINCT ON (m.id) unless included
 LIMIT sqlc.arg(query_limit)::INT OFFSET sqlc.arg(query_offset)::INT;
+
+-- name: UpdateMessagePricedWithStatusTx :exec
+-- Updates message status and cost within a transaction context
+UPDATE messages
+SET
+    processing_status = $1,
+    cost = $2::numeric,
+    error_code = $3,
+    error_description = $4,
+    processed_for_queue_at = CASE WHEN $1 = 'queued_for_send' THEN NOW() ELSE processed_for_queue_at END
+WHERE id = $5;
+
+-- name: MoveToDeadLetterQueue :exec
+-- Moves a message to the dead letter queue for manual intervention
+INSERT INTO dead_letter_queue (
+    message_id, original_status, error_code, error_description, metadata
+)
+SELECT
+    m.id, m.final_status, m.error_code, m.error_description,
+    jsonb_build_object(
+        'retry_count', m.retry_count,
+        'routed_mno_id', m.routed_mno_id,
+        'service_provider_id', m.service_provider_id
+    )
+FROM messages m
+WHERE m.id = $1
+ON CONFLICT DO NOTHING;
+
+-- name: MarkMessageForRetry :exec
+-- Marks a message for retry with exponential backoff
+UPDATE messages
+SET
+    processing_status = 'retry_pending',
+    retry_count = retry_count + 1,
+    next_retry_at = NOW() + (LEAST(GREATEST(5 * (2 ^ (retry_count)), 5), 300) || ' seconds')::interval,
+    error_code = $1,
+    error_description = $2
+WHERE id = $3;
+
+-- name: GetMessagesReadyForRetry :many
+-- Fetches messages that are ready for retry (next_retry_at <= NOW())
+SELECT id, service_provider_id, sp_credential_id, original_destination_addr, original_source_addr
+FROM messages
+WHERE processing_status = 'retry_pending'
+  AND next_retry_at <= NOW()
+  AND retry_count < 5
+ORDER BY next_retry_at ASC
+LIMIT $1
+FOR UPDATE SKIP LOCKED;

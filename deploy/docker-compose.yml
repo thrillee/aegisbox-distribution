@@ -1,4 +1,22 @@
 services:
+  # PostgreSQL Database
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: aegisbox
+      POSTGRES_PASSWORD: aegisbox
+      POSTGRES_DB: aegisbox_dev
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U aegisbox -d aegisbox_dev"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
   # Database Migration Service
   migration:
     build:
@@ -7,6 +25,9 @@ services:
     image: migration:latest
     env_file:
       - .env
+    depends_on:
+      postgres:
+        condition: service_healthy
     logging:
       driver: "json-file"
       options:
@@ -26,7 +47,8 @@ services:
     ports:
       - "8001:8001"
     depends_on:
-      - migration
+      postgres:
+        condition: service_healthy
     logging:
       driver: "json-file"
       options:
@@ -46,7 +68,8 @@ services:
     ports:
       - "2775:2775"
     depends_on:
-      - migration
+      postgres:
+        condition: service_healthy
     logging:
       driver: "json-file"
       options:
@@ -130,6 +153,7 @@ services:
         tag: "promtail"
 
 volumes:
+  postgres_data:
   grafana_data:
   prometheus_data:
 

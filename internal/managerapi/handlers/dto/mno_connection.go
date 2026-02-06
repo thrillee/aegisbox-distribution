@@ -1,7 +1,6 @@
 package dto
 
 import (
-	"encoding/json"
 	"time"
 )
 
@@ -29,8 +28,15 @@ type MNOConnectionResponse struct {
 	SourceAddrNPI           *int32  `json:"source_addr_npi,omitempty"`
 	DestAddrTON             *int32  `json:"dest_addr_ton,omitempty"`
 	DestAddrNPI             *int32  `json:"dest_addr_npi,omitempty"`
-	// HTTP Fields
-	HTTPConfig json.RawMessage `json:"http_config,omitempty"` // Return relevant (non-sensitive) parts or full config? Be careful.
+	// HTTP Fields (Flattened)
+	ApiKey          *string `json:"api_key,omitempty"`
+	BaseUrl         *string `json:"base_url,omitempty"`
+	Username        *string `json:"username,omitempty"`
+	HttpPassword    *string `json:"http_password,omitempty"`
+	SecretKey       *string `json:"secret_key,omitempty"`
+	TimeoutSecs     *int32  `json:"timeout_secs,omitempty"`
+	SupportsWebhook *bool   `json:"supports_webhook,omitempty"`
+	WebhookPath     *string `json:"webhook_path,omitempty"`
 	// Timestamps
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
@@ -59,7 +65,14 @@ type CreateMNOConnectionRequest struct {
 	DestAddrTON             *int32  `json:"dest_addr_ton"`
 	DestAddrNPI             *int32  `json:"dest_addr_npi"`
 	// HTTP Fields (Required if protocol=http)
-	HTTPConfig json.RawMessage `json:"http_config" binding:"required_if=Protocol http"` // Requires valid JSON object
+	ApiKey          *string `json:"api_key" binding:"required_if=Protocol http"`
+	BaseUrl         *string `json:"base_url" binding:"required_if=Protocol http"`
+	Username        *string `json:"username,omitempty"`
+	HttpPassword    *string `json:"http_password,omitempty"`
+	SecretKey       *string `json:"secret_key,omitempty"`
+	TimeoutSecs     *int32  `json:"timeout_secs"`
+	SupportsWebhook *bool   `json:"supports_webhook,omitempty"`
+	WebhookPath     *string `json:"webhook_path,omitempty"`
 }
 
 type HTTPMnoConfigRetryPolicy struct {
@@ -95,6 +108,13 @@ type UpdateMNOConnectionRequest struct {
 	SourceAddrNPI           *int32  `json:"source_addr_npi"`
 	DestAddrTON             *int32  `json:"dest_addr_ton"`
 	DestAddrNPI             *int32  `json:"dest_addr_npi"`
-	// HTTP Fields
-	HTTPConfig json.RawMessage `json:"http_config"` // Allow updating HTTP config JSON
+	// HTTP Fields (Flattened)
+	ApiKey          *string `json:"api_key,omitempty"`
+	BaseUrl         *string `json:"base_url,omitempty"`
+	Username        *string `json:"username,omitempty"`
+	HttpPassword    *string `json:"http_password,omitempty"`
+	SecretKey       *string `json:"secret_key,omitempty"`
+	TimeoutSecs     *int32  `json:"timeout_secs,omitempty"`
+	SupportsWebhook *bool   `json:"supports_webhook,omitempty"`
+	WebhookPath     *string `json:"webhook_path,omitempty"`
 }

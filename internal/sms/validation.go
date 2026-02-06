@@ -26,8 +26,9 @@ func (v *DefaultValidator) Validate(ctx context.Context, spID int32, senderID st
 	result := &ValidationResult{IsValid: false} // Default to invalid
 
 	// --- SenderID Validation ---
+	spIDPtr := spID
 	sidRecordID, err := v.dbQueries.ValidateSenderID(ctx, database.ValidateSenderIDParams{
-		ServiceProviderID: spID,
+		ServiceProviderID: &spIDPtr,
 		SenderIDString:    senderID,
 	})
 	if err != nil {

@@ -58,9 +58,11 @@ type SubmitResult struct {
 
 // RoutingResult holds the outcome of the routing step.
 type RoutingResult struct {
-	MNOID     int32 // Use sql.NullInt32 for nullable FK
-	ShouldUse bool
-	Error     error
+	MNOID        int32  // Use sql.NullInt32 for nullable FK
+	ConnectionID *int32 // Specific connection ID (optional, for HTTP)
+	Protocol     string // "smpp" or "http"
+	ShouldUse    bool
+	Error        error
 }
 
 // Connector defines the interface for interacting with a specific MNO connection (SMPP or HTTP).

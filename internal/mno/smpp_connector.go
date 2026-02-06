@@ -52,31 +52,15 @@ type SMPPConnectorConfig struct {
 }
 
 // Helper function to create config from DB model
-// Assumes sqlc model `database.MnoConnection` has fields matching the ALTER TABLE additions
-func NewSMPPConfigFromDB(dbConn database.GetActiveMNOConnectionsRow) (SMPPConnectorConfig, error) {
+func NewSMPPConfigFromDB(dbConn database.MnoConnection) (SMPPConnectorConfig, error) {
 	cfg := SMPPConnectorConfig{
 		ConnectionID: dbConn.ID,
 		MNOID:        dbConn.MnoID,
-		SystemID:     *dbConn.SystemID,   // Default to empty string if NULL
-		Password:     *dbConn.Password,   // Default to empty string if NULL
-		Host:         *dbConn.Host,       // Default to empty string if NULL
-		Port:         0,                  // Default, set below
-		UseTLS:       *dbConn.UseTls,     // Default to false if NULL
-		BindType:     "trx",              // Default, set below
-		SystemType:   *dbConn.SystemType, // Default to empty string if NULL
-		// Set defaults for durations/int, override below if valid
-		EnquireLink:       time.Duration(*dbConn.EnquireLinkIntervalSecs) * time.Second,
-		RequestTimeout:    time.Duration(*dbConn.RequestTimeoutSecs) * time.Second,
-		ConnectRetryDelay: time.Duration(*dbConn.ConnectRetryDelaySecs) * time.Second,
-		MaxWindowSize:     uint(*dbConn.MaxWindowSize),
-		DefaultDataCoding: data.GSM7BIT,                // Default coding
-		SourceAddrTON:     byte(*dbConn.SourceAddrNpi), // Default TON/NPI
-		SourceAddrNPI:     byte(*dbConn.SourceAddrTon),
-		DestAddrTON:       byte(*dbConn.DestAddrTon),
-		DestAddrNPI:       byte(*dbConn.DestAddrNpi),
 	}
 
-	// --- Assign values from DB, checking Valid flag for Null types ---
+	if dbConn.SystemID != nil {
+		cfg.SystemID = *dbConn.SystemID
+	}
 	if dbConn.Password != nil {
 		cfg.Password = *dbConn.Password
 	}
@@ -89,7 +73,7 @@ func NewSMPPConfigFromDB(dbConn database.GetActiveMNOConnectionsRow) (SMPPConnec
 	if dbConn.UseTls != nil {
 		cfg.UseTLS = *dbConn.UseTls
 	}
-	if dbConn.BindType != nil && *dbConn.BindType == "" {
+	if dbConn.BindType != nil {
 		cfg.BindType = *dbConn.BindType
 	}
 	if dbConn.SystemType != nil {
@@ -109,8 +93,7 @@ func NewSMPPConfigFromDB(dbConn database.GetActiveMNOConnectionsRow) (SMPPConnec
 		cfg.MaxWindowSize = uint(*dbConn.MaxWindowSize)
 	}
 	if dbConn.DefaultDataCoding != nil {
-		// Cast int32 from DB to byte, then to data.Coding
-		// cfg.DefaultDataCoding = data.Coding(byte(*dbConn.DefaultDataCoding))
+		cfg.DefaultDataCoding = data.FromDataCoding(byte(*dbConn.DefaultDataCoding))
 	}
 	if dbConn.SourceAddrTon != nil {
 		cfg.SourceAddrTON = byte(*dbConn.SourceAddrTon)
@@ -123,11 +106,6 @@ func NewSMPPConfigFromDB(dbConn database.GetActiveMNOConnectionsRow) (SMPPConnec
 	}
 	if dbConn.DestAddrNpi != nil {
 		cfg.DestAddrNPI = byte(*dbConn.DestAddrNpi)
-	}
-
-	// Final validation of essential fields
-	if cfg.Host == "" || cfg.Port == 0 || cfg.SystemID == "" {
-		return cfg, errors.New("missing required SMPP config fields after processing DB values (Host, Port, SystemID)")
 	}
 
 	return cfg, nil

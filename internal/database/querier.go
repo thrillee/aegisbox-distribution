@@ -24,8 +24,6 @@ type Querier interface {
 	CountPricingRulesBySP(ctx context.Context, serviceProviderID int32) (int64, error)
 	CountRoutingAssignmentsByRoutingGroup(ctx context.Context, routingGroupID int32) (int64, error)
 	CountRoutingGroups(ctx context.Context) (int64, error)
-	// Counts routing rules, optionally filtered by MNO ID.
-	CountRoutingRules(ctx context.Context, dollar_1 int32) (int64, error)
 	// Counts credentials, optionally filtered by Service Provider ID
 	CountSPCredentials(ctx context.Context, dollar_1 int32) (int64, error)
 	CountServiceProviders(ctx context.Context) (int64, error)
@@ -49,7 +47,6 @@ type Querier interface {
 	CreateRoutingAssignment(ctx context.Context, arg CreateRoutingAssignmentParams) (RoutingAssignment, error)
 	// Queries for RoutingGroup
 	CreateRoutingGroup(ctx context.Context, arg CreateRoutingGroupParams) (RoutingGroup, error)
-	CreateRoutingRule(ctx context.Context, arg CreateRoutingRuleParams) (RoutingRule, error)
 	CreateSMPPCredential(ctx context.Context, arg CreateSMPPCredentialParams) (SpCredential, error)
 	// Creates an SP credential (SMPP or HTTP)
 	CreateSPCredential(ctx context.Context, arg CreateSPCredentialParams) (SpCredential, error)
@@ -74,8 +71,6 @@ type Querier interface {
 	DeleteRoutingAssignment(ctx context.Context, id int32) error
 	// Note: This will fail if the group is referenced in routing_assignments or sp_credentials.
 	DeleteRoutingGroup(ctx context.Context, id int32) error
-	// Note: If updating mno_id, ensure the new MNO exists (handled by FK or check in handler)
-	DeleteRoutingRule(ctx context.Context, id int32) error
 	DeleteSPCredential(ctx context.Context, id int32) error
 	DeleteServiceProvider(ctx context.Context, id int32) error
 	// Inserts a new DLR forwarding job into the queue.
@@ -88,17 +83,16 @@ type Querier interface {
 	// Finds segment details based on MNO Message ID for DLR processing
 	FindSegmentByMnoMessageID(ctx context.Context, mnoMessageID *string) (FindSegmentByMnoMessageIDRow, error)
 	// Selects all connections marked as 'active' in status
-	GetActiveMNOConnections(ctx context.Context) ([]GetActiveMNOConnectionsRow, error)
+	GetActiveMNOConnections(ctx context.Context) ([]MnoConnection, error)
 	// Selects the highest priority active template for a given alternative sender and optionally MNO.
 	GetActiveOtpTemplateAssignment(ctx context.Context, arg GetActiveOtpTemplateAssignmentParams) (GetActiveOtpTemplateAssignmentRow, error)
 	// Core routing query:
 	// Given a routing_group_id (from sp_credential or a default) and an msisdn_prefix_group_id (from MSISDN lookup),
-	// find the active MNO to route to.
+	// find the active MNO to route to. Returns MNO with protocol preference.
 	// $1: routing_group_id
 	// $2: msisdn_prefix_group_id
 	GetApplicableMnoForRouting(ctx context.Context, arg GetApplicableMnoForRoutingParams) (GetApplicableMnoForRoutingRow, error)
 	GetApplicablePrice(ctx context.Context, arg GetApplicablePriceParams) (GetApplicablePriceRow, error)
-	GetApplicableRoutingRule(ctx context.Context, prefix string) (int32, error)
 	// Filter by date range (inclusive)
 	GetDailyReport(ctx context.Context, arg GetDailyReportParams) ([]GetDailyReportRow, error)
 	GetMNOByID(ctx context.Context, id int32) (Mno, error)
@@ -109,6 +103,8 @@ type Querier interface {
 	GetMessageFinalStatus(ctx context.Context, id int64) (string, error)
 	GetMessageTotalSegments(ctx context.Context, id int64) (int32, error)
 	GetMessagesByStatus(ctx context.Context, arg GetMessagesByStatusParams) ([]GetMessagesByStatusRow, error)
+	// Fetches messages that are ready for retry (next_retry_at <= NOW())
+	GetMessagesReadyForRetry(ctx context.Context, limit int32) ([]GetMessagesReadyForRetryRow, error)
 	GetMessagesToPrice(ctx context.Context, limit int32) ([]GetMessagesToPriceRow, error)
 	GetMsisdnPrefixEntryByID(ctx context.Context, id int32) (MsisdnPrefixEntry, error)
 	GetMsisdnPrefixEntryByPrefix(ctx context.Context, msisdnPrefix string) (MsisdnPrefixEntry, error)
@@ -119,6 +115,8 @@ type Querier interface {
 	GetOtpSenderTemplateAssignmentByID(ctx context.Context, id int32) (GetOtpSenderTemplateAssignmentByIDRow, error)
 	// Selects pending DLR jobs and locks them for processing.
 	GetPendingDLRsToForward(ctx context.Context, arg GetPendingDLRsToForwardParams) ([]GetPendingDLRsToForwardRow, error)
+	// Selects pending DLR jobs that are due for retry (next_retry_at <= NOW()).
+	GetPendingDLRsToForwardWithBackoff(ctx context.Context, arg GetPendingDLRsToForwardWithBackoffParams) ([]GetPendingDLRsToForwardWithBackoffRow, error)
 	// Join MNO Name for display
 	GetPricingRuleByID(ctx context.Context, id int32) (GetPricingRuleByIDRow, error)
 	GetRoutingAssignmentByID(ctx context.Context, id int32) (GetRoutingAssignmentByIDRow, error)
@@ -128,8 +126,6 @@ type Querier interface {
 	// Returns the routing_group_id (can be NULL) and the sp_credential_id itself for context.
 	GetRoutingGroupIdForSpCredential(ctx context.Context, id int32) (GetRoutingGroupIdForSpCredentialRow, error)
 	GetRoutingGroupReferenceById(ctx context.Context, id int32) (*string, error)
-	// Join with MNOs to get the name for display
-	GetRoutingRuleByID(ctx context.Context, id int32) (GetRoutingRuleByIDRow, error)
 	// Gets SP credential based on a hashed API key for HTTP auth.
 	GetSPCredentialByAPIKey(ctx context.Context, apiKeyHash *string) (GetSPCredentialByAPIKeyRow, error)
 	GetSPCredentialByID(ctx context.Context, id int32) (SpCredential, error)
@@ -172,8 +168,6 @@ type Querier interface {
 	// Lists assignments for a specific routing group.
 	ListRoutingAssignmentsByRoutingGroup(ctx context.Context, arg ListRoutingAssignmentsByRoutingGroupParams) ([]ListRoutingAssignmentsByRoutingGroupRow, error)
 	ListRoutingGroups(ctx context.Context, arg ListRoutingGroupsParams) ([]RoutingGroup, error)
-	// Lists routing rules, optionally filtered by MNO ID, with pagination.
-	ListRoutingRules(ctx context.Context, arg ListRoutingRulesParams) ([]ListRoutingRulesRow, error)
 	// Lists credentials, optionally filtered by Service Provider ID
 	ListSPCredentials(ctx context.Context, arg ListSPCredentialsParams) ([]SpCredential, error)
 	ListServiceProviders(ctx context.Context, arg ListServiceProvidersParams) ([]ServiceProvider, error)
@@ -182,14 +176,19 @@ type Querier interface {
 	ListSpSpecificOtpAlternativeSenders(ctx context.Context, arg ListSpSpecificOtpAlternativeSendersParams) ([]OtpAlternativeSender, error)
 	// Lists wallets for a specific Service Provider, paginated.
 	ListWalletsBySP(ctx context.Context, arg ListWalletsBySPParams) ([]Wallet, error)
-	// Marks a job as failed for this attempt, increments attempts, and potentially sets to permanent failure.
+	// Marks a job as failed for this attempt, increments attempts, sets next_retry_at for exponential backoff.
+	// Calculates backoff: least(greatest(5 * 2^(attempts), 5 seconds), 5 minutes) seconds
 	MarkDLRForwardingAttemptFailed(ctx context.Context, arg MarkDLRForwardingAttemptFailedParams) error
 	// Marks a job as successfully completed.
 	MarkDLRForwardingSuccess(ctx context.Context, id int64) error
+	// Marks a message for retry with exponential backoff
+	MarkMessageForRetry(ctx context.Context, arg MarkMessageForRetryParams) error
 	// Use this if the Sender.Send fails catastrophically *before* MNO gets involved,
 	// or potentially as the final aggregated status if needed.
 	MarkMessageSendFailed(ctx context.Context, arg MarkMessageSendFailedParams) error
 	MarkMessageSent(ctx context.Context, id int64) error
+	// Moves a message to the dead letter queue for manual intervention
+	MoveToDeadLetterQueue(ctx context.Context, id int64) error
 	RemoveRoutingGroupFromSpCredential(ctx context.Context, spCredentialID int32) (SpCredential, error)
 	// Optional: Periodically run to unlock jobs held by dead workers.
 	UnlockStaleDLRs(ctx context.Context) error
@@ -201,6 +200,8 @@ type Querier interface {
 	// Updates the final aggregated status and error info
 	UpdateMessageFinalStatus(ctx context.Context, arg UpdateMessageFinalStatusParams) error
 	UpdateMessagePriced(ctx context.Context, arg UpdateMessagePricedParams) error
+	// Updates message status and cost within a transaction context
+	UpdateMessagePricedWithStatusTx(ctx context.Context, arg UpdateMessagePricedWithStatusTxParams) error
 	UpdateMessageRoutingInfo(ctx context.Context, arg UpdateMessageRoutingInfoParams) error
 	// Updates status after Sender.Send finishes (regardless of segment success/failure)
 	UpdateMessageSendAttempted(ctx context.Context, id int64) error
@@ -214,8 +215,6 @@ type Querier interface {
 	// WHERE id = sqlc.arg(id) AND routing_group_id = sqlc.arg(routing_group_id_context)
 	UpdateRoutingAssignment(ctx context.Context, arg UpdateRoutingAssignmentParams) (RoutingAssignment, error)
 	UpdateRoutingGroup(ctx context.Context, arg UpdateRoutingGroupParams) (RoutingGroup, error)
-	// Optional MNO ID filter
-	UpdateRoutingRule(ctx context.Context, arg UpdateRoutingRuleParams) (RoutingRule, error)
 	// Updates status, password hash, scope, http_config for a credential.
 	UpdateSPCredential(ctx context.Context, arg UpdateSPCredentialParams) (SpCredential, error)
 	// Updates segment status based on received DLR

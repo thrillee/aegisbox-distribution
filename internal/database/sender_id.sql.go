@@ -38,7 +38,7 @@ LIMIT 1
 `
 
 type ValidateSenderIDParams struct {
-	ServiceProviderID int32  `json:"serviceProviderId"`
+	ServiceProviderID *int32 `json:"serviceProviderId"`
 	SenderIDString    string `json:"senderIdString"`
 }
 

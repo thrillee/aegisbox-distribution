@@ -16,36 +16,37 @@ import (
 	"github.com/thrillee/aegisbox/pkg/segmenter"
 )
 
-// Compile-time check to ensure Manager implements ConnectorProvider
 var _ ConnectorProvider = (*Manager)(nil)
 
-// Manager handles the lifecycle and access to MNO Connector instances.
 type Manager struct {
 	pool         *pgxpool.Pool
 	dbQueries    database.Querier
-	segmenter    segmenter.Segmenter // Required by SMPPConnector
-	dlrHandler   DLRHandlerFunc      // The main DLR handler callback from sms.Processor
-	syncInterval time.Duration       // How often to check DB for config changes
+	segmenter    segmenter.Segmenter
+	dlrHandler   DLRHandlerFunc
+	syncInterval time.Duration
+	logger       *slog.Logger
 
-	connectors    sync.Map      // map[int32]Connector - Key: mno_connections.id (DB PK)
-	mnoConnectors sync.Map      // map[int32][]int32 - Key: mno.id, Value: Slice of connection IDs for that MNO
-	mu            sync.RWMutex  // Protects internal maps during sync
-	stopCh        chan struct{} // Signals the manager loop to stop
-	wg            sync.WaitGroup
+	connectors      sync.Map
+	mnoConnectors   sync.Map
+	circuitBreakers sync.Map // map[int32]*CircuitBreaker per MNO ID
+	mu              sync.RWMutex
+	stopCh          chan struct{}
+	wg              sync.WaitGroup
 }
 
-// NewManager creates a new MNO Connection Manager.
-func NewManager(pool *pgxpool.Pool, q database.Querier, seg segmenter.Segmenter, dlrHandler DLRHandlerFunc, syncInterval time.Duration) *Manager {
+func NewManager(pool *pgxpool.Pool, q database.Querier, seg segmenter.Segmenter, dlrHandler DLRHandlerFunc, syncInterval time.Duration, logger *slog.Logger) *Manager {
 	if syncInterval <= 0 {
-		syncInterval = 1 * time.Minute // Default sync interval
+		syncInterval = 1 * time.Minute
 	}
 	return &Manager{
-		pool:         pool,
-		dbQueries:    q,
-		segmenter:    seg,
-		dlrHandler:   dlrHandler,
-		syncInterval: syncInterval,
-		stopCh:       make(chan struct{}),
+		pool:            pool,
+		dbQueries:       q,
+		segmenter:       seg,
+		dlrHandler:      dlrHandler,
+		syncInterval:    syncInterval,
+		stopCh:          make(chan struct{}),
+		circuitBreakers: sync.Map{},
+		logger:          logger,
 	}
 }
 
@@ -53,23 +54,22 @@ func (m *Manager) GetDLRHandler() DLRHandlerFunc {
 	return m.dlrHandler
 }
 
-// Start initiates the manager's main loop for syncing connectors with DB config.
 func (m *Manager) Start(ctx context.Context) {
 	slog.InfoContext(ctx, "Starting MNO Connection Manager", slog.Duration("sync_interval", m.syncInterval))
 	m.wg.Add(1)
 	go m.runSyncLoop(ctx)
 }
 
-// runSyncLoop is the main background loop.
 func (m *Manager) runSyncLoop(ctx context.Context) {
 	defer m.wg.Done()
 	slog.InfoContext(ctx, "MNO Manager sync loop started.")
 
-	// Initial sync on startup
 	if err := m.loadAndSyncConnectors(ctx); err != nil {
 		slog.ErrorContext(ctx, "Initial MNO connector sync failed", slog.Any("error", err))
-		// Depending on severity, might want to stop the application
 	}
+
+	m.wg.Add(1)
+	go m.runReconnectionLoop(ctx)
 
 	ticker := time.NewTicker(m.syncInterval)
 	defer ticker.Stop()
@@ -91,7 +91,143 @@ func (m *Manager) runSyncLoop(ctx context.Context) {
 	}
 }
 
-// loadAndSyncConnectors fetches DB config and updates running connectors.
+func (m *Manager) runReconnectionLoop(ctx context.Context) {
+	defer m.wg.Done()
+
+	ticker := time.NewTicker(10 * time.Second)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-m.stopCh:
+			return
+		case <-ticker.C:
+			m.reconnectDisconnected(ctx)
+		}
+	}
+}
+
+func (m *Manager) reconnectDisconnected(ctx context.Context) {
+	m.connectors.Range(func(key, value any) bool {
+		connID := key.(int32)
+		conn := value.(Connector)
+
+		status := conn.Status()
+		if status == codes.StatusDisconnected || status == codes.StatusError || status == codes.StatusBindingFailed {
+			logCtx := logging.ContextWithMNOConnID(ctx, connID)
+			logCtx = logging.ContextWithMNOID(logCtx, conn.MnoID())
+
+			slog.InfoContext(logCtx, "Attempting to reconnect disconnected connector")
+
+			if smppConn, ok := conn.(*SMPPMNOConnector); ok {
+				m.wg.Add(1)
+				go func() {
+					defer m.wg.Done()
+					m.reconnectWithBackoff(logCtx, smppConn)
+				}()
+			} else if httpConn, ok := conn.(*HTTPMNOConnector); ok {
+				m.wg.Add(1)
+				go func() {
+					defer m.wg.Done()
+					m.reconnectHTTP(logCtx, httpConn)
+				}()
+			}
+		}
+		return true
+	})
+}
+
+func (m *Manager) reconnectWithBackoff(ctx context.Context, conn *SMPPMNOConnector) {
+	backoff := time.Second * 5
+	maxBackoff := time.Minute * 5
+
+	for i := 0; i < 10; i++ {
+		select {
+		case <-m.stopCh:
+			return
+		default:
+		}
+
+		slog.InfoContext(ctx, "Reconnection attempt", slog.Int("attempt", i+1), slog.Duration("backoff", backoff))
+
+		if err := conn.ConnectAndBind(ctx); err != nil {
+			slog.ErrorContext(ctx, "Reconnection failed", slog.Any("error", err), slog.Duration("retry_delay", backoff))
+
+			select {
+			case <-m.stopCh:
+				return
+			case <-time.After(backoff):
+			}
+
+			backoff *= 2
+			if backoff > maxBackoff {
+				backoff = maxBackoff
+			}
+			continue
+		}
+
+		slog.InfoContext(ctx, "Reconnection successful")
+		return
+	}
+
+	slog.ErrorContext(ctx, "Max reconnection attempts reached, will retry in next cycle")
+}
+
+func (m *Manager) reconnectHTTP(ctx context.Context, conn *HTTPMNOConnector) {
+	backoff := time.Second * 5
+	maxBackoff := time.Minute * 5
+
+	for i := 0; i < 10; i++ {
+		select {
+		case <-m.stopCh:
+			return
+		default:
+		}
+
+		slog.InfoContext(ctx, "HTTP connector health check/reconnect attempt", slog.Int("attempt", i+1))
+
+		if err := conn.HealthCheck(ctx); err != nil {
+			slog.ErrorContext(ctx, "HTTP connector health check failed", slog.Any("error", err))
+
+			select {
+			case <-m.stopCh:
+				return
+			case <-time.After(backoff):
+			}
+
+			backoff *= 2
+			if backoff > maxBackoff {
+				backoff = maxBackoff
+			}
+			continue
+		}
+
+		slog.InfoContext(ctx, "HTTP connector health check passed")
+		return
+	}
+}
+
+func (m *Manager) GetCircuitBreaker(mnoID int32) *CircuitBreaker {
+	if cb, ok := m.circuitBreakers.Load(mnoID); ok {
+		return cb.(*CircuitBreaker)
+	}
+
+	newCB := NewCircuitBreaker(CircuitBreakerConfig{
+		FailureThreshold: 5,
+		SuccessThreshold: 3,
+		Timeout:          30 * time.Second,
+		RequestTimeout:   10 * time.Second,
+		VolumeThreshold:  10,
+		Logger:           m.logger,
+		MNOID:            mnoID,
+	})
+
+	actual, _ := m.circuitBreakers.LoadOrStore(mnoID, newCB)
+	return actual.(*CircuitBreaker)
+}
+
 func (m *Manager) loadAndSyncConnectors(ctx context.Context) error {
 	slog.DebugContext(ctx, "Loading active MNO connections from database...")
 	dbConfigs, err := m.dbQueries.GetActiveMNOConnections(ctx)
@@ -100,37 +236,32 @@ func (m *Manager) loadAndSyncConnectors(ctx context.Context) error {
 	}
 	slog.DebugContext(ctx, "Fetched active MNO connection configs", slog.Int("count", len(dbConfigs)))
 
-	m.mu.Lock() // Lock maps for syncing
+	m.mu.Lock()
 	defer m.mu.Unlock()
 
 	activeDBConnIDs := make(map[int32]bool)
-	newMnoMap := make(map[int32][]int32) // Build new map[mno_id][]conn_id
+	newMnoMap := make(map[int32][]int32)
 
-	// Iterate through DB configs to add/update connectors
 	for _, dbConn := range dbConfigs {
 		connID := dbConn.ID
 		mnoID := dbConn.MnoID
-		activeDBConnIDs[connID] = true // Mark this ID as active in DB
+		activeDBConnIDs[connID] = true
 
 		logCtx := logging.ContextWithMNOConnID(ctx, connID)
 		logCtx = logging.ContextWithMNOID(logCtx, mnoID)
 
-		// Check if connector already exists
 		if existingVal, ok := m.connectors.Load(connID); ok {
-			// Exists - Check if config changed significantly (e.g., host/port/systemid/protocol)
-			// For now, we assume config changes require restart and don't handle dynamic updates.
-			// Just ensure it's added to the new MNO map.
-			existingConn := existingVal.(Connector) // Type assert
-			if existingConn.MnoID() == mnoID {      // Basic check
+			existingConn := existingVal.(Connector)
+			if existingConn.MnoID() == mnoID {
 				newMnoMap[mnoID] = append(newMnoMap[mnoID], connID)
 			} else {
 				slog.WarnContext(logCtx, "Existing connector MNO ID mismatch, scheduling shutdown.", slog.Int("old_mno_id", int(existingConn.MnoID())))
-				go func(conn Connector) { // Shutdown in background
+				go func(conn Connector) {
 					shutdownCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 					defer cancel()
 					_ = conn.Shutdown(shutdownCtx)
 				}(existingConn)
-				m.connectors.Delete(connID) // Remove inconsistent connector
+				m.connectors.Delete(connID)
 			}
 			continue
 		}
@@ -154,7 +285,6 @@ func (m *Manager) loadAndSyncConnectors(ctx context.Context) error {
 			} else {
 				creationErr = err
 			}
-			// creationErr = errors.New("http MNO connector not yet implemented")
 		default:
 			creationErr = fmt.Errorf("unknown protocol '%s' for conn %d", dbConn.Protocol, connID)
 		}
@@ -164,55 +294,46 @@ func (m *Manager) loadAndSyncConnectors(ctx context.Context) error {
 			continue
 		}
 
-		// Register the central DLR handler
 		newConn.RegisterDLRHandler(m.dlrHandler)
-
-		// Store the new connector
 		m.connectors.Store(connID, newConn)
 		newMnoMap[mnoID] = append(newMnoMap[mnoID], connID)
 
-		// Start the connector's connection process in background
 		go func(conn Connector) {
 			connCtx := logging.ContextWithMNOConnID(context.Background(), conn.ConnectionID())
 			connCtx = logging.ContextWithMNOID(connCtx, conn.MnoID())
 			if smppConn, ok := conn.(*SMPPMNOConnector); ok {
-				// TODO: Add retry logic here?
-				backoff := time.Second * 5 // Initial backoff
+				backoff := time.Second * 5
 				for {
 					slog.InfoContext(connCtx, "Attempting initial connect and bind...")
 					err := smppConn.ConnectAndBind(connCtx)
 					if err == nil {
 						slog.InfoContext(connCtx, "ConnectAndBind succeeded.")
-						break // Successfully connected
+						break
 					}
 					slog.ErrorContext(connCtx, "ConnectAndBind failed, will retry.", slog.Any("error", err), slog.Duration("retry_delay", backoff))
 
-					// Check if manager is stopping
 					select {
 					case <-m.stopCh:
 						slog.InfoContext(connCtx, "Manager stopping, aborting connect retry.")
 						return
 					case <-time.After(backoff):
-						// Increase backoff potentially (e.g., backoff *= 2) up to a max
 						if backoff < time.Minute {
 							backoff *= 2
 						}
 					}
 				}
 			} else if httpConn, ok := conn.(*HTTPMNOConnector); ok {
-				_ = httpConn // Placeholder
+				_ = httpConn
 			}
 		}(newConn)
 
-	} // End DB config loop
+	}
 
-	// Remove connectors that are no longer active in the DB
 	m.connectors.Range(func(key, value any) bool {
 		connID := key.(int32)
 		if !activeDBConnIDs[connID] {
 			slog.InfoContext(ctx, "Removing connector no longer active in database", slog.Int("conn_id", int(connID)))
 			conn := value.(Connector)
-			// Shutdown in background
 			go func(c Connector) {
 				shutdownCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 				defer cancel()
@@ -220,13 +341,11 @@ func (m *Manager) loadAndSyncConnectors(ctx context.Context) error {
 			}(conn)
 			m.connectors.Delete(connID)
 		}
-		return true // Continue iteration
+		return true
 	})
 
-	// Update the mnoConnectors map (atomically if Go maps supported it, otherwise simple replace under lock)
-	m.mnoConnectors = sync.Map{} // Clear and rebuild (or use newMnoMap directly if locking allows)
+	m.mnoConnectors = sync.Map{}
 	for mnoID, connIDs := range newMnoMap {
-		// slog.InfoContext(ctx, "Register Connection", slog.Any("conn_ids", connIDs), slog.Any("mno_id", mnoID))
 		m.mnoConnectors.Store(mnoID, connIDs)
 	}
 	slog.DebugContext(ctx, "Finished MNO connector sync")
@@ -234,52 +353,108 @@ func (m *Manager) loadAndSyncConnectors(ctx context.Context) error {
 	return nil
 }
 
-// GetConnector implements the ConnectorProvider interface.
-// It finds an *active* connector for the requested MNO ID.
 func (m *Manager) GetConnector(ctx context.Context, mnoID int32) (Connector, error) {
+	return m.GetConnectorWithProtocol(ctx, mnoID, "")
+}
+
+func (m *Manager) GetConnectorWithProtocol(ctx context.Context, mnoID int32, preferredProtocol string) (Connector, error) {
 	logCtx := logging.ContextWithMNOID(ctx, mnoID)
-	m.mu.RLock() // Read lock while accessing map
+
+	cb := m.GetCircuitBreaker(mnoID)
+	if !cb.AllowRequest() {
+		slog.WarnContext(logCtx, "Circuit breaker is open for MNO, rejecting request", slog.String("state", cb.State().String()))
+		return nil, fmt.Errorf("circuit breaker open for MNO ID %d", mnoID)
+	}
+
+	m.mu.RLock()
 	defer m.mu.RUnlock()
 
 	connIDsVal, ok := m.mnoConnectors.Load(mnoID)
 	if !ok {
+		cb.RecordFailure()
 		return nil, fmt.Errorf("no connectors configured for MNO ID %d", mnoID)
 	}
-	connIDs := connIDsVal.([]int32) // Type assert
+	connIDs := connIDsVal.([]int32)
 	if len(connIDs) == 0 {
+		cb.RecordFailure()
 		return nil, fmt.Errorf("no connectors available for MNO ID %d", mnoID)
 	}
 
-	var activeConnectors []Connector
+	var preferredConnectors []Connector
+	var fallbackConnectors []Connector
+
 	for _, connID := range connIDs {
 		connVal, ok := m.connectors.Load(connID)
 		if !ok {
 			continue
-		} // Should not happen if maps are synced
+		}
 		conn := connVal.(Connector)
 		status := conn.Status()
-		if status == codes.StatusBound || status == codes.StatusHttpOk {
-			activeConnectors = append(activeConnectors, conn)
+		if status != codes.StatusBound && status != codes.StatusHttpOk {
+			continue
+		}
+
+		connProtocol := m.getConnectorProtocol(conn)
+		if preferredProtocol != "" && strings.EqualFold(connProtocol, preferredProtocol) {
+			preferredConnectors = append(preferredConnectors, conn)
+		} else {
+			fallbackConnectors = append(fallbackConnectors, conn)
 		}
 	}
 
-	if len(activeConnectors) == 0 {
-		slog.WarnContext(logCtx, "No currently active connectors found for MNO", slog.Int("total_configured", len(connIDs)))
+	var selected []Connector
+	if len(preferredConnectors) > 0 {
+		selected = preferredConnectors
+		slog.DebugContext(logCtx, "Using preferred protocol connectors", slog.String("protocol", preferredProtocol))
+	} else if len(fallbackConnectors) > 0 {
+		selected = fallbackConnectors
+		slog.DebugContext(logCtx, "No preferred protocol connectors available, using fallback")
+	}
+
+	if len(selected) == 0 {
+		slog.WarnContext(logCtx, "No active connectors found for MNO",
+			slog.Int("total_configured", len(connIDs)),
+			slog.String("preferred_protocol", preferredProtocol))
+		cb.RecordFailure()
 		return nil, fmt.Errorf("no active connectors available for MNO ID %d", mnoID)
 	}
 
-	// Simple load balancing: Pick randomly
-	selected := activeConnectors[rand.Intn(len(activeConnectors))]
-	slog.DebugContext(logCtx, "Selected active connector", slog.Int("conn_id", int(selected.ConnectionID())), slog.String("status", selected.Status()))
-	return selected, nil
+	selectedConnector := selected[rand.Intn(len(selected))]
+	slog.DebugContext(logCtx, "Selected active connector",
+		slog.Int("conn_id", int(selectedConnector.ConnectionID())),
+		slog.String("status", selectedConnector.Status()),
+		slog.String("protocol", m.getConnectorProtocol(selectedConnector)))
+
+	cb.RecordSuccess()
+	return selectedConnector, nil
 }
 
-// Shutdown gracefully stops all managed connectors and the sync loop.
+func (m *Manager) getConnectorProtocol(conn Connector) string {
+	switch conn.(type) {
+	case *SMPPMNOConnector:
+		return "smpp"
+	case *HTTPMNOConnector:
+		return "http"
+	default:
+		return ""
+	}
+}
+
+func (m *Manager) RecordConnectionFailure(mnoID int32) {
+	cb := m.GetCircuitBreaker(mnoID)
+	cb.RecordFailure()
+}
+
+func (m *Manager) RecordConnectionSuccess(mnoID int32) {
+	cb := m.GetCircuitBreaker(mnoID)
+	cb.RecordSuccess()
+}
+
 func (m *Manager) Shutdown(ctx context.Context) error {
 	slog.InfoContext(ctx, "Shutting down MNO Connection Manager...")
-	close(m.stopCh) // Signal sync loop to stop
+	close(m.stopCh)
 
-	m.wg.Wait() // Wait for sync loop goroutine to finish
+	m.wg.Wait()
 
 	slog.InfoContext(ctx, "Shutting down individual MNO connectors...")
 	var shutdownWg sync.WaitGroup
@@ -303,10 +478,10 @@ func (m *Manager) Shutdown(ctx context.Context) error {
 				errMu.Unlock()
 			}
 		}(conn, connID)
-		return true // Continue iteration
+		return true
 	})
 
-	shutdownWg.Wait() // Wait for all connectors to attempt shutdown
+	shutdownWg.Wait()
 	slog.InfoContext(ctx, "MNO Connection Manager shutdown complete.")
 	if len(errors) > 0 {
 		return fmt.Errorf("encountered %d error(s) during connector shutdown: %v", len(errors), errors)
