@@ -36,8 +36,8 @@ jobs:
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}/migration
           tags: |
-            type=raw,value=latest,enable={{-is_default_branch}}
-            type=sha,prefix=
+            type=sha
+            type=ref,event=branch
 
       - name: Extract metadata for Manager API
         id: meta-manager-api
@@ -45,8 +45,8 @@ jobs:
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}/manager-api
           tags: |
-            type=raw,value=latest,enable={{is_default_branch}}
-            type=sha,prefix=
+            type=sha
+            type=ref,event=branch
 
       - name: Extract metadata for SMPP Gateway
         id: meta-smpp-gateway
@@ -54,8 +54,8 @@ jobs:
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}/smpp-gateway
           tags: |
-            type=raw,value=latest,enable={{is_default_branch}}
-            type=sha,prefix=
+            type=sha
+            type=ref,event=branch
 
       - name: Build and push Migration image
         uses: docker/build-push-action@v5
