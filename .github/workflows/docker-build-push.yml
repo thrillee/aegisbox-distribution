@@ -1,0 +1,91 @@
+name: Build and Push Docker Images to GHCR
+
+on:
+  push:
+    branches:
+      - docker-prod
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata for Migration
+        id: meta-migration
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}/migration
+          tags: |
+            type=raw,value=latest,enable={{-is_default_branch}}
+            type=sha,prefix=
+
+      - name: Extract metadata for Manager API
+        id: meta-manager-api
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}/manager-api
+          tags: |
+            type=raw,value=latest,enable={{is_default_branch}}
+            type=sha,prefix=
+
+      - name: Extract metadata for SMPP Gateway
+        id: meta-smpp-gateway
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}/smpp-gateway
+          tags: |
+            type=raw,value=latest,enable={{is_default_branch}}
+            type=sha,prefix=
+
+      - name: Build and push Migration image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: deploy/migration/Dockerfile
+          push: true
+          tags: ${{ steps.meta-migration.outputs.tags }}
+          labels: ${{ steps.meta-migration.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Build and push Manager API image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: deploy/manager-api/Dockerfile
+          push: true
+          tags: ${{ steps.meta-manager-api.outputs.tags }}
+          labels: ${{ steps.meta-manager-api.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Build and push SMPP Gateway image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: deploy/smpp-gateway/Dockerfile
+          push: true
+          tags: ${{ steps.meta-smpp-gateway.outputs.tags }}
+          labels: ${{ steps.meta-smpp-gateway.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
