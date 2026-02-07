@@ -140,14 +140,16 @@
       },
       "id": 3,
       "options": {
-        "labels": ["tag"],
+        "labels": ["level", "tag"],
         "showLabels": false,
         "showTime": true,
-        "wrapLogMessage": true
+        "wrapLogMessage": true,
+        "enableLogDetails": true,
+        "prettifyLogMessage": true
       },
       "targets": [
         {
-          "expr": "{tag=\"manager-api\"} | json | line_format \"{{.log}}\"",
+          "expr": "{tag=\"manager-api\"}",
           "refId": "A"
         }
       ],
@@ -167,14 +169,16 @@
       },
       "id": 4,
       "options": {
-        "labels": ["tag"],
+        "labels": ["level", "tag"],
         "showLabels": false,
         "showTime": true,
-        "wrapLogMessage": true
+        "wrapLogMessage": true,
+        "enableLogDetails": true,
+        "prettifyLogMessage": true
       },
       "targets": [
         {
-          "expr": "{tag=\"smpp-gateway\"} | json | line_format \"{{.log}}\"",
+          "expr": "{tag=\"smpp-gateway\"}",
           "refId": "A"
         }
       ],
@@ -194,18 +198,49 @@
       },
       "id": 5,
       "options": {
-        "labels": ["tag"],
+        "labels": ["level", "tag"],
         "showLabels": false,
         "showTime": true,
-        "wrapLogMessage": true
+        "wrapLogMessage": true,
+        "enableLogDetails": true,
+        "prettifyLogMessage": true
       },
       "targets": [
         {
-          "expr": "{tag=\"portal\"} | json | line_format \"{{.log}}\"",
+          "expr": "{tag=\"portal\"}",
           "refId": "A"
         }
       ],
       "title": "Portal Logs",
+      "type": "logs"
+    },
+    {
+      "datasource": {
+        "type": "loki",
+        "uid": "loki"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 16
+      },
+      "id": 6,
+      "options": {
+        "labels": ["level", "tag"],
+        "showLabels": false,
+        "showTime": true,
+        "wrapLogMessage": true,
+        "enableLogDetails": true,
+        "prettifyLogMessage": true
+      },
+      "targets": [
+        {
+          "expr": "{job=\"aegisbox-logs\"} | level = \"WARN\" or level = \"ERROR\"",
+          "refId": "A"
+        }
+      ],
+      "title": "Error Logs (All Services)",
       "type": "logs"
     }
   ],
@@ -223,6 +258,6 @@
   "timezone": "browser",
   "title": "Aegisbox Overview",
   "uid": "aegisbox-overview",
-  "version": 2,
+  "version": 3,
   "weekStart": ""
 }

@@ -29,3 +29,12 @@ scrape_configs:
       - labels:
           stream:
           tag:
+      - regex:
+          expression: '(?s)"time":"(?P<time>[^"]+)".*?"level":"(?P<level>[^"]+)".*?"msg":"(?P<msg>[^"]+)"'
+          source: log
+      - timestamp:
+          source: time
+          format: RFC3339Nano
+      - labels:
+          level:
+          msg:
