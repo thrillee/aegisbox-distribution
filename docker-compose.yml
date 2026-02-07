@@ -1,33 +1,9 @@
-version: '3.8'
-
 services:
-  postgres:
-    image: postgres:16-alpine
-    restart: unless-stopped
-    environment:
-      POSTGRES_USER: ${POSTGRES_USER:-aegisbox}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-aegisbox}
-      POSTGRES_DB: ${POSTGRES_DB:-aegisbox_dev}
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
-    ports:
-      - "${POSTGRES_PORT:-5432}:5432"
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-aegisbox} -d ${POSTGRES_DB:-aegisbox_dev}"]
-      interval: 5s
-      timeout: 5s
-      retries: 5
-    networks:
-      - aegisbox-network
-
   migration:
     image: ghcr.io/thrillee/aegisbox/migration:${TAG:-docker-prod}
     restart: "no"
     env_file:
       - .env
-    depends_on:
-      postgres:
-        condition: service_healthy
     logging:
       driver: "json-file"
       options:
@@ -44,9 +20,6 @@ services:
       - .env
     ports:
       - "${API_PORT:-8001}:8001"
-    depends_on:
-      postgres:
-        condition: service_healthy
     logging:
       driver: "json-file"
       options:
@@ -63,9 +36,6 @@ services:
       - .env
     ports:
       - "${SMPP_PORT:-2775}:2775"
-    depends_on:
-      postgres:
-        condition: service_healthy
     logging:
       driver: "json-file"
       options:
@@ -81,7 +51,7 @@ services:
     env_file:
       - .env
     ports:
-      - "${PORTAL_PORT:-3001}:3000"
+      - "${PORTAL_PORT:-3000}:3000"
     depends_on:
       - manager-api
     logging:
@@ -94,10 +64,10 @@ services:
       - aegisbox-network
 
   grafana:
-    image: grafana/grafana:11
+    image: grafana/grafana:latest
     restart: unless-stopped
     ports:
-      - "${GRAFANA_PORT:-3000}:3000"
+      - "${GRAFANA_PORT:-3001}:3000"
     volumes:
       - grafana_data:/var/lib/grafana
       - ./grafana/provisioning/datasources:/etc/grafana/provisioning/datasources:ro
@@ -118,7 +88,7 @@ services:
       - aegisbox-network
 
   prometheus:
-    image: prom/prometheus:v3
+    image: prom/prometheus:latest
     restart: unless-stopped
     ports:
       - "${PROMETHEUS_PORT:-9090}:9090"
@@ -141,7 +111,7 @@ services:
       - aegisbox-network
 
   loki:
-    image: grafana/loki:3
+    image: grafana/loki:latest
     restart: unless-stopped
     ports:
       - "${LOKI_PORT:-3100}:3100"
@@ -159,7 +129,7 @@ services:
       - aegisbox-network
 
   promtail:
-    image: grafana/promtail:3
+    image: grafana/promtail:latest
     restart: unless-stopped
     volumes:
       - ./promtail/config.yml:/etc/promtail/config.yml:ro
@@ -178,7 +148,6 @@ services:
       - aegisbox-network
 
 volumes:
-  postgres_data:
   grafana_data:
   prometheus_data:
   loki_data:
