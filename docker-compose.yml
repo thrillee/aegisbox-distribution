@@ -133,6 +133,7 @@ services:
     restart: unless-stopped
     volumes:
       - ./promtail/config.yml:/etc/promtail/config.yml:ro
+      - promtail_data:/tmp/promtail
       - /var/log:/var/log:ro
       - /var/lib/docker/containers:/var/lib/docker/containers:ro
     command: -config.file=/etc/promtail/config.yml
@@ -151,6 +152,7 @@ volumes:
   grafana_data:
   prometheus_data:
   loki_data:
+  promtail_data:
 
 networks:
   aegisbox-network:

@@ -133,25 +133,25 @@
         "uid": "loki"
       },
       "gridPos": {
-        "h": 10,
-        "w": 12,
+        "h": 12,
+        "w": 8,
         "x": 0,
         "y": 4
       },
       "id": 3,
       "options": {
-        "labels": ["job"],
+        "labels": ["tag"],
         "showLabels": false,
         "showTime": true,
         "wrapLogMessage": true
       },
       "targets": [
         {
-          "expr": "{job=\"aegisbox-logs\"} | json",
+          "expr": "{tag=\"manager-api\"} | json | line_format \"{{.log}}\"",
           "refId": "A"
         }
       ],
-      "title": "Aegisbox Logs",
+      "title": "Manager API Logs",
       "type": "logs"
     },
     {
@@ -160,29 +160,56 @@
         "uid": "loki"
       },
       "gridPos": {
-        "h": 10,
-        "w": 12,
-        "x": 12,
+        "h": 12,
+        "w": 8,
+        "x": 8,
         "y": 4
       },
       "id": 4,
       "options": {
-        "labels": ["job"],
+        "labels": ["tag"],
         "showLabels": false,
         "showTime": true,
         "wrapLogMessage": true
       },
       "targets": [
         {
-          "expr": "{job=\"docker-logs\"} | json | container=\"aegisbox\"",
+          "expr": "{tag=\"smpp-gateway\"} | json | line_format \"{{.log}}\"",
           "refId": "A"
         }
       ],
-      "title": "Docker Container Logs",
+      "title": "SMPP Gateway Logs",
+      "type": "logs"
+    },
+    {
+      "datasource": {
+        "type": "loki",
+        "uid": "loki"
+      },
+      "gridPos": {
+        "h": 12,
+        "w": 8,
+        "x": 16,
+        "y": 4
+      },
+      "id": 5,
+      "options": {
+        "labels": ["tag"],
+        "showLabels": false,
+        "showTime": true,
+        "wrapLogMessage": true
+      },
+      "targets": [
+        {
+          "expr": "{tag=\"portal\"} | json | line_format \"{{.log}}\"",
+          "refId": "A"
+        }
+      ],
+      "title": "Portal Logs",
       "type": "logs"
     }
   ],
-  "refresh": "5s",
+  "refresh": "",
   "schemaVersion": 39,
   "tags": ["aegisbox"],
   "templating": {
@@ -196,6 +223,6 @@
   "timezone": "browser",
   "title": "Aegisbox Overview",
   "uid": "aegisbox-overview",
-  "version": 1,
+  "version": 2,
   "weekStart": ""
 }

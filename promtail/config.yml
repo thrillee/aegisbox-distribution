@@ -14,21 +14,18 @@ scrape_configs:
       - targets:
           - localhost
         labels:
-          job: aegisbox
-          __path__: /var/log/aegisbox/*log
-
-  - job_name: 'docker-logs'
-    static_configs:
-      - targets:
-          - localhost
-        labels:
-          job: docker
+          job: aegisbox-logs
           __path__: /var/lib/docker/containers/*/*-json.log
-
-  - job_name: 'system-logs'
-    static_configs:
-      - targets:
-          - localhost
-        labels:
-          job: system
-          __path__: /var/log/**/*.log
+    pipeline_stages:
+      - json:
+          expressions:
+            stream: stream
+            log: log
+            attrs: attrs
+      - json:
+          source: attrs
+          expressions:
+            tag: tag
+      - labels:
+          stream:
+          tag:
