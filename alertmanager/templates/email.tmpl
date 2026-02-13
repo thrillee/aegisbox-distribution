@@ -1,0 +1,396 @@
+{{ define "email.default.html" }}
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+            line-height: 1.6;
+            color: #333;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        .header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 30px;
+            border-radius: 8px 8px 0 0;
+        }
+        .header h1 {
+            margin: 0;
+            font-size: 24px;
+        }
+        .alert-status {
+            display: inline-block;
+            padding: 4px 12px;
+            border-radius: 4px;
+            font-size: 12px;
+            font-weight: bold;
+            margin-top: 10px;
+        }
+        .status-firing {
+            background-color: #dc3545;
+            color: white;
+        }
+        .status-resolved {
+            background-color: #28a745;
+            color: white;
+        }
+        .content {
+            background: #f8f9fa;
+            padding: 30px;
+            border-left: 4px solid #667eea;
+        }
+        .alert-group {
+            background: white;
+            border: 1px solid #dee2e6;
+            border-radius: 6px;
+            padding: 20px;
+            margin-bottom: 20px;
+        }
+        .alert-title {
+            font-size: 18px;
+            font-weight: bold;
+            color: #2c3e50;
+            margin-bottom: 10px;
+        }
+        .alert-description {
+            color: #6c757d;
+            margin-bottom: 15px;
+        }
+        .alert-labels {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            margin-top: 15px;
+        }
+        .label {
+            display: inline-block;
+            padding: 4px 8px;
+            background: #e9ecef;
+            border-radius: 4px;
+            font-size: 12px;
+            color: #495057;
+        }
+        .label-key {
+            font-weight: bold;
+        }
+        .severity-critical {
+            background-color: #dc3545;
+            color: white;
+        }
+        .severity-warning {
+            background-color: #ffc107;
+            color: #000;
+        }
+        .severity-info {
+            background-color: #17a2b8;
+            color: white;
+        }
+        .timestamp {
+            font-size: 12px;
+            color: #6c757d;
+            margin-top: 10px;
+        }
+        .footer {
+            text-align: center;
+            padding: 20px;
+            color: #6c757d;
+            font-size: 12px;
+            border-top: 1px solid #dee2e6;
+            margin-top: 20px;
+        }
+        .button {
+            display: inline-block;
+            padding: 10px 20px;
+            background: #667eea;
+            color: white !important;
+            text-decoration: none;
+            border-radius: 4px;
+            margin-top: 15px;
+        }
+        .metrics-link {
+            margin-top: 15px;
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>🔔 Aegisbox Alert Notification</h1>
+        {{ if eq .Status "firing" }}
+        <span class="alert-status status-firing">FIRING</span>
+        {{ else }}
+        <span class="alert-status status-resolved">RESOLVED</span>
+        {{ end }}
+    </div>
+    
+    <div class="content">
+        <p><strong>Alert Summary:</strong> {{ len .Alerts }} alert(s) in this notification</p>
+        
+        {{ range .Alerts }}
+        <div class="alert-group">
+            <div class="alert-title">
+                {{ .Labels.alertname }}
+                {{ if .Labels.severity }}
+                <span class="label severity-{{ .Labels.severity }}">{{ .Labels.severity | toUpper }}</span>
+                {{ end }}
+            </div>
+            
+            {{ if .Annotations.summary }}
+            <div class="alert-description">
+                <strong>Summary:</strong> {{ .Annotations.summary }}
+            </div>
+            {{ end }}
+            
+            {{ if .Annotations.description }}
+            <div class="alert-description">
+                {{ .Annotations.description }}
+            </div>
+            {{ end }}
+            
+            <div class="alert-labels">
+                {{ range $key, $value := .Labels }}
+                {{ if ne $key "alertname" }}
+                {{ if ne $key "severity" }}
+                <span class="label">
+                    <span class="label-key">{{ $key }}:</span> {{ $value }}
+                </span>
+                {{ end }}
+                {{ end }}
+                {{ end }}
+            </div>
+            
+            <div class="timestamp">
+                {{ if eq .Status "firing" }}
+                Started: {{ .StartsAt.Format "2006-01-02 15:04:05 MST" }}
+                {{ else }}
+                Resolved: {{ .EndsAt.Format "2006-01-02 15:04:05 MST" }}
+                (Duration: {{ .EndsAt.Sub .StartsAt }})
+                {{ end }}
+            </div>
+            
+            {{ if .GeneratorURL }}
+            <div class="metrics-link">
+                <a href="{{ .GeneratorURL }}" class="button">View in Prometheus</a>
+            </div>
+            {{ end }}
+        </div>
+        {{ end }}
+        
+        <div style="margin-top: 30px; padding: 15px; background: #fff3cd; border-left: 4px solid #ffc107; border-radius: 4px;">
+            <strong>📊 Quick Links:</strong><br>
+            • <a href="http://localhost:3001">Grafana Dashboards</a><br>
+            • <a href="http://localhost:9090">Prometheus Metrics</a><br>
+            • <a href="http://localhost:9093">Alertmanager Console</a>
+        </div>
+    </div>
+    
+    <div class="footer">
+        <p>This is an automated alert from Aegisbox SMS Gateway Platform</p>
+        <p>For support, contact your operations team</p>
+    </div>
+</body>
+</html>
+{{ end }}
+
+{{ define "email.critical.html" }}
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+            line-height: 1.6;
+            color: #333;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        .header {
+            background: linear-gradient(135deg, #dc3545 0%, #c82333 100%);
+            color: white;
+            padding: 30px;
+            border-radius: 8px 8px 0 0;
+            border: 3px solid #721c24;
+        }
+        .header h1 {
+            margin: 0;
+            font-size: 28px;
+        }
+        .critical-badge {
+            display: inline-block;
+            padding: 8px 16px;
+            background: #721c24;
+            border-radius: 4px;
+            font-size: 14px;
+            font-weight: bold;
+            margin-top: 10px;
+        }
+        .content {
+            background: #fff5f5;
+            padding: 30px;
+            border-left: 5px solid #dc3545;
+        }
+        .alert-group {
+            background: white;
+            border: 2px solid #dc3545;
+            border-radius: 6px;
+            padding: 20px;
+            margin-bottom: 20px;
+        }
+        .alert-title {
+            font-size: 20px;
+            font-weight: bold;
+            color: #dc3545;
+            margin-bottom: 15px;
+        }
+        .alert-description {
+            color: #495057;
+            margin-bottom: 15px;
+            font-size: 16px;
+        }
+        .impact-box {
+            background: #f8d7da;
+            border: 1px solid #f5c6cb;
+            border-radius: 4px;
+            padding: 15px;
+            margin: 15px 0;
+        }
+        .impact-box strong {
+            color: #721c24;
+        }
+        .alert-labels {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            margin-top: 15px;
+        }
+        .label {
+            display: inline-block;
+            padding: 6px 12px;
+            background: #dc3545;
+            color: white;
+            border-radius: 4px;
+            font-size: 13px;
+            font-weight: bold;
+        }
+        .timestamp {
+            font-size: 14px;
+            color: #495057;
+            margin-top: 15px;
+            padding: 10px;
+            background: #fff;
+            border-radius: 4px;
+        }
+        .action-required {
+            background: #721c24;
+            color: white;
+            padding: 20px;
+            border-radius: 6px;
+            margin: 20px 0;
+            font-size: 16px;
+        }
+        .button {
+            display: inline-block;
+            padding: 12px 24px;
+            background: #dc3545;
+            color: white !important;
+            text-decoration: none;
+            border-radius: 4px;
+            margin-top: 15px;
+            font-weight: bold;
+        }
+        .footer {
+            text-align: center;
+            padding: 20px;
+            color: #6c757d;
+            font-size: 12px;
+            border-top: 2px solid #dc3545;
+            margin-top: 20px;
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>🚨 CRITICAL ALERT - IMMEDIATE ACTION REQUIRED</h1>
+        <span class="critical-badge">SEVERITY: CRITICAL</span>
+    </div>
+    
+    <div class="content">
+        <div class="action-required">
+            <strong>⚠️ ACTION REQUIRED:</strong> This is a critical alert that requires immediate attention from the on-call team.
+        </div>
+        
+        <p><strong>Number of Critical Alerts:</strong> {{ len .Alerts }}</p>
+        
+        {{ range .Alerts }}
+        <div class="alert-group">
+            <div class="alert-title">
+                🔴 {{ .Labels.alertname }}
+            </div>
+            
+            {{ if .Annotations.summary }}
+            <div class="alert-description">
+                <strong>Summary:</strong> {{ .Annotations.summary }}
+            </div>
+            {{ end }}
+            
+            {{ if .Annotations.description }}
+            <div class="impact-box">
+                <strong>Impact:</strong><br>
+                {{ .Annotations.description }}
+            </div>
+            {{ end }}
+            
+            <div class="alert-labels">
+                {{ range $key, $value := .Labels }}
+                {{ if ne $key "alertname" }}
+                {{ if ne $key "severity" }}
+                <span class="label">{{ $key }}: {{ $value }}</span>
+                {{ end }}
+                {{ end }}
+                {{ end }}
+            </div>
+            
+            <div class="timestamp">
+                <strong>⏰ Alert Started:</strong> {{ .StartsAt.Format "2006-01-02 15:04:05 MST" }}<br>
+                <strong>⏱️  Duration:</strong> {{ .StartsAt | since }}
+            </div>
+            
+            {{ if .GeneratorURL }}
+            <div style="margin-top: 15px;">
+                <a href="{{ .GeneratorURL }}" class="button">🔍 Investigate in Prometheus</a>
+            </div>
+            {{ end }}
+        </div>
+        {{ end }}
+        
+        <div style="margin-top: 30px; padding: 20px; background: white; border: 2px solid #dc3545; border-radius: 4px;">
+            <strong>📋 Recommended Actions:</strong>
+            <ol style="margin: 10px 0;">
+                <li>Check Grafana dashboards for system health overview</li>
+                <li>Review service logs in Loki for error details</li>
+                <li>Verify network connectivity to affected services</li>
+                <li>Check circuit breaker states for any tripped connections</li>
+                <li>Escalate to senior on-call if issue persists beyond 15 minutes</li>
+            </ol>
+            
+            <strong>🔗 Quick Access:</strong><br>
+            • <a href="http://localhost:3001">Grafana Dashboards</a><br>
+            • <a href="http://localhost:9090">Prometheus Metrics</a><br>
+            • <a href="http://localhost:9093">Alertmanager Console</a><br>
+            • <a href="http://localhost:3100">Loki Logs</a>
+        </div>
+    </div>
+    
+    <div class="footer">
+        <p><strong>⚡ CRITICAL ALERT - AEGISBOX SMS GATEWAY PLATFORM</strong></p>
+        <p>This alert was sent to the critical alerts distribution list</p>
+        <p>For immediate assistance, page the on-call engineer</p>
+    </div>
+</body>
+</html>
+{{ end }}
