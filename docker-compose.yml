@@ -35,7 +35,7 @@ services:
     env_file:
       - .env
     ports:
-      - "${SMPP_PORT:-2775}:2775"
+      - "${SMPP_PORT:-6886}:6886"
     logging:
       driver: "json-file"
       options:
@@ -94,6 +94,7 @@ services:
       - "${PROMETHEUS_PORT:-9090}:9090"
     volumes:
       - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./prometheus/alerts.yml:/etc/prometheus/alerts.yml:ro
       - prometheus_data:/prometheus
     command:
       - '--config.file=/etc/prometheus/prometheus.yml'
@@ -107,6 +108,28 @@ services:
         max-size: "10m"
         max-file: "3"
         tag: "prometheus"
+    networks:
+      - aegisbox-network
+
+  alertmanager:
+    image: prom/alertmanager:latest
+    restart: unless-stopped
+    ports:
+      - "${ALERTMANAGER_PORT:-9093}:9093"
+    volumes:
+      - ./alertmanager/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+      - ./alertmanager/templates:/etc/alertmanager/templates:ro
+      - alertmanager_data:/alertmanager
+    command:
+      - '--config.file=/etc/alertmanager/alertmanager.yml'
+      - '--storage.path=/alertmanager'
+      - '--web.external-url=http://localhost:9093'
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+        tag: "alertmanager"
     networks:
       - aegisbox-network
 
@@ -151,6 +174,7 @@ services:
 volumes:
   grafana_data:
   prometheus_data:
+  alertmanager_data:
   loki_data:
   promtail_data:
 

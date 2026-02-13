@@ -1,0 +1,193 @@
+# =============================================================================
+# Alertmanager Configuration for Aegisbox
+# =============================================================================
+# This configuration handles alert routing, grouping, and notification channels
+# for the Aegisbox SMS Gateway platform.
+
+global:
+  # Global timeout for SMTP connections
+  smtp_smarthost: 'smtp.gmail.com:587'
+  smtp_from: 'aegisbox-alerts@example.com'
+  smtp_auth_username: 'your-email@example.com'
+  smtp_auth_password: 'your-app-password'
+  smtp_require_tls: true
+  
+  # Slack webhook URL (optional - configure if using Slack)
+  # slack_api_url: 'https://hooks.slack.com/services/YOUR/WEBHOOK/URL'
+  
+  # Resolve timeout - how long to wait before auto-resolving an alert
+  resolve_timeout: 5m
+
+# Templates for custom alert formatting
+templates:
+  - '/etc/alertmanager/templates/*.tmpl'
+
+# Route tree for alert distribution
+route:
+  # Default receiver for all alerts
+  receiver: 'default-receiver'
+  
+  # Group alerts by these labels
+  group_by: ['alertname', 'category', 'job']
+  
+  # Wait time before sending first notification for a group
+  group_wait: 30s
+  
+  # Wait time before sending notification about new alerts added to a group
+  group_interval: 5m
+  
+  # Wait time before re-sending a notification (for ongoing alerts)
+  repeat_interval: 4h
+  
+  # Child routes for specific alert categories
+  routes:
+    # Critical infrastructure alerts - immediate notification
+    - match:
+        severity: critical
+      receiver: 'critical-alerts'
+      group_wait: 10s
+      group_interval: 1m
+      repeat_interval: 1h
+      continue: true  # Also send to default receiver
+      
+    # Gateway-specific alerts
+    - match:
+        category: gateway
+      receiver: 'gateway-team'
+      group_by: ['alertname', 'mno_id']
+      
+    # API-specific alerts
+    - match:
+        category: api
+      receiver: 'api-team'
+      
+    # Database alerts
+    - match:
+        category: database
+      receiver: 'database-team'
+      group_wait: 1m
+      
+    # HTTP provider alerts
+    - match:
+        category: connectivity
+      receiver: 'connectivity-team'
+      group_by: ['alertname', 'provider', 'mno_id']
+      
+    # Performance degradation alerts (warning level)
+    - match:
+        severity: warning
+        category: performance
+      receiver: 'performance-alerts'
+      repeat_interval: 12h
+      
+    # Informational alerts - low priority
+    - match:
+        severity: info
+      receiver: 'info-alerts'
+      repeat_interval: 24h
+
+# Inhibition rules - suppress certain alerts when others are firing
+inhibit_rules:
+  # If service is down, don't alert on high latency or errors
+  - source_match:
+      severity: 'critical'
+      alertname: 'ServiceDown'
+    target_match:
+      severity: 'warning'
+    equal: ['job']
+    
+  # If circuit breaker is open, don't alert on individual failures
+  - source_match:
+      alertname: 'CircuitBreakerOpen'
+    target_match:
+      alertname: 'CircuitBreakerHighFailureCount'
+    equal: ['mno_id']
+    
+  # If SMPP connection is down, don't alert on SMPP-specific issues
+  - source_match:
+      alertname: 'SMPPConnectionDown'
+    target_match_re:
+      alertname: 'SMPP.*'
+    equal: ['mno_id']
+    
+  # If HTTP provider is down, don't alert on high failure rate
+  - source_match:
+      alertname: 'HTTPProviderDown'
+    target_match:
+      alertname: 'HTTPProviderHighFailureRate'
+    equal: ['provider']
+
+# Notification receivers configuration
+receivers:
+  # Default receiver - catches all alerts
+  - name: 'default-receiver'
+    email_configs:
+      - to: 'ops-team@example.com'
+        headers:
+          Subject: '[Aegisbox] {{ .GroupLabels.alertname }} - {{ .GroupLabels.category }}'
+        html: '{{ template "email.default.html" . }}'
+        
+  # Critical alerts - multiple channels
+  - name: 'critical-alerts'
+    email_configs:
+      - to: 'oncall@example.com,ops-lead@example.com'
+        headers:
+          Subject: '[CRITICAL] Aegisbox Alert: {{ .GroupLabels.alertname }}'
+        html: '{{ template "email.critical.html" . }}'
+        send_resolved: true
+    # Uncomment to enable Slack notifications
+    # slack_configs:
+    #   - channel: '#aegisbox-critical'
+    #     title: '🚨 CRITICAL: {{ .GroupLabels.alertname }}'
+    #     text: '{{ range .Alerts }}{{ .Annotations.description }}{{ end }}'
+    #     send_resolved: true
+        
+  # Gateway team alerts
+  - name: 'gateway-team'
+    email_configs:
+      - to: 'gateway-team@example.com'
+        headers:
+          Subject: '[Gateway] {{ .GroupLabels.alertname }} - MNO {{ .GroupLabels.mno_id }}'
+        html: '{{ template "email.default.html" . }}'
+        
+  # API team alerts
+  - name: 'api-team'
+    email_configs:
+      - to: 'api-team@example.com'
+        headers:
+          Subject: '[API] {{ .GroupLabels.alertname }}'
+        html: '{{ template "email.default.html" . }}'
+        
+  # Database team alerts
+  - name: 'database-team'
+    email_configs:
+      - to: 'dba-team@example.com'
+        headers:
+          Subject: '[Database] {{ .GroupLabels.alertname }}'
+        html: '{{ template "email.default.html" . }}'
+        
+  # Connectivity team (HTTP providers, SMPP connections)
+  - name: 'connectivity-team'
+    email_configs:
+      - to: 'network-ops@example.com'
+        headers:
+          Subject: '[Connectivity] {{ .GroupLabels.alertname }} - {{ .GroupLabels.provider }}'
+        html: '{{ template "email.default.html" . }}'
+        
+  # Performance alerts - lower priority
+  - name: 'performance-alerts'
+    email_configs:
+      - to: 'performance-team@example.com'
+        headers:
+          Subject: '[Performance] {{ .GroupLabels.alertname }}'
+        html: '{{ template "email.default.html" . }}'
+        send_resolved: false  # Don't spam with resolved notifications
+        
+  # Informational alerts - lowest priority
+  - name: 'info-alerts'
+    email_configs:
+      - to: 'monitoring@example.com'
+        headers:
+          Subject: '[Info] {{ .GroupLabels.alertname }}'
+        html: '{{ template "email.default.html" . }}'
+        send_resolved: false

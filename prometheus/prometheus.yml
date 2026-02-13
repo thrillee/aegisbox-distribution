@@ -2,6 +2,17 @@ global:
   scrape_interval: 15s
   evaluation_interval: 15s
 
+# Alert rules configuration
+rule_files:
+  - 'alerts.yml'
+
+# Alertmanager configuration
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets:
+            - alertmanager:9093
+
 scrape_configs:
   - job_name: 'prometheus'
     static_configs:
@@ -14,9 +25,10 @@ scrape_configs:
 
   - job_name: 'smpp-gateway'
     static_configs:
-      - targets: ['smpp-gateway:2775']
+      - targets: ['smpp-gateway:6886']
     metrics_path: /metrics
 
   - job_name: 'grafana'
     static_configs:
       - targets: ['grafana:3000']
+    metrics_path: /metrics

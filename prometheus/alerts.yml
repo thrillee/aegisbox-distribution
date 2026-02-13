@@ -1,0 +1,328 @@
+groups:
+  # =============================================================================
+  # Service Health Alerts
+  # =============================================================================
+  - name: service_health
+    interval: 30s
+    rules:
+      - alert: ServiceDown
+        expr: up == 0
+        for: 2m
+        labels:
+          severity: critical
+          category: infrastructure
+        annotations:
+          summary: "Service {{ $labels.job }} is down"
+          description: "{{ $labels.job }} on {{ $labels.instance }} has been down for more than 2 minutes."
+          
+      - alert: ManagerAPIDown
+        expr: up{job="manager-api"} == 0
+        for: 1m
+        labels:
+          severity: critical
+          category: api
+        annotations:
+          summary: "Manager API is down"
+          description: "The Manager API service is unreachable. All API operations are failing."
+          
+      - alert: SMPPGatewayDown
+        expr: up{job="smpp-gateway"} == 0
+        for: 1m
+        labels:
+          severity: critical
+          category: gateway
+        annotations:
+          summary: "SMPP Gateway is down"
+          description: "The SMPP Gateway service is unreachable. SMS routing is currently unavailable."
+
+  # =============================================================================
+  # SMPP Connection Alerts
+  # =============================================================================
+  - name: smpp_connections
+    interval: 30s
+    rules:
+      - alert: SMPPConnectionDown
+        expr: smpp_connection_status{status="bound"} == 0
+        for: 5m
+        labels:
+          severity: critical
+          category: connectivity
+        annotations:
+          summary: "SMPP connection {{ $labels.mno_id }} is down"
+          description: "MNO connection {{ $labels.mno_id }} ({{ $labels.mno_name }}) has been disconnected for more than 5 minutes."
+          
+      - alert: SMPPConnectionFlapping
+        expr: changes(smpp_connection_status[10m]) > 5
+        labels:
+          severity: warning
+          category: connectivity
+        annotations:
+          summary: "SMPP connection {{ $labels.mno_id }} is flapping"
+          description: "MNO connection {{ $labels.mno_id }} has changed state more than 5 times in 10 minutes. This indicates network instability."
+          
+      - alert: SMPPHighLatency
+        expr: histogram_quantile(0.95, rate(smpp_submit_sm_duration_seconds_bucket[5m])) > 5
+        for: 5m
+        labels:
+          severity: warning
+          category: performance
+        annotations:
+          summary: "High SMPP latency for MNO {{ $labels.mno_id }}"
+          description: "95th percentile SMPP submit latency for {{ $labels.mno_id }} is {{ $value }}s, exceeding 5s threshold."
+
+  # =============================================================================
+  # HTTP Provider Alerts
+  # =============================================================================
+  - name: http_providers
+    interval: 30s
+    rules:
+      - alert: HTTPProviderDown
+        expr: http_provider_status{status!="http_ok"} == 1
+        for: 5m
+        labels:
+          severity: critical
+          category: connectivity
+        annotations:
+          summary: "HTTP provider {{ $labels.provider }} is down"
+          description: "HTTP provider {{ $labels.provider }} ({{ $labels.mno_id }}) has been unavailable for more than 5 minutes."
+          
+      - alert: HTTPProviderHighFailureRate
+        expr: |
+          (
+            rate(http_provider_messages_failed_total[5m]) 
+            / 
+            rate(http_provider_messages_sent_total[5m])
+          ) > 0.1
+        for: 5m
+        labels:
+          severity: warning
+          category: reliability
+        annotations:
+          summary: "High failure rate for HTTP provider {{ $labels.provider }}"
+          description: "Provider {{ $labels.provider }} has a failure rate of {{ $value | humanizePercentage }} over the last 5 minutes (threshold: 10%)."
+          
+      - alert: HTTPProviderHighLatency
+        expr: histogram_quantile(0.95, rate(http_provider_latency_seconds_bucket[5m])) > 10
+        for: 5m
+        labels:
+          severity: warning
+          category: performance
+        annotations:
+          summary: "High latency for HTTP provider {{ $labels.provider }}"
+          description: "95th percentile latency for {{ $labels.provider }} is {{ $value }}s, exceeding 10s threshold."
+          
+      - alert: HTTPProviderNoTraffic
+        expr: rate(http_provider_messages_sent_total[10m]) == 0
+        for: 30m
+        labels:
+          severity: info
+          category: traffic
+        annotations:
+          summary: "No traffic to HTTP provider {{ $labels.provider }}"
+          description: "Provider {{ $labels.provider }} has not received any messages in the last 30 minutes. Verify routing configuration."
+
+  # =============================================================================
+  # Circuit Breaker Alerts
+  # =============================================================================
+  - name: circuit_breakers
+    interval: 30s
+    rules:
+      - alert: CircuitBreakerOpen
+        expr: circuit_breaker_state{state="open"} == 1
+        for: 5m
+        labels:
+          severity: critical
+          category: reliability
+        annotations:
+          summary: "Circuit breaker open for MNO {{ $labels.mno_id }}"
+          description: "Circuit breaker for MNO {{ $labels.mno_id }} has been open for more than 5 minutes due to repeated failures. Traffic is being blocked."
+          
+      - alert: CircuitBreakerHalfOpen
+        expr: circuit_breaker_state{state="half_open"} == 1
+        for: 10m
+        labels:
+          severity: warning
+          category: reliability
+        annotations:
+          summary: "Circuit breaker stuck in half-open for MNO {{ $labels.mno_id }}"
+          description: "Circuit breaker for MNO {{ $labels.mno_id }} has been in half-open state for more than 10 minutes. Recovery is taking longer than expected."
+          
+      - alert: CircuitBreakerHighFailureCount
+        expr: rate(circuit_breaker_failures_total[5m]) > 10
+        for: 5m
+        labels:
+          severity: warning
+          category: reliability
+        annotations:
+          summary: "High failure count for MNO {{ $labels.mno_id }}"
+          description: "MNO {{ $labels.mno_id }} is experiencing {{ $value }} failures per second. Circuit breaker may trip soon."
+
+  # =============================================================================
+  # Message Processing Alerts
+  # =============================================================================
+  - name: message_processing
+    interval: 30s
+    rules:
+      - alert: HighMessageFailureRate
+        expr: |
+          (
+            sum(rate(sms_messages_failed_total[5m])) 
+            / 
+            sum(rate(sms_messages_submitted_total[5m]))
+          ) > 0.1
+        for: 10m
+        labels:
+          severity: warning
+          category: reliability
+        annotations:
+          summary: "High overall message failure rate"
+          description: "Global message failure rate is {{ $value | humanizePercentage }} over the last 10 minutes (threshold: 10%)."
+          
+      - alert: MessageProcessingStalled
+        expr: rate(sms_messages_submitted_total[5m]) == 0
+        for: 15m
+        labels:
+          severity: warning
+          category: traffic
+        annotations:
+          summary: "Message processing has stalled"
+          description: "No messages have been submitted in the last 15 minutes. Check if service providers are sending traffic."
+          
+      - alert: MessageQueueBacklog
+        expr: sms_message_queue_depth > 1000
+        for: 5m
+        labels:
+          severity: warning
+          category: performance
+        annotations:
+          summary: "Large message queue backlog"
+          description: "Message queue has {{ $value }} pending messages. Processing may be delayed."
+
+  # =============================================================================
+  # DLR (Delivery Report) Alerts
+  # =============================================================================
+  - name: dlr_webhooks
+    interval: 30s
+    rules:
+      - alert: DLRWebhookFailures
+        expr: rate(dlr_webhook_failures_total[5m]) > 1
+        for: 10m
+        labels:
+          severity: warning
+          category: webhooks
+        annotations:
+          summary: "High DLR webhook failure rate for {{ $labels.provider }}"
+          description: "Provider {{ $labels.provider }} webhook is failing at {{ $value }} requests/sec. Check webhook endpoint configuration."
+          
+      - alert: LowDLRRate
+        expr: |
+          (
+            sum(rate(dlr_received_total[1h])) 
+            / 
+            sum(rate(sms_messages_submitted_total[1h]))
+          ) < 0.5
+        for: 2h
+        labels:
+          severity: info
+          category: reporting
+        annotations:
+          summary: "Low DLR reception rate"
+          description: "Only {{ $value | humanizePercentage }} of sent messages have received DLRs in the last 2 hours. Expected rate is >50%."
+
+  # =============================================================================
+  # System Resource Alerts
+  # =============================================================================
+  - name: system_resources
+    interval: 30s
+    rules:
+      - alert: HighMemoryUsage
+        expr: |
+          (
+            process_resident_memory_bytes 
+            / 
+            (1024 * 1024 * 1024)
+          ) > 2
+        for: 10m
+        labels:
+          severity: warning
+          category: resources
+        annotations:
+          summary: "High memory usage on {{ $labels.job }}"
+          description: "Service {{ $labels.job }} is using {{ $value }}GB of memory, exceeding 2GB threshold."
+          
+      - alert: HighGoroutineCount
+        expr: go_goroutines > 1000
+        for: 10m
+        labels:
+          severity: warning
+          category: resources
+        annotations:
+          summary: "High goroutine count on {{ $labels.job }}"
+          description: "Service {{ $labels.job }} has {{ $value }} goroutines running. This may indicate a goroutine leak."
+          
+      - alert: HighErrorRate
+        expr: rate(http_requests_total{status=~"5.."}[5m]) > 10
+        for: 5m
+        labels:
+          severity: warning
+          category: reliability
+        annotations:
+          summary: "High 5xx error rate on {{ $labels.job }}"
+          description: "Service {{ $labels.job }} is returning {{ $value }} server errors per second."
+
+  # =============================================================================
+  # Database Connection Alerts
+  # =============================================================================
+  - name: database_health
+    interval: 30s
+    rules:
+      - alert: DatabaseConnectionPoolExhausted
+        expr: db_connection_pool_available == 0
+        for: 2m
+        labels:
+          severity: critical
+          category: database
+        annotations:
+          summary: "Database connection pool exhausted for {{ $labels.job }}"
+          description: "Service {{ $labels.job }} has no available database connections. Operations will block or fail."
+          
+      - alert: HighDatabaseLatency
+        expr: histogram_quantile(0.95, rate(db_query_duration_seconds_bucket[5m])) > 1
+        for: 5m
+        labels:
+          severity: warning
+          category: performance
+        annotations:
+          summary: "High database query latency on {{ $labels.job }}"
+          description: "95th percentile database query latency is {{ $value }}s, exceeding 1s threshold."
+          
+      - alert: DatabaseConnectionErrors
+        expr: rate(db_connection_errors_total[5m]) > 1
+        for: 5m
+        labels:
+          severity: critical
+          category: database
+        annotations:
+          summary: "Database connection errors on {{ $labels.job }}"
+          description: "Service {{ $labels.job }} is experiencing {{ $value }} database connection errors per second."
+
+  # =============================================================================
+  # Protocol Distribution Alerts
+  # =============================================================================
+  - name: protocol_distribution
+    interval: 1m
+    rules:
+      - alert: ProtocolImbalance
+        expr: |
+          abs(
+            sum(rate(sms_messages_submitted_total{protocol="http"}[15m])) 
+            - 
+            sum(rate(sms_messages_submitted_total{protocol="smpp"}[15m]))
+          ) / sum(rate(sms_messages_submitted_total[15m])) > 0.9
+        for: 30m
+        labels:
+          severity: info
+          category: traffic
+        annotations:
+          summary: "Significant protocol traffic imbalance"
+          description: "More than 90% of traffic is going through a single protocol. Verify routing rules and failover configuration."
