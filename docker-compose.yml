@@ -37,6 +37,7 @@ services:
     ports:
       - "${SMPP_PORT:-6886}:6886"
       - "${SP_API_ADDR:-8000}:8000"
+      - "${MNO_DLR_ADDR:-9001}:9001"
     logging:
       driver: "json-file"
       options:
