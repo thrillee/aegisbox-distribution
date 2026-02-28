@@ -150,4 +150,6 @@ Verify `SMPP_SYSTEM_ID` and `SMPP_PASSWORD` in `.env` match your provider's cred
 
 ## License
 
+thrillee
+
 MIT
