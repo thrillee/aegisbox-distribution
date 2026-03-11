@@ -18,6 +18,7 @@ services:
 
   smpp-gateway:
     image: ghcr.io/thrillee/aegisbox/smpp-gateway:${TAG:-docker-prod}
+    pull_policy: always
     restart: unless-stopped
     env_file:
       - .env
@@ -35,6 +36,7 @@ services:
 
   portal:
     image: ghcr.io/thrillee/aegisbox-portal:${TAG:-docker-prod}
+    pull_policy: always
     restart: unless-stopped
     env_file:
       - .env
