@@ -1,6 +1,7 @@
 services:
   manager-api:
     image: ghcr.io/thrillee/aegisbox/manager-api:${TAG:-docker-prod}
+    pull_policy: always
     restart: unless-stopped
     env_file:
       - .env
