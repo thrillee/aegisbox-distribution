@@ -11,6 +11,34 @@ Pre-built Docker Compose deployment for Aegisbox SMPP Gateway.
 | Migration | `ghcr.io/thrillee/aegisbox/migration:docker-prod` |
 | Portal | `ghcr.io/thrillee/aegisbox-portal:docker-prod` |
 
+## Deploy on Dokploy (no GHCR)
+
+`docker-compose.dokploy.yml` runs the same stack but builds the four Aegisbox apps from source, so the server needs no GHCR login. The source comes from the git submodules in `src/`:
+
+| Path | Repository |
+|------|------------|
+| `src/aegisbox` | `thrillee/aegisbox` (migration, manager-api, smpp-gateway) |
+| `src/aegisbox-portal` | `thrillee/aegisbox-portal` (portal) |
+
+In Dokploy, create a Compose service from this repository and set:
+
+* Compose Path: `./docker-compose.dokploy.yml`
+* Enable Submodules: on
+* GitHub app access to `aegisbox`, `aegisbox-portal` and `aegisbox-distribution` (GitHub > Settings > Applications > the Dokploy app > Repository access)
+* Environment: the same variables as `.env.example`, plus `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` for the portal build
+
+The migration service runs first; manager-api and smpp-gateway start only after it succeeds.
+
+### Deploy newer app code
+
+The submodules are pinned to specific commits. To deploy the latest `main` of both apps:
+
+```bash
+git submodule update --init --remote
+git commit -am "Update apps to latest main"
+git push
+```
+
 ## Prerequisites
 
 - Docker Engine 24+

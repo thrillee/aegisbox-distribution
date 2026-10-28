@@ -1,0 +1,8 @@
+[submodule "src/aegisbox"]
+	path = src/aegisbox
+	url = ../aegisbox.git
+	branch = main
+[submodule "src/aegisbox-portal"]
+	path = src/aegisbox-portal
+	url = ../aegisbox-portal.git
+	branch = main
