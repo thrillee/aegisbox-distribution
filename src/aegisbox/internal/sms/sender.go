@@ -136,13 +136,14 @@ func (s *DefaultSender) Send(ctx context.Context, msg database.GetMessageDetails
 		// A map might be safer if order isn't guaranteed.
 		var dbSegmentID int64
 		if segResult.DBSegID == nil {
-			if segResult.Seqn <= 0 || int(segResult.Seqn) > len(submitResult.Segments) {
+			// Map the 1-based sequence number to the segment rows created above.
+			if segResult.Seqn <= 0 || int(segResult.Seqn) > len(segmentIDs) {
 				slog.ErrorContext(logCtx, "Invalid segment sequence number received from connector result", slog.Int("seqn", int(segResult.Seqn)))
 				updateErrors = true
 				continue
 			}
 
-			dbSegmentID = int64(submitResult.Segments[segResult.Seqn-1].Seqn)
+			dbSegmentID = segmentIDs[segResult.Seqn-1]
 		} else {
 			dbSegmentID = int64(*segResult.DBSegID)
 		}

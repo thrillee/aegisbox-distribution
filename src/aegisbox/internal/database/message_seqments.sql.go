@@ -293,8 +293,10 @@ func (q *Queries) UpdateSegmentSendFailed(ctx context.Context, arg UpdateSegment
 const updateSegmentSent = `-- name: UpdateSegmentSent :exec
 UPDATE message_segments
 SET
-    mno_message_id = $1,    -- sql.NullString
-    mno_connection_id = $2, -- sql.NullInt32
+    -- SMPP connectors report the MNO message ID asynchronously, possibly before this update
+    -- runs; never replace a recorded ID with NULL.
+    mno_message_id = COALESCE($1, mno_message_id),
+    mno_connection_id = $2,
     sent_to_mno_at = NOW(),
     error_code = NULL,      -- Clear previous errors if any
     error_description = NULL
