@@ -32,12 +32,14 @@ RETURNING id;
 -- Updates segment after successful MNO submission
 UPDATE message_segments
 SET
-    mno_message_id = $1,    -- sql.NullString
-    mno_connection_id = $2, -- sql.NullInt32
+    -- SMPP connectors report the MNO message ID asynchronously, possibly before this update
+    -- runs; never replace a recorded ID with NULL.
+    mno_message_id = COALESCE(sqlc.narg(mno_message_id), mno_message_id),
+    mno_connection_id = sqlc.narg(mno_connection_id),
     sent_to_mno_at = NOW(),
     error_code = NULL,      -- Clear previous errors if any
     error_description = NULL
-WHERE id = $3;
+WHERE id = sqlc.arg(id);
 
 -- name: UpdateSegmentSendFailed :exec
 -- Updates segment if MNO submission attempt failed
