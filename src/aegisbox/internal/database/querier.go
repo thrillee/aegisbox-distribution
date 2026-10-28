@@ -69,6 +69,7 @@ type Querier interface {
 	CreateOtpMessageTemplate(ctx context.Context, arg CreateOtpMessageTemplateParams) (OtpMessageTemplate, error)
 	CreateOtpSenderTemplateAssignment(ctx context.Context, arg CreateOtpSenderTemplateAssignmentParams) (OtpSenderTemplateAssignment, error)
 	CreatePricingRule(ctx context.Context, arg CreatePricingRuleParams) (PricingRule, error)
+	CreateRouteSender(ctx context.Context, arg CreateRouteSenderParams) (RouteSender, error)
 	// Queries for RoutingAssignment (the new routing rules)
 	CreateRoutingAssignment(ctx context.Context, arg CreateRoutingAssignmentParams) (RoutingAssignment, error)
 	// Queries for RoutingGroup
@@ -94,6 +95,7 @@ type Querier interface {
 	DeleteOtpMessageTemplate(ctx context.Context, id int32) error
 	DeleteOtpSenderTemplateAssignment(ctx context.Context, id int32) error
 	DeletePricingRule(ctx context.Context, id int32) error
+	DeleteRouteSender(ctx context.Context, id int32) (int64, error)
 	DeleteRoutingAssignment(ctx context.Context, id int32) error
 	// Note: This will fail if the group is referenced in routing_assignments or sp_credentials.
 	DeleteRoutingGroup(ctx context.Context, id int32) error
@@ -141,6 +143,7 @@ type Querier interface {
 	GetGlobalRoutingConfig(ctx context.Context) (RoutingConfig, error)
 	GetMNOByID(ctx context.Context, id int32) (Mno, error)
 	GetMNOConnectionByID(ctx context.Context, id int32) (MnoConnection, error)
+	GetMNOConnectionSenderPoolStrategy(ctx context.Context, id int32) (GetMNOConnectionSenderPoolStrategyRow, error)
 	// Select fields needed by the Pricer
 	GetMessageDetailsForPricing(ctx context.Context, id int64) (GetMessageDetailsForPricingRow, error)
 	GetMessageDetailsForSending(ctx context.Context, id int64) (GetMessageDetailsForSendingRow, error)
@@ -176,6 +179,7 @@ type Querier interface {
 	GetRingBufferCleanupConfig(ctx context.Context) ([]HealthRingBufferConfig, error)
 	// Get route health record
 	GetRouteHealth(ctx context.Context, arg GetRouteHealthParams) (RouteHealth, error)
+	GetRouteSender(ctx context.Context, id int32) (RouteSender, error)
 	GetRoutingAssignmentByID(ctx context.Context, id int32) (GetRoutingAssignmentByIDRow, error)
 	GetRoutingAssignmentByRoutingGroupAndPrefixGroup(ctx context.Context, arg GetRoutingAssignmentByRoutingGroupAndPrefixGroupParams) (RoutingAssignment, error)
 	// Config of one routing group, without falling back to the global defaults
@@ -237,6 +241,7 @@ type Querier interface {
 	ListPricingRulesBySP(ctx context.Context, arg ListPricingRulesBySPParams) ([]ListPricingRulesBySPRow, error)
 	// List all route health records with details for dashboard
 	ListRouteHealthWithDetails(ctx context.Context, arg ListRouteHealthWithDetailsParams) ([]ListRouteHealthWithDetailsRow, error)
+	ListRouteSenders(ctx context.Context, mnoConnectionID int32) ([]RouteSender, error)
 	// Lists assignments for a specific routing group.
 	ListRoutingAssignmentsByRoutingGroup(ctx context.Context, arg ListRoutingAssignmentsByRoutingGroupParams) ([]ListRoutingAssignmentsByRoutingGroupRow, error)
 	ListRoutingGroups(ctx context.Context, arg ListRoutingGroupsParams) ([]RoutingGroup, error)
@@ -269,6 +274,9 @@ type Querier interface {
 	MarkSegmentDLRMissing(ctx context.Context, id int64) error
 	// Moves a message to the dead letter queue for manual intervention
 	MoveToDeadLetterQueue(ctx context.Context, id int64) error
+	// Picks a sender from a connection's pool by the connection's sender_pool_strategy and records
+	// the use in the same statement. No row when the pool has no active sender.
+	PickRouteSender(ctx context.Context, mnoConnectionID int32) (PickRouteSenderRow, error)
 	// =========================================
 	// ROUTE HEALTH QUERIES
 	// =========================================
@@ -286,6 +294,7 @@ type Querier interface {
 	// Resets current_usage_count for senders whose reset interval has elapsed.
 	// Returns the ids and sender strings that were reset, for logging.
 	ResetDepletedOtpAlternativeSenders(ctx context.Context) ([]ResetDepletedOtpAlternativeSendersRow, error)
+	SetMessageSentSourceAddr(ctx context.Context, arg SetMessageSentSourceAddrParams) error
 	// Optional: Periodically run to unlock jobs held by dead workers.
 	UnlockStaleDLRs(ctx context.Context) error
 	// Update the global default row (routing_group_id IS NULL)
@@ -294,6 +303,7 @@ type Querier interface {
 	UpdateLowBalanceNotifiedAt(ctx context.Context, id int32) error
 	UpdateMNO(ctx context.Context, arg UpdateMNOParams) (Mno, error)
 	UpdateMNOConnection(ctx context.Context, arg UpdateMNOConnectionParams) (MnoConnection, error)
+	UpdateMNOConnectionSenderPoolStrategy(ctx context.Context, arg UpdateMNOConnectionSenderPoolStrategyParams) (UpdateMNOConnectionSenderPoolStrategyRow, error)
 	UpdateMessageDLRStatus(ctx context.Context, arg UpdateMessageDLRStatusParams) error
 	// Updates the final aggregated status and error info
 	UpdateMessageFinalStatus(ctx context.Context, arg UpdateMessageFinalStatusParams) error
@@ -313,6 +323,7 @@ type Querier interface {
 	UpdateOtpSenderTemplateAssignment(ctx context.Context, arg UpdateOtpSenderTemplateAssignmentParams) (OtpSenderTemplateAssignment, error)
 	// Update last cleanup timestamp
 	UpdateRingBufferCleanupTimestamp(ctx context.Context, tableName string) error
+	UpdateRouteSender(ctx context.Context, arg UpdateRouteSenderParams) (RouteSender, error)
 	// Can also add routing_group_id to WHERE if updates are always scoped to a group passed in context
 	// WHERE id = sqlc.arg(id) AND routing_group_id = sqlc.arg(routing_group_id_context)
 	UpdateRoutingAssignment(ctx context.Context, arg UpdateRoutingAssignmentParams) (RoutingAssignment, error)
@@ -333,6 +344,7 @@ type Querier interface {
 	UpdateServiceProvider(ctx context.Context, arg UpdateServiceProviderParams) (ServiceProvider, error)
 	// Sets the auto DLR config. auto_dlr_enabled_at is reset only when auto DLR goes from off to on.
 	UpdateServiceProviderAutoDLR(ctx context.Context, arg UpdateServiceProviderAutoDLRParams) (ServiceProvider, error)
+	UpdateServiceProviderRouteSenderPool(ctx context.Context, arg UpdateServiceProviderRouteSenderPoolParams) (UpdateServiceProviderRouteSenderPoolRow, error)
 	// Lock the row for atomic update
 	UpdateWalletBalance(ctx context.Context, arg UpdateWalletBalanceParams) (Wallet, error)
 	// Create or update route health record
@@ -341,6 +353,7 @@ type Querier interface {
 	UpsertRoutingConfig(ctx context.Context, arg UpsertRoutingConfigParams) (RoutingConfig, error)
 	// Create or update sender ID health record
 	UpsertSenderIdHealth(ctx context.Context, arg UpsertSenderIdHealthParams) (SenderIDHealth, error)
+	UsesRouteSenderPool(ctx context.Context, id int32) (bool, error)
 	ValidateSenderID(ctx context.Context, arg ValidateSenderIDParams) (int32, error)
 }
 

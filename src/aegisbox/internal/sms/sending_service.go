@@ -85,7 +85,7 @@ func (s *SendingService) SendMessage(
 		})
 
 		if routeErr == nil && routingResult != nil && routingResult.RoutingResult.ShouldUse {
-			routingCandidates = routingResult.Candidates
+			routingCandidates = orderAttempts(routingResult.Candidates, *fullMsg.RoutedMnoID, routingResult.RoutingResult.MNOID)
 			if routingResult.RoutingConfig != nil && routingResult.RoutingConfig.MaxRouteRetries != nil {
 				maxRetries = *routingResult.RoutingConfig.MaxRouteRetries
 			}
@@ -115,13 +115,21 @@ func (s *SendingService) SendMessage(
 					slog.Int("mno_id", int(currentRouteCandidate.MNOID)),
 					slog.String("mno_name", currentRouteCandidate.MNOName),
 				)
+			}
 
+			// Send through the candidate's MNO on every attempt, the first included: the route
+			// chosen at the routing step can have become unavailable since, in which case it is
+			// not in the candidate list and must not be used.
+			if *fullMsg.RoutedMnoID != currentRouteCandidate.MNOID {
 				fullMsg.RoutedMnoID = &currentRouteCandidate.MNOID
 				logCtx = logging.ContextWithMNOID(logCtx, currentRouteCandidate.MNOID)
 			}
 		}
 		submitResult, sendErr = s.sender.Send(logCtx, fullMsg)
-		submitResult.MnoID = currentRouteCandidate.MNOID
+		if submitResult == nil {
+			submitResult = &mno.SubmitResult{WasSubmitted: false, Error: sendErr}
+		}
+		submitResult.MnoID = *fullMsg.RoutedMnoID
 
 		if s.routeHealthTracker != nil && routingAssignmentID != nil {
 			routeSuccess := (sendErr == nil && submitResult != nil && submitResult.WasSubmitted && submitResult.Error == nil)
@@ -233,6 +241,34 @@ func (s *SendingService) SendMessage(
 	}
 
 	return false, nil
+}
+
+// orderAttempts puts the route to try first at the front of the candidates, which come in
+// priority order: the MNO the message was routed to when it is still a candidate, otherwise the
+// router's fresh pick (a weighted choice). The rest stay in priority order as failover routes.
+func orderAttempts(candidates []RouteCandidate, routedMnoID, pickedMnoID int32) []RouteCandidate {
+	first := -1
+	for i, c := range candidates {
+		if c.MNOID == routedMnoID {
+			first = i
+			break
+		}
+	}
+	if first < 0 {
+		for i, c := range candidates {
+			if c.MNOID == pickedMnoID {
+				first = i
+				break
+			}
+		}
+	}
+	if first <= 0 {
+		return candidates
+	}
+	ordered := make([]RouteCandidate, 0, len(candidates))
+	ordered = append(ordered, candidates[first])
+	ordered = append(ordered, candidates[:first]...)
+	return append(ordered, candidates[first+1:]...)
 }
 
 func (s *SendingService) attemptReversal(ctx context.Context, msgID int64, reason string) {

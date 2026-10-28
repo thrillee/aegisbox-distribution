@@ -37,7 +37,8 @@ SELECT
     mc.timeout_secs,
     mc.provider_config,
     mc.created_at,
-    mc.updated_at
+    mc.updated_at,
+    mc.sender_pool_strategy
 FROM mno_connections mc
 WHERE mc.status = 'active';
 
@@ -80,7 +81,8 @@ SELECT
     mc.timeout_secs,
     mc.provider_config,
     mc.created_at,
-    mc.updated_at
+    mc.updated_at,
+    mc.sender_pool_strategy
 FROM mno_connections mc
 WHERE mc.status = 'active' AND mc.protocol = 'http';
 

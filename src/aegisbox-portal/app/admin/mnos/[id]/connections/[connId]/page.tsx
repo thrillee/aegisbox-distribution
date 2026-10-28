@@ -6,6 +6,7 @@ import Link from 'next/link'
 import { ArrowLeft, Save, Network, Loader2, Globe, Server, Clock, AlertCircle, CheckCircle } from 'lucide-react'
 import { JsonEditor } from '@/components/ui/json-editor'
 import { PageLoadingSkeleton } from '@/components/routing/loading-components'
+import { RouteSenderPool } from '@/components/mnos/route-sender-pool'
 
 interface Connection {
   id: number
@@ -559,6 +560,10 @@ export default function ConnectionDetailPage() {
           </button>
         </div>
       </form>
+
+      <div className="mt-6">
+        <RouteSenderPool connectionId={Number(connId)} />
+      </div>
     </div>
   )
 }

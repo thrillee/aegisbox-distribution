@@ -15,6 +15,7 @@ func SetupRoutes(router gin.IRouter, q database.Querier, pool *pgxpool.Pool) {
 
 	mnoHandler := NewMNOHandler(q, pool)
 	connHandler := NewMNOConnectionHandler(q, pool)
+	routeSenderHandler := NewRouteSenderHandler(q)
 	routingHandler := NewRoutingAssignmentHandler(q, pool)
 
 	pricingHandler := NewPricingRuleHandler(q, pool)
@@ -79,7 +80,16 @@ func SetupRoutes(router gin.IRouter, q database.Querier, pool *pgxpool.Pool) {
 		spGroup.DELETE("/:id", spHandler.DeleteServiceProvider)
 		spGroup.GET("/:id/auto-dlr", dlrHandler.GetAutoDLR)
 		spGroup.PUT("/:id/auto-dlr", dlrHandler.UpdateAutoDLR)
+		spGroup.GET("/:id/route-sender-pool", routeSenderHandler.GetRouteSenderPoolSetting)
+		spGroup.PUT("/:id/route-sender-pool", routeSenderHandler.UpdateRouteSenderPoolSetting)
 	}
+
+	// --- Route Sender Pool Routes (sender IDs each upstream connection accepts) ---
+	router.GET("/mno-connections/:id/route-senders", routeSenderHandler.GetRouteSenderPool)
+	router.POST("/mno-connections/:id/route-senders", routeSenderHandler.CreateRouteSender)
+	router.PUT("/mno-connections/:id/route-senders/strategy", routeSenderHandler.UpdateSenderPoolStrategy)
+	router.PUT("/route-senders/:id", routeSenderHandler.UpdateRouteSender)
+	router.DELETE("/route-senders/:id", routeSenderHandler.DeleteRouteSender)
 
 	// --- Message DLR Routes ---
 	messageGroup := router.Group("/messages")

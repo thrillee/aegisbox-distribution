@@ -71,7 +71,7 @@ func (c *HTTPProviderConnector) SubmitMessage(ctx context.Context, msgDetails Pr
 			slog.String("provider", c.provider.Name()),
 			slog.Any("error", err))
 
-		errCode := "PROVIDER_ERR"
+		errCode := "PROV_ERR" // fits message_segments.error_code VARCHAR(10)
 		for i := range segments {
 			dbSegID := msgDetails.DBSeqs[i]
 			segments[i] = SegmentSubmitInfo{

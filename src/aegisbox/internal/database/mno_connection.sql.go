@@ -42,7 +42,7 @@ INSERT INTO mno_connections (
     $21, $22, $23, $24, $25, $26,
     $27, $28, $29, $30, $31,
     $32
-) RETURNING id, mno_id, protocol, status, priority, system_id, password, host, port, use_tls, bind_type, system_type, enquire_link_interval_secs, request_timeout_secs, connect_retry_delay_secs, max_window_size, default_data_coding, source_addr_ton, source_addr_npi, dest_addr_ton, dest_addr_npi, api_key, base_url, username, http_password, secret_key, default_sender, rate_limit, email, supports_webhook, webhook_path, timeout_secs, provider_config, created_at, updated_at
+) RETURNING id, mno_id, protocol, status, priority, system_id, password, host, port, use_tls, bind_type, system_type, enquire_link_interval_secs, request_timeout_secs, connect_retry_delay_secs, max_window_size, default_data_coding, source_addr_ton, source_addr_npi, dest_addr_ton, dest_addr_npi, api_key, base_url, username, http_password, secret_key, default_sender, rate_limit, email, supports_webhook, webhook_path, timeout_secs, provider_config, created_at, updated_at, sender_pool_strategy
 `
 
 type CreateMNOConnectionParams struct {
@@ -152,6 +152,7 @@ func (q *Queries) CreateMNOConnection(ctx context.Context, arg CreateMNOConnecti
 		&i.ProviderConfig,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.SenderPoolStrategy,
 	)
 	return i, err
 }
@@ -203,7 +204,8 @@ SELECT
     mc.timeout_secs,
     mc.provider_config,
     mc.created_at,
-    mc.updated_at
+    mc.updated_at,
+    mc.sender_pool_strategy
 FROM mno_connections mc
 WHERE mc.status = 'active' AND mc.protocol = 'http'
 `
@@ -254,6 +256,7 @@ func (q *Queries) GetActiveHTTPConnections(ctx context.Context) ([]MnoConnection
 			&i.ProviderConfig,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.SenderPoolStrategy,
 		); err != nil {
 			return nil, err
 		}
@@ -303,7 +306,8 @@ SELECT
     mc.timeout_secs,
     mc.provider_config,
     mc.created_at,
-    mc.updated_at
+    mc.updated_at,
+    mc.sender_pool_strategy
 FROM mno_connections mc
 WHERE mc.status = 'active'
 `
@@ -354,6 +358,7 @@ func (q *Queries) GetActiveMNOConnections(ctx context.Context) ([]MnoConnection,
 			&i.ProviderConfig,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.SenderPoolStrategy,
 		); err != nil {
 			return nil, err
 		}
@@ -366,7 +371,7 @@ func (q *Queries) GetActiveMNOConnections(ctx context.Context) ([]MnoConnection,
 }
 
 const getMNOConnectionByID = `-- name: GetMNOConnectionByID :one
-SELECT id, mno_id, protocol, status, priority, system_id, password, host, port, use_tls, bind_type, system_type, enquire_link_interval_secs, request_timeout_secs, connect_retry_delay_secs, max_window_size, default_data_coding, source_addr_ton, source_addr_npi, dest_addr_ton, dest_addr_npi, api_key, base_url, username, http_password, secret_key, default_sender, rate_limit, email, supports_webhook, webhook_path, timeout_secs, provider_config, created_at, updated_at FROM mno_connections WHERE id = $1 LIMIT 1
+SELECT id, mno_id, protocol, status, priority, system_id, password, host, port, use_tls, bind_type, system_type, enquire_link_interval_secs, request_timeout_secs, connect_retry_delay_secs, max_window_size, default_data_coding, source_addr_ton, source_addr_npi, dest_addr_ton, dest_addr_npi, api_key, base_url, username, http_password, secret_key, default_sender, rate_limit, email, supports_webhook, webhook_path, timeout_secs, provider_config, created_at, updated_at, sender_pool_strategy FROM mno_connections WHERE id = $1 LIMIT 1
 `
 
 func (q *Queries) GetMNOConnectionByID(ctx context.Context, id int32) (MnoConnection, error) {
@@ -408,12 +413,13 @@ func (q *Queries) GetMNOConnectionByID(ctx context.Context, id int32) (MnoConnec
 		&i.ProviderConfig,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.SenderPoolStrategy,
 	)
 	return i, err
 }
 
 const listMNOConnectionsByMNO = `-- name: ListMNOConnectionsByMNO :many
-SELECT id, mno_id, protocol, status, priority, system_id, password, host, port, use_tls, bind_type, system_type, enquire_link_interval_secs, request_timeout_secs, connect_retry_delay_secs, max_window_size, default_data_coding, source_addr_ton, source_addr_npi, dest_addr_ton, dest_addr_npi, api_key, base_url, username, http_password, secret_key, default_sender, rate_limit, email, supports_webhook, webhook_path, timeout_secs, provider_config, created_at, updated_at FROM mno_connections
+SELECT id, mno_id, protocol, status, priority, system_id, password, host, port, use_tls, bind_type, system_type, enquire_link_interval_secs, request_timeout_secs, connect_retry_delay_secs, max_window_size, default_data_coding, source_addr_ton, source_addr_npi, dest_addr_ton, dest_addr_npi, api_key, base_url, username, http_password, secret_key, default_sender, rate_limit, email, supports_webhook, webhook_path, timeout_secs, provider_config, created_at, updated_at, sender_pool_strategy FROM mno_connections
 WHERE mno_id = $1
 ORDER BY created_at DESC
 LIMIT $2 OFFSET $3
@@ -470,6 +476,7 @@ func (q *Queries) ListMNOConnectionsByMNO(ctx context.Context, arg ListMNOConnec
 			&i.ProviderConfig,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.SenderPoolStrategy,
 		); err != nil {
 			return nil, err
 		}
@@ -516,7 +523,7 @@ SET
     provider_config = COALESCE($30, provider_config),
     updated_at = NOW()
 WHERE id = $31
-RETURNING id, mno_id, protocol, status, priority, system_id, password, host, port, use_tls, bind_type, system_type, enquire_link_interval_secs, request_timeout_secs, connect_retry_delay_secs, max_window_size, default_data_coding, source_addr_ton, source_addr_npi, dest_addr_ton, dest_addr_npi, api_key, base_url, username, http_password, secret_key, default_sender, rate_limit, email, supports_webhook, webhook_path, timeout_secs, provider_config, created_at, updated_at
+RETURNING id, mno_id, protocol, status, priority, system_id, password, host, port, use_tls, bind_type, system_type, enquire_link_interval_secs, request_timeout_secs, connect_retry_delay_secs, max_window_size, default_data_coding, source_addr_ton, source_addr_npi, dest_addr_ton, dest_addr_npi, api_key, base_url, username, http_password, secret_key, default_sender, rate_limit, email, supports_webhook, webhook_path, timeout_secs, provider_config, created_at, updated_at, sender_pool_strategy
 `
 
 type UpdateMNOConnectionParams struct {
@@ -624,6 +631,7 @@ func (q *Queries) UpdateMNOConnection(ctx context.Context, arg UpdateMNOConnecti
 		&i.ProviderConfig,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.SenderPoolStrategy,
 	)
 	return i, err
 }

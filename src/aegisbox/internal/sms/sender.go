@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/thrillee/aegisbox/internal/database"
 	"github.com/thrillee/aegisbox/internal/logging"
@@ -56,12 +57,19 @@ func (s *DefaultSender) Send(ctx context.Context, msg database.GetMessageDetails
 	}
 	logCtx = logging.ContextWithMNOConnID(logCtx, connector.ConnectionID()) // Add Conn ID for tracing
 
+	senderID, err := s.resolveSenderID(logCtx, msg, connector.ConnectionID())
+	if err != nil {
+		slog.WarnContext(logCtx, "No sender available for this connection", slog.Any("error", err))
+		// Fail this attempt before creating segments, so failover can try the next route.
+		return &mno.SubmitResult{WasSubmitted: false, Error: err}, nil
+	}
+
 	// 2. Prepare Message for Connector (Segmentation handled by Connector)
 	// The Connector interface expects the full message content.
 	preparedMsg := mno.PreparedMessage{
 		InternalMessageID: msg.ID,
-		TotalSegments:     msg.TotalSegments,      // Inform connector about expected segments (for UDH?)
-		SenderID:          msg.OriginalSourceAddr, // Use original sender from SP
+		TotalSegments:     msg.TotalSegments, // Inform connector about expected segments (for UDH?)
+		SenderID:          senderID,
 		DestinationMSISDN: msg.OriginalDestinationAddr,
 		MessageContent:    msg.ShortMessage,
 		RequestDLR:        true, // TODO: Make this configurable per SP/message?
@@ -187,6 +195,39 @@ func (s *DefaultSender) Send(ctx context.Context, msg database.GetMessageDetails
 
 	// Return the result received from the connector (potentially modified if DB updates failed critically)
 	return &submitResult, nil // Return logical outcome
+}
+
+// resolveSenderID returns the sender to submit with on the given connection: the provider's own
+// sender, or for providers on the route sender pool, the next sender from that connection's pool.
+func (s *DefaultSender) resolveSenderID(ctx context.Context, msg database.GetMessageDetailsForSendingRow, connID int32) (string, error) {
+	usesPool, err := s.dbQueries.UsesRouteSenderPool(ctx, msg.ServiceProviderID)
+	if err != nil {
+		return "", fmt.Errorf("failed to check route sender pool for SP %d: %w", msg.ServiceProviderID, err)
+	}
+	if !usesPool {
+		return msg.OriginalSourceAddr, nil
+	}
+
+	picked, err := s.dbQueries.PickRouteSender(ctx, connID)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return "", fmt.Errorf("no active sender in the route sender pool of connection %d", connID)
+		}
+		return "", fmt.Errorf("failed to pick route sender for connection %d: %w", connID, err)
+	}
+
+	if err := s.dbQueries.SetMessageSentSourceAddr(ctx, database.SetMessageSentSourceAddrParams{
+		ID:             msg.ID,
+		SentSourceAddr: &picked.SenderIDString,
+	}); err != nil {
+		// The send can go ahead; only the record of which sender was used is missing.
+		slog.ErrorContext(ctx, "Failed to record route sender on message", slog.Any("error", err))
+	}
+	slog.InfoContext(ctx, "Using route pool sender",
+		slog.String("original_sender", msg.OriginalSourceAddr),
+		slog.String("route_sender", picked.SenderIDString),
+		slog.Int("route_sender_id", int(picked.ID)))
+	return picked.SenderIDString, nil
 }
 
 // Helper to check for unique violation errors (adapt based on actual pgx error type)

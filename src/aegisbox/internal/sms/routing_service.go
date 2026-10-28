@@ -124,11 +124,16 @@ func (s *RoutingService) RouteMessage(
 	}
 
 	dbErrMsg := ""
+	// Route sender pool providers have no approved sender record (ID 0); store NULL, not 0.
+	var approvedSenderID *int32
+	if validationRes.ApprovedSenderID != 0 {
+		approvedSenderID = &validationRes.ApprovedSenderID
+	}
 	params := database.UpdateMessageValidatedRoutedParams{
 		ProcessingStatus:    codes.MsgStatusRouted,
 		RoutedMnoID:         &routingRes.MNOID,
 		RoutingAssignmentID: routingRes.RoutingAssignmentID,
-		ApprovedSenderID:    &validationRes.ApprovedSenderID,
+		ApprovedSenderID:    approvedSenderID,
 		TemplateID:          nil,
 		ErrorDescription:    &dbErrMsg,
 		ErrorCode:           nil,
