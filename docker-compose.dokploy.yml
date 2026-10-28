@@ -1,5 +1,6 @@
 # Dokploy deployment that builds the Aegisbox apps from source, so no container
-# registry (GHCR) or registry login is needed. Same services, ports and monitoring
+# registry (GHCR) or registry login is needed. Two images are built: aegisbox
+# (migrations + manager API + SMPP gateway) and portal. Same ports and monitoring
 # as docker-compose.yml.
 #
 # The app source comes from the git submodules in src/ (thrillee/aegisbox and
@@ -8,54 +9,17 @@
 # To deploy newer app code, update the submodules (see README) and push.
 
 services:
-  migration:
+  # Backend: one image and one container. On start it runs pending migrations,
+  # then the manager API and the SMPP gateway (thrillee/aegisbox, cmd/aegisbox).
+  aegisbox:
     build:
       context: ./src/aegisbox
-      dockerfile: deploy/migration/Dockerfile
-    restart: "no"
-    env_file:
-      - .env
-    logging:
-      driver: "json-file"
-      options:
-        max-size: "10m"
-        max-file: "3"
-        tag: "migration"
-    networks:
-      - aegisbox-network
-
-  manager-api:
-    build:
-      context: ./src/aegisbox
-      dockerfile: deploy/manager-api/Dockerfile
+      dockerfile: deploy/aegisbox/Dockerfile
     restart: unless-stopped
-    depends_on:
-      migration:
-        condition: service_completed_successfully
     env_file:
       - .env
     ports:
       - "${API_PORT:-8001}:8001"
-    logging:
-      driver: "json-file"
-      options:
-        max-size: "10m"
-        max-file: "3"
-        tag: "manager-api"
-    networks:
-      - aegisbox-network
-
-  smpp-gateway:
-    build:
-      context: ./src/aegisbox
-      dockerfile: deploy/smpp-gateway/Dockerfile
-    restart: unless-stopped
-    depends_on:
-      migration:
-        condition: service_completed_successfully
-    env_file:
-      - .env
-    ports:
       - "${SMPP_PORT:-6886}:6886"
       - "${SP_API_ADDR:-8000}:8000"
       - "${MNO_DLR_ADDR:-9001}:9001"
@@ -64,9 +28,13 @@ services:
       options:
         max-size: "10m"
         max-file: "3"
-        tag: "smpp-gateway"
+        tag: "aegisbox"
     networks:
-      - aegisbox-network
+      aegisbox-network:
+        # Old service names, so the portal (PORTAL_API_URL) and Prometheus targets keep working
+        aliases:
+          - manager-api
+          - smpp-gateway
 
   portal:
     build:
@@ -80,7 +48,7 @@ services:
     ports:
       - "${PORTAL_PORT:-3000}:3000"
     depends_on:
-      - manager-api
+      - aegisbox
     logging:
       driver: "json-file"
       options:
