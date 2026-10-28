@@ -82,7 +82,8 @@ type Message struct {
 	RetryCount              int32              `json:"retryCount"`
 	NextRetryAt             pgtype.Timestamptz `json:"nextRetryAt"`
 	// Tracks which route was selected for this message (for health feedback loop)
-	RoutingAssignmentID *int32 `json:"routingAssignmentId"`
+	RoutingAssignmentID *int32  `json:"routingAssignmentId"`
+	SentSourceAddr      *string `json:"sentSourceAddr"`
 }
 
 type MessageSegment struct {
@@ -148,6 +149,7 @@ type MnoConnection struct {
 	ProviderConfig          []byte             `json:"providerConfig"`
 	CreatedAt               pgtype.Timestamptz `json:"createdAt"`
 	UpdatedAt               pgtype.Timestamptz `json:"updatedAt"`
+	SenderPoolStrategy      string             `json:"senderPoolStrategy"`
 }
 
 // Individual MSISDN prefixes belonging to a specific msisdn_prefix_group.
@@ -167,6 +169,14 @@ type MsisdnPrefixGroup struct {
 	Reference   *string            `json:"reference"`
 	CreatedAt   pgtype.Timestamptz `json:"createdAt"`
 	UpdatedAt   pgtype.Timestamptz `json:"updatedAt"`
+}
+
+type OrgMapping struct {
+	ID                int32              `json:"id"`
+	ClerkOrgID        string             `json:"clerkOrgId"`
+	ServiceProviderID int32              `json:"serviceProviderId"`
+	CreatedAt         pgtype.Timestamptz `json:"createdAt"`
+	UpdatedAt         pgtype.Timestamptz `json:"updatedAt"`
 }
 
 type OtpAlternativeSender struct {
@@ -253,6 +263,18 @@ type RouteHealth struct {
 	WindowSize           *int32             `json:"windowSize"`
 	CreatedAt            pgtype.Timestamptz `json:"createdAt"`
 	UpdatedAt            pgtype.Timestamptz `json:"updatedAt"`
+}
+
+type RouteSender struct {
+	ID              int32              `json:"id"`
+	MnoConnectionID int32              `json:"mnoConnectionId"`
+	SenderIDString  string             `json:"senderIdString"`
+	Status          string             `json:"status"`
+	Position        int32              `json:"position"`
+	UsageCount      int64              `json:"usageCount"`
+	LastUsedAt      pgtype.Timestamptz `json:"lastUsedAt"`
+	CreatedAt       pgtype.Timestamptz `json:"createdAt"`
+	UpdatedAt       pgtype.Timestamptz `json:"updatedAt"`
 }
 
 // Assigns an MNO to a specific MSISDN prefix group within a given routing group.
@@ -383,6 +405,7 @@ type ServiceProvider struct {
 	AutoDlrStatus       string             `json:"autoDlrStatus"`
 	AutoDlrDelaySeconds int32              `json:"autoDlrDelaySeconds"`
 	AutoDlrEnabledAt    pgtype.Timestamptz `json:"autoDlrEnabledAt"`
+	UseRouteSenderPool  bool               `json:"useRouteSenderPool"`
 }
 
 type SpCredential struct {

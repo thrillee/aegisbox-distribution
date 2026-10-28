@@ -80,7 +80,7 @@ func (q *Queries) CreateSMPPCredential(ctx context.Context, arg CreateSMPPCreden
 const createServiceProvider = `-- name: CreateServiceProvider :one
 INSERT INTO service_providers (name, email, status, default_currency_code)
 VALUES ($1, $2, $3, $4)
-RETURNING id, name, email, status, default_currency_code, created_at, updated_at, auto_dlr_enabled, auto_dlr_status, auto_dlr_delay_seconds, auto_dlr_enabled_at
+RETURNING id, name, email, status, default_currency_code, created_at, updated_at, auto_dlr_enabled, auto_dlr_status, auto_dlr_delay_seconds, auto_dlr_enabled_at, use_route_sender_pool
 `
 
 type CreateServiceProviderParams struct {
@@ -110,6 +110,7 @@ func (q *Queries) CreateServiceProvider(ctx context.Context, arg CreateServicePr
 		&i.AutoDlrStatus,
 		&i.AutoDlrDelaySeconds,
 		&i.AutoDlrEnabledAt,
+		&i.UseRouteSenderPool,
 	)
 	return i, err
 }
@@ -217,7 +218,7 @@ func (q *Queries) GetSPCredentialBySystemID(ctx context.Context, systemID *strin
 }
 
 const getServiceProviderByID = `-- name: GetServiceProviderByID :one
-SELECT id, name, email, status, default_currency_code, created_at, updated_at, auto_dlr_enabled, auto_dlr_status, auto_dlr_delay_seconds, auto_dlr_enabled_at FROM service_providers WHERE id = $1 LIMIT 1
+SELECT id, name, email, status, default_currency_code, created_at, updated_at, auto_dlr_enabled, auto_dlr_status, auto_dlr_delay_seconds, auto_dlr_enabled_at, use_route_sender_pool FROM service_providers WHERE id = $1 LIMIT 1
 `
 
 func (q *Queries) GetServiceProviderByID(ctx context.Context, id int32) (ServiceProvider, error) {
@@ -235,12 +236,13 @@ func (q *Queries) GetServiceProviderByID(ctx context.Context, id int32) (Service
 		&i.AutoDlrStatus,
 		&i.AutoDlrDelaySeconds,
 		&i.AutoDlrEnabledAt,
+		&i.UseRouteSenderPool,
 	)
 	return i, err
 }
 
 const listServiceProviders = `-- name: ListServiceProviders :many
-SELECT id, name, email, status, default_currency_code, created_at, updated_at, auto_dlr_enabled, auto_dlr_status, auto_dlr_delay_seconds, auto_dlr_enabled_at FROM service_providers
+SELECT id, name, email, status, default_currency_code, created_at, updated_at, auto_dlr_enabled, auto_dlr_status, auto_dlr_delay_seconds, auto_dlr_enabled_at, use_route_sender_pool FROM service_providers
 ORDER BY name -- Or created_at
 LIMIT $1 OFFSET $2
 `
@@ -271,6 +273,7 @@ func (q *Queries) ListServiceProviders(ctx context.Context, arg ListServiceProvi
 			&i.AutoDlrStatus,
 			&i.AutoDlrDelaySeconds,
 			&i.AutoDlrEnabledAt,
+			&i.UseRouteSenderPool,
 		); err != nil {
 			return nil, err
 		}
@@ -291,7 +294,7 @@ SET
     default_currency_code = COALESCE($4, default_currency_code),
     updated_at = NOW()
 WHERE id = $5
-RETURNING id, name, email, status, default_currency_code, created_at, updated_at, auto_dlr_enabled, auto_dlr_status, auto_dlr_delay_seconds, auto_dlr_enabled_at
+RETURNING id, name, email, status, default_currency_code, created_at, updated_at, auto_dlr_enabled, auto_dlr_status, auto_dlr_delay_seconds, auto_dlr_enabled_at, use_route_sender_pool
 `
 
 type UpdateServiceProviderParams struct {
@@ -324,6 +327,7 @@ func (q *Queries) UpdateServiceProvider(ctx context.Context, arg UpdateServicePr
 		&i.AutoDlrStatus,
 		&i.AutoDlrDelaySeconds,
 		&i.AutoDlrEnabledAt,
+		&i.UseRouteSenderPool,
 	)
 	return i, err
 }
@@ -341,7 +345,7 @@ SET
     END,
     updated_at = NOW()
 WHERE id = $4
-RETURNING id, name, email, status, default_currency_code, created_at, updated_at, auto_dlr_enabled, auto_dlr_status, auto_dlr_delay_seconds, auto_dlr_enabled_at
+RETURNING id, name, email, status, default_currency_code, created_at, updated_at, auto_dlr_enabled, auto_dlr_status, auto_dlr_delay_seconds, auto_dlr_enabled_at, use_route_sender_pool
 `
 
 type UpdateServiceProviderAutoDLRParams struct {
@@ -372,6 +376,7 @@ func (q *Queries) UpdateServiceProviderAutoDLR(ctx context.Context, arg UpdateSe
 		&i.AutoDlrStatus,
 		&i.AutoDlrDelaySeconds,
 		&i.AutoDlrEnabledAt,
+		&i.UseRouteSenderPool,
 	)
 	return i, err
 }

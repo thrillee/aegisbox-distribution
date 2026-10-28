@@ -14,7 +14,7 @@ export function managerApiHeaders(): Record<string, string> {
 
 export async function proxyToManagerApi(
   path: string,
-  init: { method: 'GET' | 'POST' | 'PUT'; body?: unknown },
+  init: { method: 'GET' | 'POST' | 'PUT' | 'DELETE'; body?: unknown },
 ): Promise<NextResponse> {
   const { userId } = await auth()
   if (!userId) {
@@ -28,6 +28,9 @@ export async function proxyToManagerApi(
       body: init.body === undefined ? undefined : JSON.stringify(init.body),
       cache: 'no-store',
     })
+    if (response.status === 204) {
+      return new NextResponse(null, { status: 204 })
+    }
     const text = await response.text()
     let data: unknown = {}
     try {

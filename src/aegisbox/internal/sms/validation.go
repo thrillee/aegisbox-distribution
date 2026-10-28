@@ -25,6 +25,22 @@ func NewDefaultValidator(q database.Querier) *DefaultValidator {
 func (v *DefaultValidator) Validate(ctx context.Context, spID int32, senderID string) (*ValidationResult, error) {
 	result := &ValidationResult{IsValid: false} // Default to invalid
 
+	// Providers on the route sender pool send with the pool sender of whichever connection the
+	// message goes out on, so their own sender is not checked against approved sender IDs.
+	usesPool, err := v.dbQueries.UsesRouteSenderPool(ctx, spID)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			result.Error = fmt.Errorf("service provider %d not found", spID)
+			return result, nil
+		}
+		result.Error = fmt.Errorf("db error checking route sender pool: %w", err)
+		return result, err
+	}
+	if usesPool {
+		result.IsValid = true
+		return result, nil
+	}
+
 	// --- SenderID Validation ---
 	spIDPtr := spID
 	sidRecordID, err := v.dbQueries.ValidateSenderID(ctx, database.ValidateSenderIDParams{

@@ -674,7 +674,7 @@ func (m *resetWorkerMockQuerier) UpdateMessagePricedWithStatusTx(ctx context.Con
 func (m *resetWorkerMockQuerier) UpdateMessageRoutingInfo(ctx context.Context, arg database.UpdateMessageRoutingInfoParams) error {
 	panic("not implemented")
 }
-func (m *resetWorkerMockQuerier) UpdateMessageSendAttempted(ctx context.Context, id int64) error {
+func (m *resetWorkerMockQuerier) UpdateMessageSendAttempted(ctx context.Context, arg database.UpdateMessageSendAttemptedParams) error {
 	panic("not implemented")
 }
 func (m *resetWorkerMockQuerier) UpdateMessageValidatedRouted(ctx context.Context, arg database.UpdateMessageValidatedRoutedParams) error {
