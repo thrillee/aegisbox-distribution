@@ -3,16 +3,19 @@ FROM node:20-alpine AS base
 # Install dependencies only when needed
 FROM base AS deps
 RUN apk add --no-cache libc6-compat curl
-RUN corepack enable pnpm && corepack prepare pnpm@latest --activate
+RUN corepack enable pnpm && corepack prepare pnpm@10.28.0 --activate
 WORKDIR /app
 
+# pnpm is pinned to the version that wrote pnpm-lock.yaml: newer majors fail the install on
+# unapproved dependency build scripts. package.json "pnpm" lists the packages allowed to run
+# them (esbuild and sharp need theirs; @clerk/shared's is only a notice).
 COPY package.json pnpm-lock.yaml ./
 RUN pnpm install --frozen-lockfile
 
 # Rebuild the source code only when needed
 FROM base AS builder
 RUN apk add --no-cache libc6-compat curl
-RUN corepack enable pnpm && corepack prepare pnpm@latest --activate
+RUN corepack enable pnpm && corepack prepare pnpm@10.28.0 --activate
 WORKDIR /app
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
