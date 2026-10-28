@@ -18,6 +18,13 @@ services:
     restart: unless-stopped
     env_file:
       - .env
+    # Listen addresses must match the container ports mapped below. Values set in
+    # .env (Dokploy's Environment tab) win; these are only the fallbacks.
+    environment:
+      API_ADDR: ${API_ADDR:-:8001}
+      SERVER_HOST: ${SERVER_HOST:-0.0.0.0:6886}
+      HTTP_CONFIG_ADDR: ${HTTP_CONFIG_ADDR:-0.0.0.0:8000}
+      API_DLR_ADDR: ${API_DLR_ADDR:-9001}
     ports:
       - "${API_PORT:-8001}:8001"
       - "${SMPP_PORT:-6886}:6886"
@@ -42,9 +49,14 @@ services:
       args:
         # Inlined into the browser bundle at build time, so it must be a build argument
         NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: ${NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY}
+        NEXT_PUBLIC_CLERK_ADMIN_ORG_ID: ${NEXT_PUBLIC_CLERK_ADMIN_ORG_ID:-}
+        NEXT_PUBLIC_APP_URL: ${NEXT_PUBLIC_APP_URL:-}
     restart: unless-stopped
     env_file:
       - .env
+    environment:
+      # The portal reads MANAGER_API_URL (not PORTAL_API_URL); fallback is the internal service name
+      MANAGER_API_URL: ${MANAGER_API_URL:-http://manager-api:8001}
     ports:
       - "${PORTAL_PORT:-3000}:3000"
     depends_on:

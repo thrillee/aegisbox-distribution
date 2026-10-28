@@ -25,7 +25,7 @@ In Dokploy, create a Compose service from this repository and set:
 * Compose Path: `./docker-compose.dokploy.yml`
 * Enable Submodules: on
 * GitHub app access to `aegisbox`, `aegisbox-portal` and `aegisbox-distribution` (GitHub > Settings > Applications > the Dokploy app > Repository access)
-* Environment: the same variables as `.env.example`, plus `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` for the portal build
+* Environment: the variables in `.env.example`. At minimum `DATABASE_URL`, `MANAGER_API_KEY` (protects the manager API; the portal sends it automatically), the Clerk keys, and the `NEXT_PUBLIC_*` values (built into the portal, so redeploy after changing them). Ports and internal URLs have working defaults.
 
 On start the `aegisbox` container runs pending migrations, then the manager API and SMPP gateway. It keeps the old `manager-api` and `smpp-gateway` hostnames, so the portal and Prometheus need no changes.
 
