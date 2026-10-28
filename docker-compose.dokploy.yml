@@ -3,10 +3,9 @@
 # (migrations + manager API + SMPP gateway) and portal. Same ports and monitoring
 # as docker-compose.yml.
 #
-# The app source comes from the git submodules in src/ (thrillee/aegisbox and
-# thrillee/aegisbox-portal). In Dokploy: compose path ./docker-compose.dokploy.yml,
-# turn on "Enable Submodules", and give the Dokploy GitHub app access to both repos.
-# To deploy newer app code, update the submodules (see README) and push.
+# The app source is copied into src/ (from thrillee/aegisbox and thrillee/aegisbox-portal),
+# so Dokploy only needs this repository: compose path ./docker-compose.dokploy.yml, no
+# submodules. To deploy newer app code, run scripts/sync-sources.sh and push (see README).
 
 services:
   # Backend: one image and one container. On start it runs pending migrations,

@@ -1,0 +1,17 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+scrape_configs:
+  - job_name: 'prometheus'
+    static_configs:
+      - targets: ['localhost:9090']
+
+  # Add your services here for monitoring
+  - job_name: 'manager-api'
+    static_configs:
+      - targets: ['manager-api:8001']
+    
+  - job_name: 'smpp-gateway'
+    static_configs:
+      - targets: ['smpp-gateway:6886']

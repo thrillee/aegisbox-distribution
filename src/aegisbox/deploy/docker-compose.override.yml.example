@@ -1,0 +1,12 @@
+# Override file to use GHCR pre-built images
+# Copy this to docker-compose.override.yml and configure before deployment
+
+services:
+  migration:
+    image: ghcr.io/thrillee/aegisbox/migration:docker-prod
+
+  manager-api:
+    image: ghcr.io/thrillee/aegisbox/manager-api:docker-prod
+
+  smpp-gateway:
+    image: ghcr.io/thrillee/aegisbox/smpp-gateway:docker-prod
