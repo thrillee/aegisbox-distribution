@@ -1,7 +1,7 @@
 import { db } from '@/lib/db'
 import { walletTransactions, wallets } from '@/lib/schema'
 import { NextResponse } from 'next/server'
-import { eq, desc, asc, and, gte, lte } from 'drizzle-orm'
+import { eq, desc, asc, and, gte, lte, sql } from 'drizzle-orm'
 import { transactionTypeEnum } from '@/lib/schema'
 
 export async function GET(
@@ -35,18 +35,17 @@ export async function GET(
       return NextResponse.json({ error: 'Wallet not found' }, { status: 404 })
     }
 
-    const conditions = [eq(walletTransactions.walletId, wallet.id)]
+    const dateConditions = []
+    if (startDate) {
+      dateConditions.push(gte(walletTransactions.transactionDate, new Date(startDate)))
+    }
+    if (endDate) {
+      dateConditions.push(lte(walletTransactions.transactionDate, new Date(endDate + 'T23:59:59')))
+    }
 
+    const conditions = [eq(walletTransactions.walletId, wallet.id), ...dateConditions]
     if (type && ['credit', 'debit', 'reversal'].includes(type)) {
       conditions.push(eq(walletTransactions.transactionType, type as 'credit' | 'debit' | 'reversal'))
-    }
-
-    if (startDate) {
-      conditions.push(gte(walletTransactions.transactionDate, new Date(startDate)))
-    }
-
-    if (endDate) {
-      conditions.push(lte(walletTransactions.transactionDate, new Date(endDate + 'T23:59:59')))
     }
 
     const transactions = await db
@@ -66,39 +65,26 @@ export async function GET(
       .offset((page - 1) * limit)
 
     const [totalCountResult] = await db
-      .select({ count: walletTransactions.id })
+      .select({ count: sql<number>`count(*)::int` })
       .from(walletTransactions)
       .where(and(...conditions))
 
-    const [totalStats] = await db
+    // Totals over the selected dates (all types): top-ups, charges and refunds, so the net change
+    // matches how the balance moved.
+    const [totals] = await db
       .select({
-        totalCredits: walletTransactions.amount,
+        credits: sql<string>`COALESCE(SUM(${walletTransactions.amount}) FILTER (WHERE ${walletTransactions.transactionType} = 'credit'), 0)`,
+        netDebits: sql<string>`COALESCE(SUM(CASE ${walletTransactions.transactionType} WHEN 'debit' THEN ${walletTransactions.amount} WHEN 'reversal' THEN -${walletTransactions.amount} ELSE 0 END), 0)`,
+        reversals: sql<string>`COALESCE(SUM(${walletTransactions.amount}) FILTER (WHERE ${walletTransactions.transactionType} = 'reversal'), 0)`,
+        netChange: sql<string>`COALESCE(SUM(CASE ${walletTransactions.transactionType} WHEN 'debit' THEN -${walletTransactions.amount} ELSE ${walletTransactions.amount} END), 0)`,
       })
       .from(walletTransactions)
-      .where(and(eq(walletTransactions.walletId, wallet.id)))
+      .where(and(eq(walletTransactions.walletId, wallet.id), ...dateConditions))
 
-    const creditsResult = await db
-      .select({
-        sum: walletTransactions.amount,
-      })
-      .from(walletTransactions)
-      .where(and(
-        eq(walletTransactions.walletId, wallet.id),
-        eq(walletTransactions.transactionType, 'credit' as any)
-      ))
-
-    const debitsResult = await db
-      .select({
-        sum: walletTransactions.amount,
-      })
-      .from(walletTransactions)
-      .where(and(
-        eq(walletTransactions.walletId, wallet.id),
-        eq(walletTransactions.transactionType, 'debit' as any)
-      ))
-
-    const totalCredits = Number(creditsResult[0]?.sum || 0)
-    const totalDebits = Number(debitsResult[0]?.sum || 0)
+    const totalCredits = Number(totals?.credits || 0)
+    const totalRefunds = Number(totals?.reversals || 0)
+    const totalDebits = Number(totals?.netDebits || 0)
+    const netChange = Number(totals?.netChange || 0)
 
     return NextResponse.json({
       wallet: {
@@ -121,7 +107,8 @@ export async function GET(
       summary: {
         totalCredits,
         totalDebits,
-        netChange: totalCredits - totalDebits,
+        totalRefunds,
+        netChange,
       },
     })
   } catch (error) {

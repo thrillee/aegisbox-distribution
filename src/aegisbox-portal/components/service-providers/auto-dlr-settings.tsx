@@ -149,7 +149,7 @@ export function AutoDlrSettings({ providerId }: Readonly<{ providerId: number }>
 
         {FAILURE_DLR_STATUSES.includes(status) && (
           <p className="text-sm text-amber-400">
-            A failure status marks messages as failed and reverses the wallet debit.
+            A failure status marks messages as failed. Charges are not refunded automatically.
           </p>
         )}
         {errorMessage && <p className="text-sm text-red-400">{errorMessage}</p>}

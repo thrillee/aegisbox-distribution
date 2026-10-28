@@ -13,6 +13,7 @@ import {
 } from 'recharts'
 import { DataCard } from '@/components/dashboard/data-card'
 import { PageLoadingSkeleton } from '@/components/routing/loading-components'
+import { formatMoney } from '@/lib/money'
 
 interface AnalyticsData {
   overview: {
@@ -137,14 +138,7 @@ export default function ServiceProviderAnalyticsPage({ params }: { params: Promi
     color: STATUS_COLORS[s.status] || '#6B7280',
   })) || []
 
-  const formatCurrency = (amount: number) => {
-    if (!analytics?.provider) return `$${amount.toFixed(2)}`
-    const symbol = analytics.provider.currency === 'NGN' ? '₦' : 
-                   analytics.provider.currency === 'USD' ? '$' : 
-                   analytics.provider.currency === 'EUR' ? '€' : 
-                   analytics.provider.currency === 'GBP' ? '£' : ''
-    return `${symbol}${amount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
-  }
+  const formatCurrency = (amount: number) => formatMoney(amount, analytics?.provider?.currency)
 
   if (initialLoad) {
     return <PageLoadingSkeleton />

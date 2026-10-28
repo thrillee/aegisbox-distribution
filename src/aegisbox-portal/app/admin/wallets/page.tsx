@@ -6,6 +6,7 @@ import { desc, eq } from 'drizzle-orm'
 import { PageHeader } from '@/components/dashboard/page-header'
 import { DataCard } from '@/components/dashboard/data-card'
 import { Button } from '@/components/ui/button'
+import { formatMoney } from '@/lib/money'
 
 function getTransactionBadge(type: string) {
   const styles: Record<string, { bg: string; text: string; icon: any }> = {
@@ -88,7 +89,11 @@ async function getWallets() {
 
 export default async function WalletsPage() {
   const wallets = await getWallets()
-  const totalBalance = wallets.reduce((acc, w) => acc + w.balance, 0)
+  // Wallets hold different currencies, so totals are kept per currency.
+  const totalsByCurrency = wallets.reduce<Record<string, number>>((acc, w) => {
+    acc[w.currency] = (acc[w.currency] ?? 0) + w.balance
+    return acc
+  }, {})
 
   return (
     <div className="p-8 space-y-6">
@@ -116,7 +121,13 @@ export default async function WalletsPage() {
             </div>
             <div>
               <p className="text-sm text-zinc-400">Total Balance</p>
-              <p className="text-2xl font-bold text-white">₦{totalBalance.toLocaleString()}</p>
+              {Object.keys(totalsByCurrency).length === 0 ? (
+                <p className="text-2xl font-bold text-white">-</p>
+              ) : (
+                Object.entries(totalsByCurrency).map(([currency, total]) => (
+                  <p key={currency} className="text-2xl font-bold text-white">{formatMoney(total, currency)}</p>
+                ))
+              )}
             </div>
           </div>
         </DataCard>
@@ -137,7 +148,7 @@ export default async function WalletsPage() {
             <div>
               <p className="text-sm text-zinc-400">Current Balance</p>
               <p className="text-2xl font-bold text-white">
-                {wallet.currency === 'NGN' ? '₦' : '$'}{wallet.balance.toLocaleString()}
+                {formatMoney(wallet.balance, wallet.currency)}
               </p>
               <p className="text-xs text-zinc-500 mt-1">
                 Wallet Type: {wallet.walletType || 'prepaid'}
@@ -181,11 +192,11 @@ export default async function WalletsPage() {
                               ? 'text-emerald-400' 
                               : 'text-red-400'
                           }`}>
-                            {tx.transactionType === 'credit' || tx.transactionType === 'reversal' ? '+' : '-'}₦{tx.amount.toLocaleString()}
+                            {tx.transactionType === 'credit' || tx.transactionType === 'reversal' ? '+' : '-'}{formatMoney(tx.amount, wallet.currency)}
                           </span>
                         </td>
                         <td className="px-4 py-3 whitespace-nowrap text-white">
-                          ₦{tx.balanceAfter.toLocaleString()}
+                          {formatMoney(tx.balanceAfter, wallet.currency)}
                         </td>
                         <td className="px-4 py-3 whitespace-nowrap text-zinc-400">
                           {tx.description || '-'}

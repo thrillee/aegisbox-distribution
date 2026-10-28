@@ -70,6 +70,7 @@ export async function GET(request: Request) {
           clientMessageId: messages.clientMessageId,
           clientRef: messages.clientRef,
           originalSourceAddr: messages.originalSourceAddr,
+          sentSourceAddr: messages.sentSourceAddr,
           originalDestinationAddr: messages.originalDestinationAddr,
           shortMessage: sql<string>`substring(${messages.shortMessage} for 100)`,
           totalSegments: messages.totalSegments,

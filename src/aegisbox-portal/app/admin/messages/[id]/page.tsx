@@ -9,12 +9,14 @@ import { DataCard } from '@/components/dashboard/data-card'
 import { Button } from '@/components/ui/button'
 import { PageLoadingSkeleton } from '@/components/routing/loading-components'
 import { ManualDlrForm, isAwaitingFinalDlr } from '@/components/messages/manual-dlr-form'
+import { formatMoney } from '@/lib/money'
 
 interface Message {
   id: number
   clientMessageId: string | null
   clientRef: string | null
   originalSourceAddr: string
+  sentSourceAddr: string | null
   originalDestinationAddr: string
   shortMessage: string
   totalSegments: number
@@ -86,8 +88,7 @@ function getDlrStatusIcon(status: string | null) {
 }
 
 function formatCurrency(amount: string, currency: string) {
-  const symbol = currency === 'NGN' ? '₦' : currency === 'USD' ? '$' : currency === 'EUR' ? '€' : currency === 'GBP' ? '£' : currency
-  return `${symbol}${Number(amount || 0).toFixed(2)}`
+  return formatMoney(amount, currency)
 }
 
 export default function MessageDetailPage() {
@@ -242,6 +243,9 @@ export default function MessageDetailPage() {
           <div>
             <span className="text-sm text-zinc-400">From</span>
             <p className="text-lg font-medium text-white">{message.originalSourceAddr}</p>
+            {message.sentSourceAddr && message.sentSourceAddr !== message.originalSourceAddr && (
+              <p className="text-sm text-zinc-400">Sent as {message.sentSourceAddr}</p>
+            )}
           </div>
           <div>
             <span className="text-sm text-zinc-400">To</span>

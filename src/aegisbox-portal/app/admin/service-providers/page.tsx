@@ -6,6 +6,7 @@ import { desc, eq, sql, count, ilike, or } from 'drizzle-orm'
 import { PageHeader } from '@/components/dashboard/page-header'
 import { DataCard } from '@/components/dashboard/data-card'
 import { Button } from '@/components/ui/button'
+import { formatMoney } from '@/lib/money'
 
 async function getServiceProviders(search: string | undefined, status: string | undefined) {
   try {
@@ -39,6 +40,7 @@ async function getServiceProviders(search: string | undefined, status: string | 
     for (const sp of providers) {
       const [wallet] = await db.select({
         balance: wallets.balance,
+        currencyCode: wallets.currencyCode,
       })
         .from(wallets)
         .where(eq(wallets.serviceProviderId, sp.id))
@@ -68,7 +70,7 @@ async function getServiceProviders(search: string | undefined, status: string | 
         name: sp.name,
         email: sp.email,
         status: sp.status,
-        currency: sp.defaultCurrencyCode,
+        currency: wallet?.currencyCode || sp.defaultCurrencyCode,
         walletBalance: parseFloat(wallet?.balance || '0'),
         messagesToday: parseInt(String(messageCount?.count || '0')),
         routingGroup: routingGroupName,
@@ -194,7 +196,7 @@ export default async function ServiceProvidersPage({
                   <td className="px-6 py-4 whitespace-nowrap">
                     <div>
                       <p className="font-medium text-white">
-                        {provider.currency === 'NGN' ? '₦' : '$'}{provider.walletBalance.toLocaleString()}
+                        {formatMoney(provider.walletBalance, provider.currency)}
                       </p>
                     </div>
                   </td>

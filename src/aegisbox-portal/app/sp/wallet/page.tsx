@@ -6,6 +6,7 @@ import { desc, eq, sql } from 'drizzle-orm'
 import { PageHeader } from '@/components/dashboard/page-header'
 import { DataCard } from '@/components/dashboard/data-card'
 import { Button } from '@/components/ui/button'
+import { formatMoney } from '@/lib/money'
 
 async function getWalletData(serviceProviderId: number) {
   
@@ -76,7 +77,7 @@ function getTransactionBadge(type: string) {
 }
 
 function formatCurrency(amount: number, currency: string) {
-  return currency === 'NGN' ? `₦${amount.toLocaleString()}` : `$${amount.toLocaleString()}`
+  return formatMoney(amount, currency)
 }
 
 export default async function WalletPage() {
@@ -166,10 +167,10 @@ export default async function WalletPage() {
                         tx.type === 'credit' ? 'text-emerald-400' :
                         tx.type === 'reversal' ? 'text-amber-400' : 'text-red-400'
                       }`}>
-                        {tx.type === 'credit' || tx.type === 'reversal' ? '+' : '-'}₦{tx.amount.toLocaleString()}
+                        {tx.type === 'credit' || tx.type === 'reversal' ? '+' : '-'}{formatMoney(tx.amount, walletList[0]?.currency)}
                       </span>
                     </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-white">₦{tx.balanceAfter.toLocaleString()}</td>
+                    <td className="px-6 py-4 whitespace-nowrap text-white">{formatMoney(tx.balanceAfter, walletList[0]?.currency)}</td>
                     <td className="px-6 py-4 whitespace-nowrap text-zinc-400">{tx.description}</td>
                     <td className="px-6 py-4 whitespace-nowrap text-zinc-400">{new Date(tx.date).toLocaleString()}</td>
                   </tr>

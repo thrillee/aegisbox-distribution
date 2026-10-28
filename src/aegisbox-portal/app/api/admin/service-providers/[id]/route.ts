@@ -67,6 +67,8 @@ export async function GET(
         ...provider,
         walletBalance: wallet?.balance || 0,
         walletCurrency: wallet?.currencyCode || provider.defaultCurrencyCode,
+        // The provider page reads `currency` for its wallet amounts.
+        currency: wallet?.currencyCode || provider.defaultCurrencyCode,
       },
       credentials: {
         apiKeys,
