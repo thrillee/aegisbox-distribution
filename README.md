@@ -13,11 +13,11 @@ Pre-built Docker Compose deployment for Aegisbox SMPP Gateway.
 
 ## Deploy on Dokploy (no GHCR)
 
-`docker-compose.dokploy.yml` runs the same stack but builds the four Aegisbox apps from source, so the server needs no GHCR login. The source comes from the git submodules in `src/`:
+`docker-compose.dokploy.yml` runs the same stack but builds the Aegisbox apps from source (two images: `aegisbox` and `portal`), so the server needs no GHCR login. The source comes from the git submodules in `src/`:
 
 | Path | Repository |
 |------|------------|
-| `src/aegisbox` | `thrillee/aegisbox` (migration, manager-api, smpp-gateway) |
+| `src/aegisbox` | `thrillee/aegisbox`: one `aegisbox` image that runs migrations, the manager API and the SMPP gateway |
 | `src/aegisbox-portal` | `thrillee/aegisbox-portal` (portal) |
 
 In Dokploy, create a Compose service from this repository and set:
@@ -27,7 +27,7 @@ In Dokploy, create a Compose service from this repository and set:
 * GitHub app access to `aegisbox`, `aegisbox-portal` and `aegisbox-distribution` (GitHub > Settings > Applications > the Dokploy app > Repository access)
 * Environment: the same variables as `.env.example`, plus `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` for the portal build
 
-The migration service runs first; manager-api and smpp-gateway start only after it succeeds.
+On start the `aegisbox` container runs pending migrations, then the manager API and SMPP gateway. It keeps the old `manager-api` and `smpp-gateway` hostnames, so the portal and Prometheus need no changes.
 
 ### Deploy newer app code
 
