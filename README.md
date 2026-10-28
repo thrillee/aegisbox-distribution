@@ -13,31 +13,36 @@ Pre-built Docker Compose deployment for Aegisbox SMPP Gateway.
 
 ## Deploy on Dokploy (no GHCR)
 
-`docker-compose.dokploy.yml` runs the same stack but builds the Aegisbox apps from source (two images: `aegisbox` and `portal`), so the server needs no GHCR login. The source comes from the git submodules in `src/`:
+`docker-compose.dokploy.yml` runs the same stack but builds the Aegisbox apps from source (two images: `aegisbox` and `portal`), so the server needs no GHCR login. The app source is copied into this repository under `src/`, so Dokploy needs access to this repository only (no submodules):
 
-| Path | Repository |
-|------|------------|
+| Path | Copied from |
+|------|-------------|
 | `src/aegisbox` | `thrillee/aegisbox`: one `aegisbox` image that runs migrations, the manager API and the SMPP gateway |
 | `src/aegisbox-portal` | `thrillee/aegisbox-portal` (portal) |
 
+`SOURCE_VERSIONS` records the commit each copy came from.
+
 In Dokploy, create a Compose service from this repository and set:
 
+* Branch: `main`
 * Compose Path: `./docker-compose.dokploy.yml`
-* Enable Submodules: on
-* GitHub app access to `aegisbox`, `aegisbox-portal` and `aegisbox-distribution` (GitHub > Settings > Applications > the Dokploy app > Repository access)
 * Environment: the variables in `.env.example`. At minimum `DATABASE_URL`, `MANAGER_API_KEY` (protects the manager API; the portal sends it automatically), the Clerk keys, and the `NEXT_PUBLIC_*` values (built into the portal, so redeploy after changing them). Ports and internal URLs have working defaults.
+* Domains: point them at the `aegisbox` service (container port 8000 for the SP HTTP API, 9001 for MNO DLRs) or `portal` (port 3000). There is no `smpp-gateway` or `manager-api` service any more.
 
-On start the `aegisbox` container runs pending migrations, then the manager API and SMPP gateway. It keeps the old `manager-api` and `smpp-gateway` hostnames, so the portal and Prometheus need no changes.
+On start the `aegisbox` container runs pending migrations, then the manager API and SMPP gateway. It keeps the old `manager-api` and `smpp-gateway` hostnames on the internal network, so the portal and Prometheus need no changes.
 
 ### Deploy newer app code
 
-The submodules are pinned to specific commits. To deploy the latest `main` of both apps:
+Do not edit `src/` by hand. Change the app repositories, then copy their latest `main` here:
 
 ```bash
-git submodule update --init --remote
-git commit -am "Update apps to latest main"
+scripts/sync-sources.sh
+git add -A src SOURCE_VERSIONS
+git commit -m "Sync app source"
 git push
 ```
+
+Pass refs to deploy something other than `main`: `scripts/sync-sources.sh <aegisbox-ref> <portal-ref>`.
 
 ## Prerequisites
 

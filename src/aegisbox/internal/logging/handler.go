@@ -1,0 +1,192 @@
+package logging
+
+import (
+	"context"
+	"log/slog"
+)
+
+type contextKey string
+
+const (
+	SPIDKey             contextKey = "sp_id"
+	SystemIDKey         contextKey = "system_id"
+	MessageIDKey        contextKey = "msg_id"
+	ClientMessageID     contextKey = "client_message_id"
+	MNOIDKey            contextKey = "mno_id"
+	MNOConnIDKey        contextKey = "mno_conn_id"
+	MNOMsgIDKey         contextKey = "mno_msg_id"
+	SegMsgIDKey         contextKey = "seg_msg_id"
+	MSISDNKey           contextKey = "msisdn"
+	SpCredentialID      contextKey = "sp_credential_id"
+	WalletIDKey         contextKey = "wallet_id"
+	CallBackKey         contextKey = "callback_url"
+	WorkerID            contextKey = "worker_id"
+	JobIDKey            contextKey = "job_id"
+	CommandIDKey        contextKey = "cmd_id"
+	SeqNumberKey        contextKey = "seq_num"
+	CredentialIDKey     contextKey = "credential_id"
+	SenderIDKey         contextKey = "sender_id"
+	CurrencyCodeKey     contextKey = "currency_code"
+	APIKeyIdentifierKey contextKey = "api_key_identifier"
+	RemoteAddrKey       contextKey = "remote_addr"
+	MangerAPIHandlerKey contextKey = "manager_api_handler"
+	SpEMailKey          contextKey = "sp_email"
+	PricingRuleID       contextKey = "pricing_rule_id"
+	ServiceName         contextKey = "serivce_name"
+	SPNameKey           contextKey = "sp_name"
+	MONameKey           contextKey = "mno_name"
+	TruncatedAPIKeyKey  contextKey = "truncated_api_key"
+	// Add other keys as needed
+)
+
+// ContextHandler wraps another slog.Handler and adds attributes from context.
+type ContextHandler struct {
+	slog.Handler
+}
+
+// NewContextHandler creates a handler that extracts values from context.
+func NewContextHandler(h slog.Handler) *ContextHandler {
+	return &ContextHandler{Handler: h}
+}
+
+// Handle adds context attributes before calling the wrapped handler.
+func (h *ContextHandler) Handle(ctx context.Context, r slog.Record) error {
+	if spID, ok := ctx.Value(SPIDKey).(int32); ok {
+		r.AddAttrs(slog.Int("sp_id", int(spID)))
+	}
+	if sysID, ok := ctx.Value(SystemIDKey).(string); ok {
+		r.AddAttrs(slog.String("system_id", sysID))
+	}
+	if msgID, ok := ctx.Value(MessageIDKey).(int64); ok {
+		r.AddAttrs(slog.Int64("msg_id", msgID))
+	}
+	if mnoID, ok := ctx.Value(MNOIDKey).(int32); ok {
+		r.AddAttrs(slog.Int("mno_id", int(mnoID)))
+	}
+	if spName, ok := ctx.Value(SPNameKey).(string); ok {
+		r.AddAttrs(slog.String("sp_name", spName))
+	}
+	if mnoName, ok := ctx.Value(MONameKey).(string); ok {
+		r.AddAttrs(slog.String("mno_name", mnoName))
+	}
+	if truncatedAPIKey, ok := ctx.Value(TruncatedAPIKeyKey).(string); ok {
+		r.AddAttrs(slog.String("truncated_api_key", truncatedAPIKey))
+	}
+	// Add more context value extractions here
+
+	return h.Handler.Handle(ctx, r)
+}
+
+// Helper functions to add values to context
+func ContextWithSPID(ctx context.Context, spID int32) context.Context {
+	return context.WithValue(ctx, SPIDKey, spID)
+}
+
+func ContextWithSystemID(ctx context.Context, systemID string) context.Context {
+	return context.WithValue(ctx, SystemIDKey, systemID)
+}
+
+func ContextWithMessageID(ctx context.Context, msgID int64) context.Context {
+	return context.WithValue(ctx, MessageIDKey, msgID)
+}
+
+func ContextWithMNOID(ctx context.Context, mnoID int32) context.Context {
+	return context.WithValue(ctx, MNOIDKey, mnoID)
+}
+
+func ContextWithMNOConnID(ctx context.Context, connID int32) context.Context {
+	return context.WithValue(ctx, MNOConnIDKey, connID)
+}
+
+func ContextWithMNOMsgID(ctx context.Context, msgID string) context.Context {
+	return context.WithValue(ctx, MNOMsgIDKey, msgID)
+}
+
+func ContextWithSegmentID(ctx context.Context, segmentID int64) context.Context {
+	return context.WithValue(ctx, SegMsgIDKey, segmentID)
+}
+
+func ContextWithMSISDN(ctx context.Context, msisdn string) context.Context {
+	return context.WithValue(ctx, MSISDNKey, msisdn)
+}
+
+func ContextWithSPCredentialID(ctx context.Context, spCredentialID int32) context.Context {
+	return context.WithValue(ctx, SpCredentialID, spCredentialID)
+}
+
+func ContextWithSenderID(ctx context.Context, senderID string) context.Context {
+	return context.WithValue(ctx, MSISDNKey, senderID)
+}
+
+func ContextWithWalletID(ctx context.Context, walletID int32) context.Context {
+	return context.WithValue(ctx, WalletIDKey, walletID)
+}
+
+func ContextWithCallbackURL(ctx context.Context, callbackURL string) context.Context {
+	return context.WithValue(ctx, CallBackKey, callbackURL)
+}
+
+func ContextWithWorkerID(ctx context.Context, workerID string) context.Context {
+	return context.WithValue(ctx, CallBackKey, workerID)
+}
+
+func ContextWithJobID(ctx context.Context, jobID int64) context.Context {
+	return context.WithValue(ctx, JobIDKey, jobID)
+}
+
+func ContextWithCredentialID(ctx context.Context, credentialID int32) context.Context {
+	return context.WithValue(ctx, CredentialIDKey, credentialID)
+}
+
+func ContextWithPDUInfo(ctx context.Context, commandID string, seqNumber int32) context.Context {
+	ctx = context.WithValue(ctx, CommandIDKey, commandID)
+	return context.WithValue(ctx, SeqNumberKey, seqNumber)
+}
+
+func ContextWithCurrency(ctx context.Context, currencyCode string) context.Context {
+	return context.WithValue(ctx, CurrencyCodeKey, currencyCode)
+}
+
+func ContextWithAPIKeyIdentifier(ctx context.Context, apiKeyIdentifier string) context.Context {
+	return context.WithValue(ctx, APIKeyIdentifierKey, apiKeyIdentifier)
+}
+
+func ContextWithRemoteAddr(ctx context.Context, addr string) context.Context {
+	return context.WithValue(ctx, RemoteAddrKey, addr)
+}
+
+func ContextWithHandler(ctx context.Context, handler string) context.Context {
+	return context.WithValue(ctx, MangerAPIHandlerKey, handler)
+}
+
+func ContextWithSPEmail(ctx context.Context, email string) context.Context {
+	return context.WithValue(ctx, SpEMailKey, email)
+}
+
+func ContextWithRuleID(ctx context.Context, createdRuleID int32) context.Context {
+	return context.WithValue(ctx, SpEMailKey, createdRuleID)
+}
+
+func ContextWithPricingRuleID(ctx context.Context, createdRuleID int32) context.Context {
+	return context.WithValue(ctx, PricingRuleID, createdRuleID)
+}
+
+func ContextWithClientMessageID(ctx context.Context, msgID string) context.Context {
+	return context.WithValue(ctx, ClientMessageID, msgID)
+}
+
+func ContextWithService(ctx context.Context, serviceName string) context.Context {
+	return context.WithValue(ctx, ServiceName, serviceName)
+}
+
+func ContextWithSPName(ctx context.Context, spName string) context.Context {
+	return context.WithValue(ctx, SPNameKey, spName)
+}
+
+func ContextWithMOName(ctx context.Context, mnoName string) context.Context {
+	return context.WithValue(ctx, MONameKey, mnoName)
+}
+
+func ContextWithTruncatedAPIKey(ctx context.Context, apiKey string) context.Context {
+	return context.WithValue(ctx, TruncatedAPIKeyKey, apiKey)
+}

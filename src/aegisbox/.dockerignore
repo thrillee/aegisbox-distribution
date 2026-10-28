@@ -1,0 +1,4 @@
+.git
+.env
+.env.*
+deploy/docker-compose.override.yml
