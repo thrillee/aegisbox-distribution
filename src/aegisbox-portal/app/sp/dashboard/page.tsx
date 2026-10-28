@@ -13,7 +13,8 @@ import {
 import { db } from '@/lib/db'
 import { getCurrentServiceProviderId, NOT_LINKED_MESSAGE } from '@/lib/service-provider'
 import { wallets, messages } from '@/lib/schema'
-import { desc, eq, gte, sql } from 'drizzle-orm'
+import { and, desc, eq, gte, sql } from 'drizzle-orm'
+import { formatMoney } from '@/lib/money'
 import { PageHeader } from '@/components/dashboard/page-header'
 import { StatCard } from '@/components/dashboard/stat-card'
 import { DataCard } from '@/components/dashboard/data-card'
@@ -27,20 +28,29 @@ async function getSPStats(serviceProviderId: number) {
 
   const today = new Date()
   today.setHours(0, 0, 0, 0)
+  const monthStart = new Date(today.getFullYear(), today.getMonth(), 1)
 
   const [messageStats] = await db
     .select({
       totalMessages: sql<number>`count(*)`,
       deliveredMessages: sql<number>`SUM(CASE WHEN ${messages.finalStatus} = 'delivered' THEN 1 ELSE 0 END)`,
-      monthSpent: sql<number>`COALESCE(SUM(${messages.cost}), 0)`,
     })
     .from(messages)
     .where(eq(messages.serviceProviderId, serviceProviderId))
 
+  // Spend is what the wallet was charged this month, less refunds (same basis as Analytics).
+  const monthSpend = wallet
+    ? await db.execute(sql`
+        SELECT COALESCE(SUM(CASE transaction_type WHEN 'debit' THEN amount
+                                                  WHEN 'reversal' THEN -amount ELSE 0 END), 0) AS spent
+        FROM wallet_transactions
+        WHERE wallet_id = ${wallet.id} AND transaction_date >= ${monthStart}`)
+    : null
+
   const todayMessages = await db
     .select({ count: sql<number>`count(*)` })
     .from(messages)
-    .where(gte(messages.submittedAt, today))
+    .where(and(eq(messages.serviceProviderId, serviceProviderId), gte(messages.submittedAt, today)))
 
   const totalMessages = Number(messageStats.totalMessages) || 0
   const deliveredMessages = Number(messageStats.deliveredMessages) || 0
@@ -52,7 +62,7 @@ async function getSPStats(serviceProviderId: number) {
     walletType: wallet?.walletType || 'prepaid',
     messagesToday: Number(todayMessages[0]?.count) || 0,
     deliveryRate: Math.round(deliveryRate * 10) / 10,
-    monthToDateSpent: Number(messageStats.monthSpent) || 0,
+    monthToDateSpent: Number(monthSpend?.rows[0]?.spent) || 0,
   }
 }
 
@@ -109,6 +119,7 @@ async function getRecentMessages(serviceProviderId: number) {
       recipient: messages.originalDestinationAddr,
       status: messages.finalStatus,
       cost: messages.cost,
+      currency: messages.currencyCode,
       submittedAt: messages.submittedAt,
     })
     .from(messages)
@@ -122,6 +133,7 @@ async function getRecentMessages(serviceProviderId: number) {
     recipient: msg.recipient ? `${msg.recipient.slice(0, 6)}***${msg.recipient.slice(-4)}` : 'Unknown',
     status: msg.status || 'pending',
     cost: msg.cost ? Number(msg.cost) : 0,
+    currency: msg.currency,
     time: msg.submittedAt ? getRelativeTime(msg.submittedAt) : 'Unknown',
   }))
 }
@@ -192,31 +204,27 @@ export default async function SPDashboardPage() {
       <div className="grid gap-4 md:grid-cols-4">
         <StatCard
           title="Wallet Balance"
-          value={stats.walletBalance}
+          value={formatMoney(stats.walletBalance, stats.walletCurrency)}
           icon={Wallet}
-          prefix={stats.walletCurrency === 'NGN' ? '₦' : '$'}
           trend={null}
         />
         <StatCard
           title="Messages Today"
           value={stats.messagesToday}
           icon={MessageSquare}
-          trend="up"
-          trendValue="+12%"
+          trend={null}
         />
         <StatCard
           title="Delivery Rate"
           value={stats.deliveryRate}
           icon={TrendingUp}
           suffix="%"
-          trend="up"
-          trendValue="+0.3%"
+          trend={null}
         />
         <StatCard
           title="Spent This Month"
-          value={stats.monthToDateSpent}
+          value={formatMoney(stats.monthToDateSpent, stats.walletCurrency)}
           icon={TrendingDown}
-          prefix="₦"
           trend={null}
         />
       </div>
@@ -312,7 +320,7 @@ export default async function SPDashboardPage() {
                       <StatusBadge status={msg.status as 'delivered' | 'pending' | 'failed'} />
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap font-medium text-white">
-                      {msg.cost > 0 ? `₦${msg.cost.toFixed(2)}` : '-'}
+                      {msg.cost > 0 ? formatMoney(msg.cost, msg.currency) : '-'}
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-zinc-500">{msg.time}</td>
                   </tr>

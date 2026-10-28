@@ -8,6 +8,7 @@ import { StatCard } from '@/components/dashboard/stat-card'
 import { DataCard } from '@/components/dashboard/data-card'
 import { Users, MessageSquare, TrendingUp, DollarSign } from 'lucide-react'
 import Link from 'next/link'
+import { formatMoney } from '@/lib/money'
 
 async function getDashboardStats() {
   try {
@@ -29,11 +30,19 @@ async function getDashboardStats() {
       .from(messages)
       .where(eq(messages.finalStatus, 'delivered'))
 
-    const [totalRevenue] = await db.select({
-      total: sum(walletTransactions.amount)
+    // Revenue is what was charged for messages today (debits less refunds), per wallet currency.
+    // Top-up credits are not revenue, and amounts in different currencies cannot be added up.
+    const revenueRows = await db.select({
+      currency: wallets.currencyCode,
+      total: sql<string>`COALESCE(SUM(CASE ${walletTransactions.transactionType}
+        WHEN 'debit' THEN ${walletTransactions.amount}
+        WHEN 'reversal' THEN -${walletTransactions.amount}
+        ELSE 0 END), 0)`,
     })
       .from(walletTransactions)
-      .where(eq(walletTransactions.transactionType, 'credit'))
+      .innerJoin(wallets, eq(wallets.id, walletTransactions.walletId))
+      .where(gte(walletTransactions.transactionDate, today))
+      .groupBy(wallets.currencyCode)
 
     return {
       totalSPs: totalSPs?.count || 0,
@@ -41,7 +50,9 @@ async function getDashboardStats() {
       deliveryRate: totalMessages?.count > 0
         ? Math.round((deliveredMessages?.count || 0) / totalMessages.count * 100 * 10) / 10
         : 0,
-      revenueToday: parseFloat(totalRevenue?.total || '0') || 0,
+      revenueToday: revenueRows.length > 0
+        ? revenueRows.map((r) => formatMoney(r.total, r.currency)).join(' · ')
+        : formatMoney(0, 'NGN'),
       messagesTrend: 0,
       deliveryTrend: 0,
       revenueTrend: 0,
@@ -52,7 +63,7 @@ async function getDashboardStats() {
       totalSPs: 0,
       messagesToday: 0,
       deliveryRate: 0,
-      revenueToday: 0,
+      revenueToday: '-',
       messagesTrend: 0,
       deliveryTrend: 0,
       revenueTrend: 0,
@@ -274,7 +285,6 @@ export default async function AdminDashboardPage() {
           title="Revenue Today"
           value={stats.revenueToday}
           icon={DollarSign}
-          prefix="₦"
           trend={stats.revenueTrend > 0 ? 'up' : 'down'}
           trendValue={`${stats.revenueTrend > 0 ? '+' : ''}${stats.revenueTrend}%`}
         />

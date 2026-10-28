@@ -7,6 +7,7 @@ import { PageLoadingSkeleton } from '@/components/routing/loading-components'
 import { AutoDlrSettings } from '@/components/service-providers/auto-dlr-settings'
 import { PortalAccessSettings } from '@/components/service-providers/portal-access-settings'
 import { RouteSenderPoolSetting } from '@/components/service-providers/route-sender-pool-setting'
+import { formatMoney } from '@/lib/money'
 
 function getStatusBadge(status: string) {
   const styles: Record<string, string> = {
@@ -251,7 +252,7 @@ export default function ServiceProviderDetailPage({ params }: { params: Promise<
       <div className="flex items-center gap-4 text-sm">
         <div className="flex items-center gap-2 text-zinc-400">
           <Wallet className="h-4 w-4" />
-          <span>Wallet: {provider.currency === 'NGN' ? '₦' : '$'}{Number(provider.walletBalance || 0).toLocaleString()}</span>
+          <span>Wallet: {formatMoney(provider.walletBalance, provider.currency)}</span>
         </div>
         <div className="flex items-center gap-2 text-zinc-400">
           <MessageSquare className="h-4 w-4" />
@@ -823,10 +824,7 @@ function WalletTransactionsTab({ providerId, currency, walletBalance }: WalletTa
     setPagination(prev => ({ ...prev, page: 1 }))
   }
 
-  const formatCurrency = (amount: number) => {
-    const symbol = currency === 'NGN' ? '₦' : currency === 'USD' ? '$' : currency === 'EUR' ? '€' : currency === 'GBP' ? '£' : ''
-    return `${symbol}${amount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
-  }
+  const formatCurrency = (amount: number) => formatMoney(amount, currency)
 
   const getTypeBadge = (type: string) => {
     const styles: Record<string, { bg: string; text: string }> = {
@@ -854,7 +852,7 @@ function WalletTransactionsTab({ providerId, currency, walletBalance }: WalletTa
           <p className="text-2xl font-bold text-emerald-400">{formatCurrency(summary.totalCredits)}</p>
         </div>
         <div className="bg-zinc-900/50 border border-white/10 rounded-2xl p-4">
-          <p className="text-sm text-zinc-500">Total Debits</p>
+          <p className="text-sm text-zinc-500">Charges (less refunds)</p>
           <p className="text-2xl font-bold text-red-400">{formatCurrency(summary.totalDebits)}</p>
         </div>
         <div className="bg-zinc-900/50 border border-white/10 rounded-2xl p-4">

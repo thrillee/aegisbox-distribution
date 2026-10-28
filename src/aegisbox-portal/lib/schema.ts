@@ -111,6 +111,8 @@ export const messages = pgTable('messages', {
   clientMessageId: varchar('client_message_id', { length: 64 }),
   clientRef: varchar('client_ref', { length: 64 }),
   originalSourceAddr: varchar('original_source_addr', { length: 21 }).notNull(),
+  // Sender actually submitted upstream when a route sender pool replaced the original.
+  sentSourceAddr: varchar('sent_source_addr', { length: 21 }),
   originalDestinationAddr: varchar('original_destination_addr', { length: 21 }).notNull(),
   shortMessage: text('short_message').notNull(),
   totalSegments: integer('total_segments').default(1).notNull(),

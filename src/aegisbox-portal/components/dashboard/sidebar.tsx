@@ -32,6 +32,7 @@ import {
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
+import { formatMoney } from '@/lib/money'
 
 interface NavItem {
   href: string
@@ -271,8 +272,7 @@ function MobileOverlay({
             <div className="mb-4 p-3 rounded-lg bg-white/5 border border-white/10">
               <p className="text-xs text-zinc-400">Wallet Balance</p>
               <p className="text-lg font-semibold text-white">
-                {wallet.currency === 'NGN' ? '₦' : '$'}
-                {wallet.balance.toLocaleString()}
+                {formatMoney(wallet.balance, wallet.currency)}
               </p>
             </div>
           )}
@@ -397,8 +397,7 @@ function SidebarContent({
           <div className="p-3 rounded-lg bg-white/5 border border-white/10">
             <p className="text-xs text-zinc-400">Wallet Balance</p>
             <p className="text-lg font-semibold text-white">
-              {wallet.currency === 'NGN' ? '₦' : '$'}
-              {wallet.balance.toLocaleString()}
+              {formatMoney(wallet.balance, wallet.currency)}
             </p>
           </div>
         </div>
@@ -455,13 +454,22 @@ export function DashboardSidebar({ variant = 'admin' }: { variant?: 'admin' | 's
       }
     : undefined
 
-  const walletData =
-    variant === 'sp'
-      ? {
-          balance: 0,
-          currency: 'NGN' as const,
-        }
-      : undefined
+  // The provider's real balance; nothing is shown until it has loaded.
+  const [walletData, setWalletData] = useState<{ balance: number; currency: string } | undefined>(undefined)
+  useEffect(() => {
+    if (variant !== 'sp') return
+    let cancelled = false
+    fetch('/api/sp/wallet')
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        const w = data?.wallets?.[0]
+        if (!cancelled && w) setWalletData({ balance: Number(w.balance), currency: w.currencyCode })
+      })
+      .catch(() => {})
+    return () => {
+      cancelled = true
+    }
+  }, [variant])
 
   useEffect(() => {
     const saved = localStorage.getItem('sidebar-collapsed')

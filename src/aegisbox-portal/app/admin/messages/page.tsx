@@ -7,12 +7,14 @@ import { PageHeader } from '@/components/dashboard/page-header'
 import { DataCard } from '@/components/dashboard/data-card'
 import { Button } from '@/components/ui/button'
 import { ManualDlrForm } from '@/components/messages/manual-dlr-form'
+import { formatMoney } from '@/lib/money'
 
 interface Message {
   id: number
   clientMessageId: string | null
   clientRef: string | null
   originalSourceAddr: string
+  sentSourceAddr: string | null
   originalDestinationAddr: string
   shortMessage: string
   totalSegments: number
@@ -60,8 +62,7 @@ function getStatusBadge(status: string) {
 }
 
 function formatCurrency(amount: string, currency: string) {
-  const symbol = currency === 'NGN' ? '₦' : currency === 'USD' ? '$' : currency === 'EUR' ? '€' : currency === 'GBP' ? '£' : currency
-  return `${symbol}${Number(amount || 0).toFixed(2)}`
+  return formatMoney(amount, currency)
 }
 
 export default function MessagesPage() {
@@ -348,6 +349,9 @@ export default function MessagesPage() {
                     <td className="px-4 py-3 text-sm">
                       <div className="flex items-center gap-1">
                         <span className="text-white">{msg.originalSourceAddr}</span>
+                        {msg.sentSourceAddr && msg.sentSourceAddr !== msg.originalSourceAddr && (
+                          <span className="text-xs text-zinc-500">(sent as {msg.sentSourceAddr})</span>
+                        )}
                         <span className="text-zinc-500">→</span>
                         <span className="text-white">{msg.originalDestinationAddr}</span>
                       </div>

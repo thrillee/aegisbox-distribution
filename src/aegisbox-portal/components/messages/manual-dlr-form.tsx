@@ -114,7 +114,7 @@ export function ManualDlrForm({ messageIds, onDone, onCancel }: Readonly<ManualD
       </div>
       {isFailure && (
         <p className="text-sm text-amber-400">
-          A failure status marks the message as failed and reverses the wallet debit, the same as a failed DLR from the MNO.
+          A failure status marks the message as failed. The charge is not refunded automatically; refund it from the provider's wallet if needed.
         </p>
       )}
       {errorMessage && <p className="text-sm text-red-400">{errorMessage}</p>}

@@ -7,6 +7,7 @@ import { PageHeader } from '@/components/dashboard/page-header'
 import { DataCard } from '@/components/dashboard/data-card'
 import { StatusBadge } from '@/components/dashboard/status-badge'
 import { Button } from '@/components/ui/button'
+import { formatMoney } from '@/lib/money'
 
 async function getMessages(
   serviceProviderId: number,
@@ -45,6 +46,7 @@ async function getMessages(
         recipient: messages.originalDestinationAddr,
         segments: messages.totalSegments,
         cost: messages.cost,
+        currency: messages.currencyCode,
         status: messages.finalStatus,
         submittedAt: messages.submittedAt,
         completedAt: messages.completedAt,
@@ -68,6 +70,7 @@ async function getMessages(
       recipient: msg.recipient ? `${msg.recipient.slice(0, 6)}***${msg.recipient.slice(-4)}` : 'Unknown',
       segments: Number(msg.segments),
       cost: msg.cost ? Number(msg.cost) : 0,
+      currency: msg.currency,
       status: msg.status || 'pending',
       sentAt: msg.submittedAt?.toISOString() || null,
       deliveredAt: msg.completedAt?.toISOString() || null,
@@ -176,7 +179,7 @@ export default async function MessagesPage({
                     <td className="px-6 py-4 whitespace-nowrap font-medium text-white">{msg.sender}</td>
                     <td className="px-6 py-4 whitespace-nowrap text-zinc-400">{msg.recipient}</td>
                     <td className="px-6 py-4 whitespace-nowrap text-white">{msg.segments}</td>
-                    <td className="px-6 py-4 whitespace-nowrap font-medium text-white">₦{msg.cost.toFixed(2)}</td>
+                    <td className="px-6 py-4 whitespace-nowrap font-medium text-white">{formatMoney(msg.cost, msg.currency)}</td>
                     <td className="px-6 py-4 whitespace-nowrap">
                       <StatusBadge status={msg.status as 'delivered' | 'pending' | 'failed'} />
                     </td>

@@ -6,6 +6,7 @@ import { desc, eq } from 'drizzle-orm'
 import { PageHeader } from '@/components/dashboard/page-header'
 import { DataCard } from '@/components/dashboard/data-card'
 import { Button } from '@/components/ui/button'
+import { formatMoney } from '@/lib/money'
 
 async function getPricingRules() {
   try {
@@ -131,7 +132,7 @@ export default async function PricingPage() {
                   <td className="px-6 py-4 text-white">{rule.mno}</td>
                   <td className="px-6 py-4 text-white">{rule.currency}</td>
                   <td className="px-6 py-4 font-medium text-white">
-                    {rule.currency === 'NGN' ? '₦' : '$'}{rule.pricePerSms.toFixed(4)}
+                    {formatMoney(rule.pricePerSms, rule.currency)}
                   </td>
                   <td className="px-6 py-4 text-zinc-400">
                     {new Date(rule.createdAt).toLocaleDateString()}

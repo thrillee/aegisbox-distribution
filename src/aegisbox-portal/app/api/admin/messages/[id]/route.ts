@@ -21,6 +21,7 @@ export async function GET(
         clientMessageId: messages.clientMessageId,
         clientRef: messages.clientRef,
         originalSourceAddr: messages.originalSourceAddr,
+        sentSourceAddr: messages.sentSourceAddr,
         originalDestinationAddr: messages.originalDestinationAddr,
         shortMessage: messages.shortMessage,
         totalSegments: messages.totalSegments,
