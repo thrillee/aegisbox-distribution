@@ -22,6 +22,8 @@ Pre-built Docker Compose deployment for Aegisbox SMPP Gateway.
 
 `SOURCE_VERSIONS` records the commit each copy came from.
 
+This compose file runs only `aegisbox` and `portal`. The monitoring stack (Grafana, Prometheus, Loki, Promtail, Alertmanager) is left out for now; its configuration stays in this repository and `docker-compose.yml` still includes it.
+
 In Dokploy, create a Compose service from this repository and set:
 
 * Branch: `main`
