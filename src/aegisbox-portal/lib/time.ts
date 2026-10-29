@@ -46,7 +46,7 @@ const dateTimeFormat = new Intl.DateTimeFormat('en-GB', {
   hour: '2-digit',
   minute: '2-digit',
   second: '2-digit',
-  hour12: false,
+  hourCycle: 'h23', // 00:00 at midnight, never 24:00
 })
 
 // An instant as Lagos date and time, YYYY-MM-DD HH:MM:SS.

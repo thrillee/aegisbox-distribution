@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/linxGnu/gosmpp/data"
 	"github.com/linxGnu/gosmpp/pdu"
 	"github.com/thrillee/aegisbox/internal/auth"
@@ -114,7 +115,8 @@ func (s *Server) ListenAndServe() error {
 	}
 	s.listener = ln // Store listener to allow closing
 
-	// Sessions still marked connected were open when the gateway last stopped.
+	// Sessions still marked connected were open when the gateway last stopped. This assumes one
+	// gateway instance per database, as deployed; with several, each would close the others' rows.
 	cleanupCtx, cancelCleanup := context.WithTimeout(context.Background(), 10*time.Second)
 	if n, err := s.dbQueries.CloseOrphanedSMPPSessions(cleanupCtx); err != nil {
 		slog.Warn("Could not close SMPP sessions left open by the last run", slog.Any("error", err))
@@ -122,6 +124,22 @@ func (s *Server) ListenAndServe() error {
 		slog.Info("Closed SMPP sessions left open by the last run", slog.Int64("count", n))
 	}
 	cancelCleanup()
+
+	// Keep the session history bounded: prune old rows now and once a day.
+	s.wg.Add(1)
+	go func() {
+		defer s.wg.Done()
+		ticker := time.NewTicker(24 * time.Hour)
+		defer ticker.Stop()
+		for {
+			s.pruneSessionHistory()
+			select {
+			case <-s.shutdown:
+				return
+			case <-ticker.C:
+			}
+		}
+	}()
 
 	// Goroutine to handle shutdown signal
 	s.wg.Add(1)
@@ -512,7 +530,6 @@ func (s *Server) handleBind(ctx context.Context, ss *sessionState, hdr PDUHeader
 	sessionCount := len(s.sessions[systemID])
 	s.sessionsMu.Unlock()
 	slog.InfoContext(logCtx, "Session stored", slog.Int("sessions_for_system_id", sessionCount), slog.Bool("can_receive", ss.canReceive))
-	s.recordBind(logCtx, ss, systemID, hdr.CommandID, credID, spID, "connected", "")
 
 	// Send the response matching the bind type (bind_receiver_resp, bind_transmitter_resp or
 	// bind_transceiver_resp): the response command ID is the request's with the high bit set.
@@ -526,6 +543,8 @@ func (s *Server) handleBind(ctx context.Context, ss *sessionState, hdr PDUHeader
 		return false // Indicate bind failed due to write error
 	}
 	slog.InfoContext(logCtx, "Bind successful")
+	// Recorded after bind_resp is sent, so a slow database never delays the customer's bind.
+	s.recordBind(logCtx, ss, systemID, hdr.CommandID, credID, spID, "connected", "")
 	return true // Bind succeeded
 }
 
@@ -1049,5 +1068,19 @@ func (s *Server) endSessionHistory(ss *sessionState) {
 	defer cancel()
 	if err := s.dbQueries.EndSMPPSession(ctx, database.EndSMPPSessionParams{ID: ss.historyID, EndReason: &reason}); err != nil {
 		slog.Warn("Could not record end of SMPP session", slog.Any("error", err), slog.String("system_id", ss.systemID))
+	}
+}
+
+// sessionHistoryRetention is how long smpp_sessions rows are kept.
+const sessionHistoryRetention = 90 * 24 * time.Hour
+
+func (s *Server) pruneSessionHistory() {
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+	cutoff := pgtype.Timestamptz{Time: time.Now().Add(-sessionHistoryRetention), Valid: true}
+	if n, err := s.dbQueries.DeleteSMPPSessionsBefore(ctx, cutoff); err != nil {
+		slog.Warn("Could not prune SMPP session history", slog.Any("error", err))
+	} else if n > 0 {
+		slog.Info("Pruned old SMPP session history", slog.Int64("rows", n))
 	}
 }
