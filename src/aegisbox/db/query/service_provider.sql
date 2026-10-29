@@ -32,7 +32,8 @@ SELECT
     spc.created_at,
     spc.updated_at,
     sp.name as service_provider_name,
-    sp.default_currency_code -- Include currency
+    sp.default_currency_code, -- Include currency
+    sp.status as service_provider_status
 FROM sp_credentials spc -- Use new table name
 JOIN service_providers sp ON spc.service_provider_id = sp.id
 WHERE spc.protocol = 'smpp' -- Ensure it's an SMPP credential
@@ -85,6 +86,9 @@ SET
 WHERE id = sqlc.arg(id)
 RETURNING *;
 
+-- name: UpdateSPCredentialPasswordHash :exec
+-- Replaces a legacy plain password with its bcrypt hash after a successful bind.
+UPDATE sp_credentials SET password_hash = $2, updated_at = NOW() WHERE id = $1;
+
 -- name: GetSPCredentialForHTTPAuth :one
 -- SELECT ... FROM sp_credentials WHERE protocol = 'http' AND http_config->>'api_key' = $1 ...
-

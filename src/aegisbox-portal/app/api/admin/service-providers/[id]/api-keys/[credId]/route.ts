@@ -46,7 +46,9 @@ export async function PATCH(
       return NextResponse.json({ error: 'Credential not found' }, { status: 404 })
     }
 
-    return NextResponse.json({ success: true, credential })
+    // Never send stored secrets (password or API key hashes) to the browser.
+    const { passwordHash: _passwordHash, apiKeyHash: _apiKeyHash, ...safe } = credential
+    return NextResponse.json({ success: true, credential: safe })
   } catch (error) {
     console.error('[v0] Error updating API key:', error)
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 })

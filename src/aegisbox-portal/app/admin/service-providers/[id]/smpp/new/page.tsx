@@ -4,6 +4,7 @@ import { use, useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { ArrowLeft, Loader2, Plus, Route } from 'lucide-react'
+import { SmppLoginCreated, type SmppConnection } from '@/components/service-providers/smpp-login-created'
 
 interface RoutingGroup {
   id: number
@@ -23,14 +24,13 @@ export default function NewSmppPage({
   const [fetchingRg, setFetchingRg] = useState(true)
   const [routingGroups, setRoutingGroups] = useState<RoutingGroup[]>([])
   const [error, setError] = useState('')
+  const [created, setCreated] = useState<{ systemId: string; password: string; connection: SmppConnection | null } | null>(null)
   const [formData, setFormData] = useState({
     systemId: '',
     password: '',
     bindType: 'trx',
     scope: 'default',
     routingGroupId: '',
-    host: '',
-    port: '',
   })
 
   useEffect(() => {
@@ -73,7 +73,11 @@ export default function NewSmppPage({
         return
       }
 
-      router.push(`/admin/service-providers/${resolvedParams.id}`)
+      setCreated({
+        systemId: data.credential.systemId,
+        password: data.credential.password,
+        connection: data.connection ?? null,
+      })
     } catch (err) {
       setError('An error occurred')
     } finally {
@@ -96,6 +100,12 @@ export default function NewSmppPage({
         </div>
       </div>
 
+      {created ? (
+        <SmppLoginCreated
+          {...created}
+          onDone={() => router.push(`/admin/service-providers/${resolvedParams.id}`)}
+        />
+      ) : (
       <form onSubmit={handleSubmit} className="space-y-6">
         {error && (
           <div className="p-4 bg-red-500/10 border border-red-500/20 rounded-xl text-red-400">
@@ -111,25 +121,28 @@ export default function NewSmppPage({
             <input
               type="text"
               required
+              maxLength={15}
               value={formData.systemId}
               onChange={(e) => setFormData({ ...formData, systemId: e.target.value })}
               className="w-full px-3 py-2 border border-white/10 rounded-xl bg-black/50 text-white placeholder:text-zinc-600 focus:outline-none focus:ring-2 focus:ring-white/20"
-              placeholder="Enter SMPP system ID"
+              placeholder="Up to 15 characters"
             />
           </div>
 
           <div>
             <label className="block text-sm font-medium text-zinc-400 mb-1">
-              Password *
+              Password
             </label>
             <input
-              type="password"
-              required
+              type="text"
+              maxLength={8}
+              autoComplete="off"
               value={formData.password}
               onChange={(e) => setFormData({ ...formData, password: e.target.value })}
               className="w-full px-3 py-2 border border-white/10 rounded-xl bg-black/50 text-white placeholder:text-zinc-600 focus:outline-none focus:ring-2 focus:ring-white/20"
-              placeholder="Enter SMPP password"
+              placeholder="Leave blank to generate one"
             />
+            <p className="text-xs text-zinc-500 mt-1">Up to 8 characters (SMPP limit). Shown once after creation.</p>
           </div>
 
           <div className="grid grid-cols-2 gap-4">
@@ -184,32 +197,6 @@ export default function NewSmppPage({
             </p>
           </div>
 
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label className="block text-sm font-medium text-zinc-400 mb-1">
-                Host
-              </label>
-              <input
-                type="text"
-                value={formData.host}
-                onChange={(e) => setFormData({ ...formData, host: e.target.value })}
-                className="w-full px-3 py-2 border border-white/10 rounded-xl bg-black/50 text-white placeholder:text-zinc-600 focus:outline-none focus:ring-2 focus:ring-white/20"
-                placeholder="localhost"
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-zinc-400 mb-1">
-                Port
-              </label>
-              <input
-                type="number"
-                value={formData.port}
-                onChange={(e) => setFormData({ ...formData, port: e.target.value })}
-                className="w-full px-3 py-2 border border-white/10 rounded-xl bg-black/50 text-white placeholder:text-zinc-600 focus:outline-none focus:ring-2 focus:ring-white/20"
-                placeholder="2775"
-              />
-            </div>
-          </div>
         </div>
 
         <div className="flex gap-4">
@@ -230,6 +217,7 @@ export default function NewSmppPage({
           </Link>
         </div>
       </form>
+      )}
     </div>
   )
 }

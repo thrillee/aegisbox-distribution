@@ -2,6 +2,7 @@ package mno
 
 import (
 	"context"
+	"crypto/subtle"
 	"encoding/json"
 	"errors"
 	"log/slog"
@@ -113,8 +114,11 @@ func (s *DLRServer) authMiddleware(next http.HandlerFunc) http.HandlerFunc {
 				apiKey = apiKey[7:]
 			}
 		}
+		if apiKey == "" {
+			apiKey = r.URL.Query().Get("key") // for upstreams that can only configure a URL
+		}
 
-		if apiKey != s.config.APIKey {
+		if subtle.ConstantTimeCompare([]byte(apiKey), []byte(s.config.APIKey)) != 1 {
 			slog.Warn("Unauthorized DLR callback attempt",
 				slog.String("remote_addr", r.RemoteAddr),
 				slog.String("user_agent", r.UserAgent()),
@@ -181,13 +185,13 @@ func (s *DLRServer) handleHealthCheck(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-func StartDLRServer(dlrHandleFunc DLRHandlerFunc, port string) (*DLRServer, error) {
+func StartDLRServer(dlrHandleFunc DLRHandlerFunc, port string, apiKey string) (*DLRServer, error) {
 	config := DLRServerConfig{
 		Addr:         ":" + port,
 		ReadTimeout:  30 * time.Second,
 		WriteTimeout: 30 * time.Second,
 		IdleTimeout:  60 * time.Second,
-		APIKey:       "", // Set this if you want to require authentication
+		APIKey:       apiKey, // empty leaves callbacks unauthenticated
 	}
 
 	server := NewDLRServer(config, dlrHandleFunc)

@@ -94,6 +94,7 @@ export default function ServiceProviderDetailPage({ params }: { params: Promise<
   const [provider, setProvider] = useState<ServiceProvider | null>(null)
   const [apiKeys, setApiKeys] = useState<ApiKey[]>([])
   const [smppCreds, setSmppCreds] = useState<SmppCredential[]>([])
+  const [connection, setConnection] = useState<{ host: string | null; port: string | null } | null>(null)
   const [routingGroups, setRoutingGroups] = useState<RoutingGroup[]>([])
   const [copiedId, setCopiedId] = useState<string | null>(null)
   const [togglingId, setTogglingId] = useState<number | null>(null)
@@ -118,6 +119,7 @@ export default function ServiceProviderDetailPage({ params }: { params: Promise<
         setProvider(data.provider)
         setApiKeys(data.credentials?.apiKeys || [])
         setSmppCreds(data.credentials?.smpps || [])
+        setConnection(data.connection ?? null)
       }
       
       if (rgResponse.ok) {
@@ -323,11 +325,11 @@ export default function ServiceProviderDetailPage({ params }: { params: Promise<
                       <div className="grid grid-cols-2 gap-4 mb-3 text-sm">
                         <div>
                           <span className="text-zinc-500">Host:</span>
-                          <span className="ml-2 text-zinc-300">smpp.aegisbox.com</span>
+                          <span className="ml-2 text-zinc-300">{connection?.host ?? 'Not set'}</span>
                         </div>
                         <div>
                           <span className="text-zinc-500">Port:</span>
-                          <span className="ml-2 text-zinc-300">8080</span>
+                          <span className="ml-2 text-zinc-300">{connection?.port ?? 'Not set'}</span>
                         </div>
                         <div>
                           <span className="text-zinc-500">System ID:</span>
@@ -571,8 +573,8 @@ export default function ServiceProviderDetailPage({ params }: { params: Promise<
                       <tr key={cred.id} className="hover:bg-white/5">
                         <td className="px-4 py-3 font-mono text-sm text-white">{cred.systemId}</td>
                         <td className="px-4 py-3 text-sm text-zinc-400 uppercase">{cred.bindType}</td>
-                        <td className="px-4 py-3 text-sm text-zinc-400">smpp.aegisbox.com</td>
-                        <td className="px-4 py-3 text-sm text-zinc-400 font-mono">8080</td>
+                        <td className="px-4 py-3 text-sm text-zinc-400">{connection?.host ?? 'Not set'}</td>
+                        <td className="px-4 py-3 text-sm text-zinc-400 font-mono">{connection?.port ?? 'Not set'}</td>
                         <td className="px-4 py-3">{getStatusBadge(cred.status)}</td>
                         <td className="px-4 py-3">
                           {cred.routingGroupId ? (
