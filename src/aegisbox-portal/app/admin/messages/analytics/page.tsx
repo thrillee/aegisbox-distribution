@@ -27,6 +27,8 @@ import { PageHeader } from "@/components/dashboard/page-header";
 import { DataCard } from "@/components/dashboard/data-card";
 import { Button } from "@/components/ui/button";
 import { PageLoadingSkeleton } from "@/components/routing/loading-components";
+import { formatMoney } from "@/lib/money";
+import { reportDate, reportDayStart } from "@/lib/time";
 
 interface Analytics {
   overview: {
@@ -36,9 +38,8 @@ interface Analytics {
     failed: number;
     failedRate: string;
     pending: number;
-    totalCost: string;
   };
-  byStatus: Record<string, { count: number; totalCost: number }>;
+  charged: { currency: string; amount: number }[];
   byDay: {
     date: string;
     received: number;
@@ -48,8 +49,11 @@ interface Analytics {
   byServiceProvider: {
     id: number;
     name: string;
+    currency: string;
     totalMessages: number;
-    totalCost: number;
+    delivered: number;
+    failed: number;
+    charged: number;
   }[];
   byMno: {
     id: number;
@@ -65,10 +69,11 @@ export default function AnalyticsPage() {
   const [analytics, setAnalytics] = useState<Analytics | null>(null);
   const [loading, setLoading] = useState(true);
   const [initialLoad, setInitialLoad] = useState(true);
-  const [filters, setFilters] = useState({
-    date_from: "",
-    date_to: "",
-  });
+  // Last 30 days in Lagos time by default.
+  const [filters, setFilters] = useState(() => ({
+    date_from: reportDate(reportDayStart(29)),
+    date_to: reportDate(),
+  }));
   const [activeTab, setActiveTab] = useState<"bySP" | "byMno">("byMno");
 
   const fetchAnalytics = useCallback(async () => {
@@ -112,10 +117,11 @@ export default function AnalyticsPage() {
     : [];
 
   const dailyChartData =
-    analytics?.byDay.slice(-30).map((day) => ({
-      date: new Date(day.date).toLocaleDateString("en-US", {
+    analytics?.byDay.map((day) => ({
+      date: new Date(`${day.date}T00:00:00Z`).toLocaleDateString("en-US", {
         month: "short",
         day: "numeric",
+        timeZone: "UTC",
       }),
       Received: day.received,
       Delivered: day.delivered,
@@ -160,7 +166,7 @@ export default function AnalyticsPage() {
         </div>
       ) : analytics ? (
         <>
-          <div className="grid gap-4 md:grid-cols-4">
+          <div className="grid gap-4 md:grid-cols-3 xl:grid-cols-5">
             <DataCard title="">
               <div className="flex items-center gap-3">
                 <div className="p-2 rounded-lg bg-blue-500/20">
@@ -184,6 +190,7 @@ export default function AnalyticsPage() {
                   <p className="text-2xl font-bold text-emerald-400">
                     {analytics.overview.deliveredRate}%
                   </p>
+                  <p className="text-xs text-zinc-500">{analytics.overview.delivered.toLocaleString()} messages</p>
                 </div>
               </div>
             </DataCard>
@@ -197,6 +204,7 @@ export default function AnalyticsPage() {
                   <p className="text-2xl font-bold text-red-400">
                     {analytics.overview.failedRate}%
                   </p>
+                  <p className="text-xs text-zinc-500">{analytics.overview.failed.toLocaleString()} messages, rejected included</p>
                 </div>
               </div>
             </DataCard>
@@ -210,6 +218,25 @@ export default function AnalyticsPage() {
                   <p className="text-2xl font-bold text-amber-400">
                     {analytics.overview.pending.toLocaleString()}
                   </p>
+                </div>
+              </div>
+            </DataCard>
+            <DataCard title="">
+              <div className="flex items-center gap-3">
+                <div className="p-2 rounded-lg bg-violet-500/20">
+                  <DollarSign className="h-5 w-5 text-violet-400" />
+                </div>
+                <div>
+                  <p className="text-sm text-zinc-400">Charged, less refunds</p>
+                  {analytics.charged.length === 0 ? (
+                    <p className="text-2xl font-bold text-white">-</p>
+                  ) : (
+                    analytics.charged.map((c) => (
+                      <p key={c.currency} className="text-xl font-bold text-white">
+                        {formatMoney(c.amount, c.currency)}
+                      </p>
+                    ))
+                  )}
                 </div>
               </div>
             </DataCard>
@@ -336,18 +363,26 @@ export default function AnalyticsPage() {
                         <tr className="text-left text-xs font-semibold text-zinc-400 uppercase">
                           <th className="pb-3">Service Provider</th>
                           <th className="pb-3 text-right">Messages</th>
-                          <th className="pb-3 text-right">Total Cost</th>
+                          <th className="pb-3 text-right">Delivered</th>
+                          <th className="pb-3 text-right">Failed</th>
+                          <th className="pb-3 text-right">Charged, less refunds</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-white/10">
                         {analytics.byServiceProvider.map((sp) => (
-                          <tr key={sp.id}>
+                          <tr key={`${sp.id}-${sp.currency}`}>
                             <td className="py-3 text-white">{sp.name}</td>
                             <td className="py-3 text-right text-zinc-400">
                               {sp.totalMessages.toLocaleString()}
                             </td>
+                            <td className="py-3 text-right text-emerald-400">
+                              {sp.delivered.toLocaleString()}
+                            </td>
+                            <td className="py-3 text-right text-red-400">
+                              {sp.failed.toLocaleString()}
+                            </td>
                             <td className="py-3 text-right font-medium text-white">
-                              ${Number(sp.totalCost).toFixed(2)}
+                              {formatMoney(sp.charged, sp.currency)}
                             </td>
                           </tr>
                         ))}
@@ -367,7 +402,7 @@ export default function AnalyticsPage() {
                     <table className="w-full">
                       <thead>
                         <tr className="text-left text-xs font-semibold text-zinc-400 uppercase">
-                          <th className="pb-3">MNO</th>
+                          <th className="pb-3">Route (MNO)</th>
                           <th className="pb-3 text-right">Messages</th>
                           <th className="pb-3 text-right">Delivered</th>
                           <th className="pb-3 text-right">Failed</th>
@@ -376,7 +411,7 @@ export default function AnalyticsPage() {
                       </thead>
                       <tbody className="divide-y divide-white/10">
                         {analytics.byMno.map((mno) => (
-                          <tr key={mno.id}>
+                          <tr key={mno.id || "none"}>
                             <td className="py-3 text-white">{mno.name}</td>
                             <td className="py-3 text-right text-zinc-400">
                               {mno.totalMessages.toLocaleString()}
