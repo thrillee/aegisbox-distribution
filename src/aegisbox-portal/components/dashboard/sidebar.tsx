@@ -8,7 +8,6 @@ import {
   LayoutDashboard,
   MessageSquare,
   History,
-  Send,
   Tag,
   Key,
   Wallet,
@@ -102,7 +101,6 @@ const SP_NAV_GROUPS: NavGroup[] = [
   {
     label: 'Messaging',
     items: [
-      { href: '/sp/compose', label: 'Send SMS', icon: Send },
       { href: '/sp/messages', label: 'Messages', icon: History },
       { href: '/sp/senders', label: 'Sender IDs', icon: Tag },
       { href: '/sp/templates', label: 'Templates', icon: FileText },
@@ -111,10 +109,9 @@ const SP_NAV_GROUPS: NavGroup[] = [
   {
     label: 'Account',
     items: [
-      { href: '/sp/api-keys', label: 'API Keys', icon: Key },
+      { href: '/sp/api-keys', label: 'Connection', icon: Key },
       { href: '/sp/wallet', label: 'Wallet', icon: Wallet },
       { href: '/sp/analytics', label: 'Analytics', icon: BarChart3 },
-      { href: '/sp/settings', label: 'Settings', icon: Settings },
     ],
   },
 ]

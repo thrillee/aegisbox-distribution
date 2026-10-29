@@ -194,11 +194,11 @@ export default async function SPDashboardPage() {
         description="Welcome back! Here's your account overview."
         actions={
           <Link
-            href="/sp/compose"
+            href="/sp/api-keys"
             className="flex items-center gap-2 px-4 py-2 bg-white text-black rounded-lg hover:bg-zinc-200 transition-colors"
           >
             <Send className="h-4 w-4" />
-            Send SMS
+            Connection details
           </Link>
         }
       />

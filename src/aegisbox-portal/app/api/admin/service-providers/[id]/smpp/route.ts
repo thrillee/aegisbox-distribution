@@ -3,7 +3,8 @@ import { spCredentials } from '@/lib/schema'
 import { NextResponse } from 'next/server'
 import { eq } from 'drizzle-orm'
 import { randomBytes } from 'crypto'
-import { generateSmppPassword, hashSmppPassword, systemIdTaken, smppConnectionInfo, validateSmppLogin } from '@/lib/smpp-credentials'
+import { generateSmppPassword, hashSmppPassword, systemIdTaken, validateSmppLogin } from '@/lib/smpp-credentials'
+import { smppConnectionInfo } from '@/lib/connection-info'
 
 export async function POST(
   request: Request,

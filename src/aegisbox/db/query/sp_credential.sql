@@ -30,6 +30,8 @@ JOIN service_providers sp ON spc.service_provider_id = sp.id
 WHERE spc.protocol = 'http'
   AND spc.api_key_identifier = $1 -- Lookup by IDENTIFIER
   AND spc.status = 'active'
+  -- Same rule as SMPP binds: suspended, inactive or cancelled customers cannot send.
+  AND sp.status NOT IN ('suspended', 'inactive', 'cancelled')
 LIMIT 1;
 
 -- name: CreateSPCredential :one
