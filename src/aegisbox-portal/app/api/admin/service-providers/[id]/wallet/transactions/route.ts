@@ -1,7 +1,8 @@
 import { db } from '@/lib/db'
 import { walletTransactions, wallets } from '@/lib/schema'
 import { NextResponse } from 'next/server'
-import { eq, desc, asc, and, gte, lte, sql } from 'drizzle-orm'
+import { eq, desc, asc, and, gte, lt, sql } from 'drizzle-orm'
+import { isReportDate, reportDayRange } from '@/lib/time'
 import { transactionTypeEnum } from '@/lib/schema'
 
 export async function GET(
@@ -36,11 +37,12 @@ export async function GET(
     }
 
     const dateConditions = []
-    if (startDate) {
-      dateConditions.push(gte(walletTransactions.transactionDate, new Date(startDate)))
+    // Whole Lagos days.
+    if (startDate && isReportDate(startDate)) {
+      dateConditions.push(gte(walletTransactions.transactionDate, reportDayRange(startDate, startDate).from))
     }
-    if (endDate) {
-      dateConditions.push(lte(walletTransactions.transactionDate, new Date(endDate + 'T23:59:59')))
+    if (endDate && isReportDate(endDate)) {
+      dateConditions.push(lt(walletTransactions.transactionDate, reportDayRange(endDate, endDate).to))
     }
 
     const conditions = [eq(walletTransactions.walletId, wallet.id), ...dateConditions]

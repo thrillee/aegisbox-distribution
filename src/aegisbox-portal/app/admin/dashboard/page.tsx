@@ -1,6 +1,7 @@
 import { Suspense } from 'react'
 import { RefreshCw } from 'lucide-react'
 import { db } from '@/lib/db'
+import { reportDate, reportDayStart } from '@/lib/time'
 import { serviceProviders, messages, mnoConnections, wallets, walletTransactions } from '@/lib/schema'
 import { desc, gte, lt, eq, and, sql, count, sum } from 'drizzle-orm'
 import { PageHeader } from '@/components/dashboard/page-header'
@@ -16,8 +17,7 @@ async function getDashboardStats() {
       .from(serviceProviders)
       .where(eq(serviceProviders.status, 'active'))
 
-    const today = new Date()
-    today.setHours(0, 0, 0, 0)
+    const today = reportDayStart()
 
     const [messagesToday] = await db.select({ count: count() })
       .from(messages)
@@ -74,15 +74,10 @@ async function getDashboardStats() {
 async function get7DayAnalytics() {
   try {
     const days = []
-    const today = new Date()
 
     for (let i = 6; i >= 0; i--) {
-      const date = new Date(today)
-      date.setDate(date.getDate() - i)
-      date.setHours(0, 0, 0, 0)
-
-      const nextDate = new Date(date)
-      nextDate.setDate(nextDate.getDate() + 1)
+      const date = reportDayStart(i)
+      const nextDate = reportDayStart(i - 1)
 
       const [dayStats] = await db.select({
         processed: count(),
@@ -101,7 +96,7 @@ async function get7DayAnalytics() {
 
       days.push({
         date: date.toISOString(),
-        dateOnly: date.toISOString().split('T')[0],
+        dateOnly: reportDate(date),
         processed: parseInt(String(dayStats?.processed || '0')),
         delivered: parseInt(String(dayStats?.delivered || '0')),
         failed: parseInt(String(dayStats?.failed || '0')),
@@ -113,13 +108,11 @@ async function get7DayAnalytics() {
   } catch (error) {
     console.error('Error fetching 7-day analytics:', error)
     const days = []
-    const today = new Date()
     for (let i = 6; i >= 0; i--) {
-      const date = new Date(today)
-      date.setDate(date.getDate() - i)
+      const date = reportDayStart(i)
       days.push({
         date: date.toISOString(),
-        dateOnly: date.toISOString().split('T')[0],
+        dateOnly: reportDate(date),
         processed: 0,
         delivered: 0,
         failed: 0,
@@ -315,7 +308,7 @@ export default async function AdminDashboardPage() {
                   />
                 </div>
                 <span className="text-xs text-zinc-500">
-                  {new Date(day.dateOnly + 'T00:00:00').toLocaleDateString('en-US', { weekday: 'short' })}
+                  {new Date(`${day.dateOnly}T00:00:00Z`).toLocaleDateString('en-US', { weekday: 'short', timeZone: 'UTC' })}
                 </span>
               </div>
             ))}

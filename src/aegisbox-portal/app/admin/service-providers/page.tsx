@@ -1,6 +1,7 @@
 import Link from 'next/link'
 import { Plus, Search, Filter, Download, MoreHorizontal } from 'lucide-react'
 import { db } from '@/lib/db'
+import { reportDayStart } from '@/lib/time'
 import { serviceProviders, wallets, messages, spCredentials, routingGroups } from '@/lib/schema'
 import { desc, eq, sql, count, ilike, or } from 'drizzle-orm'
 import { PageHeader } from '@/components/dashboard/page-header'
@@ -34,8 +35,7 @@ async function getServiceProviders(search: string | undefined, status: string | 
     const providers = await query.orderBy(desc(serviceProviders.createdAt))
 
     const results = []
-    const today = new Date()
-    today.setHours(0, 0, 0, 0)
+    const today = reportDayStart()
 
     for (const sp of providers) {
       const [wallet] = await db.select({

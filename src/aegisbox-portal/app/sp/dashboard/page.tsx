@@ -11,6 +11,8 @@ import {
   AlertCircle
 } from 'lucide-react'
 import { db } from '@/lib/db'
+import { REPORT_TIME_ZONE_SQL } from '@/lib/time-sql'
+import { reportDayStart, reportMonthStart } from '@/lib/time'
 import { getCurrentServiceProviderId, NOT_LINKED_MESSAGE } from '@/lib/service-provider'
 import { wallets, messages } from '@/lib/schema'
 import { and, desc, eq, gte, sql } from 'drizzle-orm'
@@ -26,9 +28,8 @@ async function getSPStats(serviceProviderId: number) {
     where: (wallets, { eq }) => eq(wallets.serviceProviderId, serviceProviderId),
   })
 
-  const today = new Date()
-  today.setHours(0, 0, 0, 0)
-  const monthStart = new Date(today.getFullYear(), today.getMonth(), 1)
+  const today = reportDayStart()
+  const monthStart = reportMonthStart()
 
   const [messageStats] = await db
     .select({
@@ -67,20 +68,21 @@ async function getSPStats(serviceProviderId: number) {
 }
 
 async function get7DayStats(serviceProviderId: number) {
-  const sevenDaysAgo = new Date()
-  sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7)
+  // The last 7 Lagos days, today included.
+  const since = reportDayStart(6)
+  const lagosDay = sql`to_char(${messages.submittedAt} AT TIME ZONE ${REPORT_TIME_ZONE_SQL}, 'YYYY-MM-DD')`
 
   const dailyStats = await db
     .select({
-      date: sql<string>`DATE(${messages.submittedAt})`,
+      date: sql<string>`${lagosDay}`,
       processed: sql<number>`count(*)`,
       delivered: sql<number>`SUM(CASE WHEN ${messages.finalStatus} = 'delivered' THEN 1 ELSE 0 END)`,
       failed: sql<number>`SUM(CASE WHEN ${messages.finalStatus} = 'failed' THEN 1 ELSE 0 END)`,
     })
     .from(messages)
-    .where(gte(messages.submittedAt, sevenDaysAgo))
-    .groupBy(sql`DATE(${messages.submittedAt})`)
-    .orderBy(sql`DATE(${messages.submittedAt})`)
+    .where(and(eq(messages.serviceProviderId, serviceProviderId), gte(messages.submittedAt, since)))
+    .groupBy(lagosDay)
+    .orderBy(lagosDay)
 
   return dailyStats.map(stat => ({
     date: stat.date,
@@ -250,7 +252,7 @@ export default async function SPDashboardPage() {
                     />
                   </div>
                   <span className="text-xs text-zinc-500">
-                    {new Date(day.date).toLocaleDateString('en-US', { weekday: 'short' })}
+                    {new Date(`${day.date}T00:00:00Z`).toLocaleDateString('en-US', { weekday: 'short', timeZone: 'UTC' })}
                   </span>
                 </div>
               ))}

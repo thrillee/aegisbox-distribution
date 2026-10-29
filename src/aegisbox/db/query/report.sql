@@ -1,7 +1,7 @@
 -- name: GetDailyReport :many
 SELECT
     -- Grouping Keys
-    DATE(m.submitted_at AT TIME ZONE 'UTC') AS report_date, -- Group by date part of submitted_at in UTC
+    DATE(m.submitted_at AT TIME ZONE 'Africa/Lagos') AS report_date, -- Lagos calendar day (UTC+1, no daylight saving)
     sp.id AS service_provider_id,
     sp.name AS service_provider_name,
     sp.email AS service_provider_email,
@@ -20,9 +20,9 @@ SELECT
 FROM messages m
 JOIN service_providers sp ON m.service_provider_id = sp.id
 LEFT JOIN mnos mn ON m.routed_mno_id = mn.id
--- Filter by date range (inclusive)
-WHERE m.submitted_at AT TIME ZONE 'UTC' >= sqlc.arg(start_date)::timestamptz -- Start of day UTC
-  AND m.submitted_at AT TIME ZONE 'UTC' < sqlc.arg(end_date)::timestamptz + INTERVAL '1 day' -- Up to, but not including, start of next day UTC
+-- Whole Lagos days, start_date through end_date (the handler passes each as midnight UTC of that date)
+WHERE m.submitted_at >= ((sqlc.arg(start_date)::timestamptz AT TIME ZONE 'UTC')::date)::timestamp AT TIME ZONE 'Africa/Lagos'
+  AND m.submitted_at < ((sqlc.arg(end_date)::timestamptz AT TIME ZONE 'UTC')::date + 1)::timestamp AT TIME ZONE 'Africa/Lagos'
   AND ($1::INT IS NULL OR m.service_provider_id = $1) -- Filter by sp_id if provided
   AND ($2::TEXT IS NULL OR sp.email = $2) -- Filter by sp_email if provided
 GROUP BY

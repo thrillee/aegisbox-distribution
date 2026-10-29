@@ -137,7 +137,7 @@ type Querier interface {
 	GetAutoDLRCandidates(ctx context.Context, arg GetAutoDLRCandidatesParams) ([]GetAutoDLRCandidatesRow, error)
 	// Find blocked senders with no activity in 7 days (for auto-unblock)
 	GetBlockedSendersForAutoUnblock(ctx context.Context) ([]GetBlockedSendersForAutoUnblockRow, error)
-	// Filter by date range (inclusive)
+	// Whole Lagos days, start_date through end_date (the handler passes each as midnight UTC of that date)
 	GetDailyReport(ctx context.Context, arg GetDailyReportParams) ([]GetDailyReportRow, error)
 	// Get global routing configuration
 	GetGlobalRoutingConfig(ctx context.Context) (RoutingConfig, error)
