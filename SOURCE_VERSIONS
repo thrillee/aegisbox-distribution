@@ -1,4 +1,4 @@
 # App source copied into src/ by scripts/sync-sources.sh. Do not edit src/ by hand;
 # change the app repos and sync again.
-aegisbox 58f3798e55e56ba21677713bae6b7330750855a1
-aegisbox-portal e56790bde55edb21160066c273654ab88af8b80f
+aegisbox 0783ecbca51254e04be2ac016b2102d7732c02ce
+aegisbox-portal 848fbd7ec7df55e4d2dcf968bcc461fad7d39631

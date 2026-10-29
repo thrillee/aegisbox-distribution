@@ -2,7 +2,8 @@ import { db } from '@/lib/db'
 import { serviceProviders, wallets, spCredentials } from '@/lib/schema'
 import { NextResponse } from 'next/server'
 import crypto from 'crypto'
-import { generateSmppPassword, hashSmppPassword, systemIdTaken, smppConnectionInfo, validateSmppLogin } from '@/lib/smpp-credentials'
+import { generateSmppPassword, hashSmppPassword, systemIdTaken, validateSmppLogin } from '@/lib/smpp-credentials'
+import { smppConnectionInfo } from '@/lib/connection-info'
 import { linkOrganizationToProvider } from '@/lib/service-provider'
 
 export async function GET() {

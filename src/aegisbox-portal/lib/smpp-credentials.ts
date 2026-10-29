@@ -36,11 +36,3 @@ export async function systemIdTaken(systemId: string): Promise<boolean> {
 export function hashSmppPassword(password: string): Promise<string> {
   return bcrypt.hash(password, 12)
 }
-
-// Where customers connect, set per deployment.
-export function smppConnectionInfo() {
-  return {
-    host: process.env.SMPP_PUBLIC_HOST || null,
-    port: process.env.SMPP_PUBLIC_PORT || null,
-  }
-}
