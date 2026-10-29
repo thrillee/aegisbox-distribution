@@ -7,6 +7,8 @@ package database
 
 import (
 	"context"
+
+	"github.com/jackc/pgx/v5/pgtype"
 )
 
 const closeOrphanedSMPPSessions = `-- name: CloseOrphanedSMPPSessions :execrows
@@ -54,6 +56,20 @@ func (q *Queries) CreateSMPPSession(ctx context.Context, arg CreateSMPPSessionPa
 	var id int64
 	err := row.Scan(&id)
 	return id, err
+}
+
+const deleteSMPPSessionsBefore = `-- name: DeleteSMPPSessionsBefore :execrows
+DELETE FROM smpp_sessions
+WHERE started_at < $1 AND status <> 'connected'
+`
+
+// Retention: drops history older than the cutoff, but never a session that is still connected.
+func (q *Queries) DeleteSMPPSessionsBefore(ctx context.Context, cutoff pgtype.Timestamptz) (int64, error) {
+	result, err := q.db.Exec(ctx, deleteSMPPSessionsBefore, cutoff)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const endSMPPSession = `-- name: EndSMPPSession :exec

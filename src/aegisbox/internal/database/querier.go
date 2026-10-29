@@ -6,6 +6,8 @@ package database
 
 import (
 	"context"
+
+	"github.com/jackc/pgx/v5/pgtype"
 )
 
 type Querier interface {
@@ -102,6 +104,8 @@ type Querier interface {
 	DeleteRoutingAssignment(ctx context.Context, id int32) error
 	// Note: This will fail if the group is referenced in routing_assignments or sp_credentials.
 	DeleteRoutingGroup(ctx context.Context, id int32) error
+	// Retention: drops history older than the cutoff, but never a session that is still connected.
+	DeleteSMPPSessionsBefore(ctx context.Context, cutoff pgtype.Timestamptz) (int64, error)
 	DeleteSPCredential(ctx context.Context, id int32) error
 	DeleteServiceProvider(ctx context.Context, id int32) error
 	EndSMPPSession(ctx context.Context, arg EndSMPPSessionParams) error

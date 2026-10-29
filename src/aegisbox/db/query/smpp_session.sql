@@ -14,3 +14,8 @@ WHERE id = sqlc.arg(id) AND status = 'connected';
 UPDATE smpp_sessions
 SET status = 'closed', ended_at = NOW(), end_reason = 'gateway restarted'
 WHERE status = 'connected';
+
+-- name: DeleteSMPPSessionsBefore :execrows
+-- Retention: drops history older than the cutoff, but never a session that is still connected.
+DELETE FROM smpp_sessions
+WHERE started_at < sqlc.arg(cutoff) AND status <> 'connected';
