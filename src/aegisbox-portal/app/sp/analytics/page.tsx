@@ -1,6 +1,8 @@
 import Link from 'next/link'
 import { sql } from 'drizzle-orm'
 import { db } from '@/lib/db'
+import { REPORT_TIME_ZONE_SQL } from '@/lib/time-sql'
+import { reportDate, reportDayStart } from '@/lib/time'
 import { getCurrentServiceProviderId, NOT_LINKED_MESSAGE } from '@/lib/service-provider'
 import { formatMoney } from '@/lib/money'
 
@@ -42,7 +44,7 @@ async function getAnalytics(serviceProviderId: number, since: Date) {
       FROM messages m
       WHERE m.service_provider_id = ${serviceProviderId} AND m.submitted_at >= ${since}`),
     db.execute(sql`
-      SELECT to_char(date_trunc('day', m.submitted_at), 'YYYY-MM-DD') AS day, ${statusCounts},
+      SELECT to_char(m.submitted_at AT TIME ZONE ${REPORT_TIME_ZONE_SQL}, 'YYYY-MM-DD') AS day, ${statusCounts},
              COALESCE(SUM(m.cost - COALESCE(r.refunded, 0)), 0) AS cost
       FROM messages m
       -- Net of refunds, so the days add up to the Spent total.
@@ -165,9 +167,7 @@ export default async function AnalyticsPage({
 
   const params = await searchParams
   const period: Period = params.period && params.period in PERIODS ? (params.period as Period) : '7d'
-  const since = new Date()
-  since.setHours(0, 0, 0, 0)
-  since.setDate(since.getDate() - (PERIODS[period] - 1))
+  const since = reportDayStart(PERIODS[period] - 1)
 
   const data = await getAnalytics(serviceProviderId, since)
   const { summary } = data
@@ -180,7 +180,7 @@ export default async function AnalyticsPage({
       <div className="flex flex-wrap items-center justify-between gap-4">
         <div>
           <h1 className="text-3xl font-bold text-white">Analytics</h1>
-          <p className="text-zinc-400 mt-1">Your messages since {since.toLocaleDateString()}</p>
+          <p className="text-zinc-400 mt-1">Your messages since {reportDate(since)} (Lagos time)</p>
         </div>
         <div className="flex items-center gap-2 bg-zinc-900/50 border border-white/10 rounded-xl p-1">
           {(Object.keys(PERIODS) as Period[]).map((p) => (

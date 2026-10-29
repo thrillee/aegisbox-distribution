@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useEffect, useCallback } from 'react'
+import { reportDate, reportDayStart } from '@/lib/time'
 import { Download, FileText, Filter, Calendar, Loader2 } from 'lucide-react'
 import { PageHeader } from '@/components/dashboard/page-header'
 import { DataCard } from '@/components/dashboard/data-card'
@@ -65,12 +66,9 @@ export default function DailyReportPage() {
   const [reportData, setReportData] = useState<DailyReport[]>([])
   const [serviceProviders, setServiceProviders] = useState<ServiceProvider[]>([])
   const [filters, setFilters] = useState(() => {
-    const today = new Date()
-    const sevenDaysAgo = new Date(today)
-    sevenDaysAgo.setDate(today.getDate() - 7)
     return {
-      start_date: sevenDaysAgo.toISOString().split('T')[0],
-      end_date: today.toISOString().split('T')[0],
+      start_date: reportDate(reportDayStart(7)),
+      end_date: reportDate(),
       sp_id: '',
       status: '',
     }

@@ -1,7 +1,9 @@
 import { db } from '@/lib/db'
 import { messages, serviceProviders, mnos } from '@/lib/schema'
 import { NextResponse } from 'next/server'
-import { desc, eq, and, gte, lte, sql, or } from 'drizzle-orm'
+import { desc, eq, and, gte, lt, sql, or } from 'drizzle-orm'
+import { REPORT_TIME_ZONE_SQL } from '@/lib/time-sql'
+import { isReportDate, reportDayRange } from '@/lib/time'
 
 export async function GET(request: Request) {
   try {
@@ -14,6 +16,9 @@ export async function GET(request: Request) {
     if (!startDate || !endDate) {
       return NextResponse.json({ error: 'Start date and end date are required' }, { status: 400 })
     }
+    if (!isReportDate(startDate) || !isReportDate(endDate)) {
+      return NextResponse.json({ error: 'Dates must be YYYY-MM-DD' }, { status: 400 })
+    }
 
     const spCondition = spId ? eq(messages.serviceProviderId, parseInt(spId)) : undefined
     
@@ -25,13 +30,10 @@ export async function GET(request: Request) {
       )
     }
 
-    const startDateTime = new Date(startDate + 'T00:00:00')
-    const endDateTime = new Date(endDate + 'T23:59:59')
-
-    const dateCondition = and(
-      gte(messages.submittedAt, startDateTime),
-      lte(messages.submittedAt, endDateTime)
-    )
+    // Whole Lagos days, start_date through end_date.
+    const { from, to } = reportDayRange(startDate, endDate)
+    const dateCondition = and(gte(messages.submittedAt, from), lt(messages.submittedAt, to))
+    const reportDay = sql`DATE(${messages.submittedAt} AT TIME ZONE ${REPORT_TIME_ZONE_SQL})`
 
     const conditions = [dateCondition]
     if (spCondition) conditions.push(spCondition)
@@ -41,7 +43,7 @@ export async function GET(request: Request) {
 
     const result = await db
       .select({
-        reportDate: sql<string>`DATE(${messages.submittedAt} AT TIME ZONE 'UTC')`,
+        reportDate: sql<string>`${reportDay}`,
         serviceProviderId: serviceProviders.id,
         serviceProviderName: serviceProviders.name,
         serviceProviderEmail: serviceProviders.email,
@@ -60,8 +62,8 @@ export async function GET(request: Request) {
       .innerJoin(serviceProviders, eq(messages.serviceProviderId, serviceProviders.id))
       .leftJoin(mnos, eq(messages.routedMnoId, mnos.id))
       .where(whereClause)
-      .groupBy(sql`DATE(${messages.submittedAt} AT TIME ZONE 'UTC')`, serviceProviders.id, mnos.id, mnos.name, messages.currencyCode)
-      .orderBy(desc(sql`DATE(${messages.submittedAt} AT TIME ZONE 'UTC')`), desc(serviceProviders.name))
+      .groupBy(reportDay, serviceProviders.id, mnos.id, mnos.name, messages.currencyCode)
+      .orderBy(desc(reportDay), desc(serviceProviders.name))
 
     return NextResponse.json({ data: result })
   } catch (error) {
