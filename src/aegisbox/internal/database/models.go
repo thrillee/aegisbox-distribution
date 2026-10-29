@@ -408,6 +408,19 @@ type ServiceProvider struct {
 	UseRouteSenderPool  bool               `json:"useRouteSenderPool"`
 }
 
+type SmppSession struct {
+	ID                int64              `json:"id"`
+	SpCredentialID    *int32             `json:"spCredentialId"`
+	ServiceProviderID *int32             `json:"serviceProviderId"`
+	SystemID          string             `json:"systemId"`
+	BindType          string             `json:"bindType"`
+	RemoteAddr        string             `json:"remoteAddr"`
+	Status            string             `json:"status"`
+	StartedAt         pgtype.Timestamptz `json:"startedAt"`
+	EndedAt           pgtype.Timestamptz `json:"endedAt"`
+	EndReason         *string            `json:"endReason"`
+}
+
 type SpCredential struct {
 	ID                int32              `json:"id"`
 	ServiceProviderID int32              `json:"serviceProviderId"`

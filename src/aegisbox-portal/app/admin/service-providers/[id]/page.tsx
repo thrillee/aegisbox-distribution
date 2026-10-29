@@ -546,10 +546,15 @@ export default function ServiceProviderDetailPage({ params }: { params: Promise<
         <div className="bg-zinc-900/50 border border-white/10 rounded-2xl p-6">
           <div className="flex items-center justify-between mb-6">
             <h2 className="text-lg font-semibold text-white">SMPP Credentials</h2>
-            <Link href={`/admin/service-providers/${provider.id}/smpp/new`} className="flex items-center gap-2 px-4 py-2 bg-white text-black rounded-lg hover:bg-zinc-200 transition-colors">
-              <Plus className="h-4 w-4" />
-              Add SMPP Credential
-            </Link>
+            <div className="flex items-center gap-3">
+              <Link href={`/admin/smpp-sessions?sp=${provider.id}`} className="px-4 py-2 border border-white/10 rounded-lg text-zinc-300 hover:text-white hover:bg-white/5 transition-colors">
+                Session history
+              </Link>
+              <Link href={`/admin/service-providers/${provider.id}/smpp/new`} className="flex items-center gap-2 px-4 py-2 bg-white text-black rounded-lg hover:bg-zinc-200 transition-colors">
+                <Plus className="h-4 w-4" />
+                Add SMPP Credential
+              </Link>
+            </div>
           </div>
           {smppCreds.length > 0 ? (
             <div className="overflow-x-auto">

@@ -6,6 +6,7 @@ import { usePathname } from 'next/navigation'
 import { useUser, useOrganization, SignOutButton } from '@clerk/nextjs'
 import {
   LayoutDashboard,
+  Plug,
   MessageSquare,
   History,
   Tag,
@@ -78,6 +79,7 @@ const ADMIN_NAV_GROUPS: NavGroup[] = [
     items: [
       { href: '/admin/service-providers', label: 'Service Providers', icon: Users },
       { href: '/admin/wallets', label: 'Wallets', icon: Wallet },
+      { href: '/admin/smpp-sessions', label: 'SMPP Sessions', icon: Plug },
     ],
   },
   {
