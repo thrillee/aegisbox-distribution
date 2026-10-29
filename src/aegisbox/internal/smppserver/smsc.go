@@ -59,7 +59,15 @@ type sessionState struct {
 	writeMu           sync.Mutex    // Mutex for writing PDUs
 	boundAt           time.Time
 	lastActivity      time.Time // Track last PDU read/write for idle timeout
+	canReceive        bool      // bound as receiver or transceiver, so it can take DeliverSM (DLRs)
 }
+
+// maxSessionsPerSystemID caps concurrent binds per login. Customers commonly open several
+// sessions (separate transmitter and receiver, or more for throughput).
+const maxSessionsPerSystemID = 10
+
+// disabledProviderStatuses are service provider statuses that block new binds.
+var disabledProviderStatuses = map[string]bool{"suspended": true, "inactive": true, "cancelled": true}
 
 // Compile-time checks for interface implementation
 var (
@@ -68,11 +76,12 @@ var (
 
 // Server implements the raw SMPP TCP server.
 type Server struct {
-	config         config.ServerConfig       // Server config (Addr, timeouts)
-	dbQueries      database.Querier          // For auth
-	messageHandler sp.IncomingMessageHandler // Core logic handler
-	sessions       map[string]*sessionState  // map[systemID]*sessionState
-	sessionsMu     sync.RWMutex              // Mutex for the sessions map
+	config         config.ServerConfig        // Server config (Addr, timeouts)
+	dbQueries      database.Querier           // For auth
+	messageHandler sp.IncomingMessageHandler  // Core logic handler
+	sessions       map[string][]*sessionState // map[systemID] -> bound sessions for that login
+	sessionsMu     sync.RWMutex               // Mutex for the sessions map
+	nextSession    map[string]int             // round-robin cursor per systemID for DLR delivery
 	listener       net.Listener
 	shutdown       chan struct{}  // Signal for graceful shutdown
 	wg             sync.WaitGroup // Waitgroup for active connections
@@ -87,7 +96,8 @@ func NewServer(ctx context.Context, cfg config.ServerConfig, q database.Querier,
 		config:         cfg,
 		dbQueries:      q,
 		messageHandler: handler,
-		sessions:       make(map[string]*sessionState),
+		sessions:       make(map[string][]*sessionState),
+		nextSession:    make(map[string]int),
 		shutdown:       make(chan struct{}),
 	}
 }
@@ -145,7 +155,7 @@ func (s *Server) handleSession(ctx context.Context, ss *sessionState) {
 	defer func() {
 		// Cleanup on exit
 		if ss.systemID != "" { // Only remove if session was bound
-			s.removeSession(ss.systemID)
+			s.removeSession(ss)
 		}
 		_ = ss.conn.Close()
 		slog.InfoContext(ctx, "Closed SMPP client connection")
@@ -417,10 +427,29 @@ func (s *Server) handleBind(ctx context.Context, ss *sessionState, hdr PDUHeader
 		s.writeErrorResponse(ss, hdr, StatusBindFailed)
 		return false
 	}
-	if cred.PasswordHash != nil && !auth.CheckPasswordHash(password, *cred.PasswordHash) {
+	if disabledProviderStatuses[cred.ServiceProviderStatus] {
+		slog.WarnContext(logCtx, "Bind failed: service provider is not active", slog.String("status", cred.ServiceProviderStatus))
+		s.writeErrorResponse(ss, hdr, StatusBindFailed)
+		return false
+	}
+	// A credential without a stored password must not accept any password.
+	if cred.PasswordHash == nil || *cred.PasswordHash == "" || !auth.CheckPasswordHash(password, *cred.PasswordHash) {
 		slog.WarnContext(logCtx, "Bind failed: Invalid password")
 		s.writeErrorResponse(ss, hdr, StatusInvPasswd)
 		return false
+	}
+	// Upgrade a legacy plain password to a bcrypt hash now that it is known to be correct.
+	if !auth.IsBcryptHash(*cred.PasswordHash) {
+		if hashed, hashErr := auth.HashPassword(password); hashErr == nil {
+			if upErr := s.dbQueries.UpdateSPCredentialPasswordHash(authCtx, database.UpdateSPCredentialPasswordHashParams{
+				ID:           cred.ID,
+				PasswordHash: &hashed,
+			}); upErr != nil {
+				slog.WarnContext(logCtx, "Could not upgrade stored SMPP password to bcrypt", slog.Any("error", upErr))
+			} else {
+				slog.InfoContext(logCtx, "Upgraded stored SMPP password to bcrypt")
+			}
+		}
 	}
 	// --- Auth Success ---
 
@@ -430,22 +459,26 @@ func (s *Server) handleBind(ctx context.Context, ss *sessionState, hdr PDUHeader
 	ss.serviceProviderID = cred.ServiceProviderID
 	ss.boundAt = time.Now()
 	ss.lastActivity = ss.boundAt
+	ss.canReceive = hdr.CommandID != CommandBindTransmitter
 
 	logCtx = logging.ContextWithSPID(logCtx, ss.serviceProviderID) // Add SP ID
 
-	// Store session
+	// Store session alongside any others for this login.
 	s.sessionsMu.Lock()
-	// Check if another session exists for this systemID (shouldn't happen with unique constraint)
-	if existing, exists := s.sessions[systemID]; exists {
-		slog.WarnContext(logCtx, "Duplicate bind attempt for already bound system ID. Closing old connection.", slog.String("old_remote_addr", existing.conn.RemoteAddr().String()))
-		_ = existing.conn.Close() // Force close old connection
-		// delete(s.sessions, systemID) // removeSession will be called by old handler exiting
+	if len(s.sessions[systemID]) >= maxSessionsPerSystemID {
+		s.sessionsMu.Unlock()
+		slog.WarnContext(logCtx, "Bind failed: too many sessions for this system ID", slog.Int("max", maxSessionsPerSystemID))
+		s.writeErrorResponse(ss, hdr, StatusBindFailed)
+		return false
 	}
-	s.sessions[systemID] = ss
+	s.sessions[systemID] = append(s.sessions[systemID], ss)
+	sessionCount := len(s.sessions[systemID])
 	s.sessionsMu.Unlock()
+	slog.InfoContext(logCtx, "Session stored", slog.Int("sessions_for_system_id", sessionCount), slog.Bool("can_receive", ss.canReceive))
 
-	// Send successful BindResp
-	respHdr := makeHeader(CommandBindResp, hdr.SequenceNumber, StatusOk)
+	// Send the response matching the bind type (bind_receiver_resp, bind_transmitter_resp or
+	// bind_transceiver_resp): the response command ID is the request's with the high bit set.
+	respHdr := makeHeader(hdr.CommandID|0x80000000, hdr.SequenceNumber, StatusOk)
 	// Body: system_id<NUL>[Optional TLVs]
 	respBody := append([]byte(systemID), 0x00) // Respond with *our* system ID (make configurable)
 	respHdr.Length += uint32(len(respBody))
@@ -465,6 +498,14 @@ func (s *Server) handleUnbind(ctx context.Context, ss *sessionState, hdr PDUHead
 	if err := s.writePDU(ss, respHdr, nil); err != nil {
 		slog.WarnContext(ctx, "Failed to write UnbindResp PDU", slog.Any("error", err))
 		// Session will be cleaned up when handleSession exits anyway
+		return
+	}
+	// The session loop returns right after this, before its usual flush, so flush here or the
+	// client never receives unbind_resp.
+	ss.writeMu.Lock()
+	defer ss.writeMu.Unlock()
+	if err := ss.writer.Flush(); err != nil {
+		slog.WarnContext(ctx, "Failed to flush UnbindResp PDU", slog.Any("error", err))
 	}
 }
 
@@ -794,16 +835,45 @@ func (s *Server) ForwardRawPDU(ctx context.Context, systemID string, pduBytes []
 	logCtx := logging.ContextWithSystemID(ctx, systemID)
 	slog.DebugContext(logCtx, "Attempting to forward raw PDU", slog.Int("pdu_len", len(pduBytes)))
 
-	s.sessionsMu.RLock() // Read lock to find session
-	ss, ok := s.sessions[systemID]
-	s.sessionsMu.RUnlock()
+	// Deliver through a session that can receive DeliverSM, rotating between them and trying the
+	// next one if a write fails.
+	s.sessionsMu.Lock()
+	var candidates []*sessionState
+	for _, ss := range s.sessions[systemID] {
+		if ss.canReceive {
+			candidates = append(candidates, ss)
+		}
+	}
+	start := 0
+	if len(candidates) > 0 {
+		start = s.nextSession[systemID] % len(candidates)
+		s.nextSession[systemID] = start + 1
+	}
+	s.sessionsMu.Unlock()
 
-	if !ok || ss == nil {
-		slog.WarnContext(logCtx, "Cannot forward PDU: Session not found")
-		return fmt.Errorf("session not found for systemID: %s", systemID)
+	if len(candidates) == 0 {
+		slog.WarnContext(logCtx, "Cannot forward PDU: no receiver or transceiver session bound")
+		return fmt.Errorf("no receiving session bound for systemID: %s", systemID)
 	}
 
-	// Write using session's mutex
+	var lastErr error
+	for i := range candidates {
+		ss := candidates[(start+i)%len(candidates)]
+		if lastErr = writeRawPDU(ss, pduBytes); lastErr == nil {
+			break
+		}
+		slog.WarnContext(logCtx, "Failed to write raw PDU to a session, trying the next", slog.Any("error", lastErr))
+	}
+	if lastErr != nil {
+		slog.ErrorContext(logCtx, "Failed to write/flush raw PDU to client", slog.Any("error", lastErr))
+		return fmt.Errorf("write/flush error for systemID %s: %w", systemID, lastErr)
+	}
+
+	slog.InfoContext(logCtx, "Successfully forwarded raw PDU")
+	return nil
+}
+
+func writeRawPDU(ss *sessionState, pduBytes []byte) error {
 	ss.writeMu.Lock()
 	defer ss.writeMu.Unlock()
 
@@ -811,20 +881,10 @@ func (s *Server) ForwardRawPDU(ctx context.Context, systemID string, pduBytes []
 	if err == nil && n != len(pduBytes) {
 		err = io.ErrShortWrite
 	}
-	// Flush immediately after writing DLR/forwarded PDU
 	if err == nil {
 		err = ss.writer.Flush()
 	}
-
-	if err != nil {
-		slog.ErrorContext(logCtx, "Failed to write/flush raw PDU to client", slog.Any("error", err))
-		// Consider removing session if write fails repeatedly?
-		// s.removeSession(systemID)
-		return fmt.Errorf("write/flush error for systemID %s: %w", systemID, err)
-	}
-
-	slog.InfoContext(logCtx, "Successfully forwarded raw PDU")
-	return nil
+	return err
 }
 
 // Shutdown gracefully stops the SMPP server.
@@ -842,11 +902,11 @@ func (s *Server) Shutdown(ctx context.Context) error {
 	slog.InfoContext(ctx, "Closing active client connections...")
 	s.sessionsMu.Lock() // Lock map for iteration
 	sessionsToClose := make([]*sessionState, 0, len(s.sessions))
-	for _, ss := range s.sessions {
-		sessionsToClose = append(sessionsToClose, ss)
+	for _, list := range s.sessions {
+		sessionsToClose = append(sessionsToClose, list...)
 	}
 	// Clear map immediately while holding write lock
-	s.sessions = make(map[string]*sessionState)
+	s.sessions = make(map[string][]*sessionState)
 	s.sessionsMu.Unlock()
 
 	var closeWg sync.WaitGroup
@@ -868,16 +928,26 @@ func (s *Server) Shutdown(ctx context.Context) error {
 	return nil
 }
 
-// removeSession removes session (called when handler exits or duplicate bind)
-func (s *Server) removeSession(systemID string) {
-	if systemID == "" {
+// removeSession removes this session (and only this one) when its handler exits.
+func (s *Server) removeSession(ss *sessionState) {
+	if ss == nil || ss.systemID == "" {
 		return
 	}
 	s.sessionsMu.Lock()
 	defer s.sessionsMu.Unlock()
-	if _, exists := s.sessions[systemID]; exists {
-		logCtx := logging.ContextWithSystemID(context.Background(), systemID)
-		slog.InfoContext(logCtx, "Removing client session from map")
-		delete(s.sessions, systemID)
+	list := s.sessions[ss.systemID]
+	for i, existing := range list {
+		if existing == ss {
+			list = append(list[:i], list[i+1:]...)
+			break
+		}
 	}
+	if len(list) == 0 {
+		delete(s.sessions, ss.systemID)
+		delete(s.nextSession, ss.systemID)
+	} else {
+		s.sessions[ss.systemID] = list
+	}
+	logCtx := logging.ContextWithSystemID(context.Background(), ss.systemID)
+	slog.InfoContext(logCtx, "Removed client session", slog.Int("sessions_left", len(list)))
 }

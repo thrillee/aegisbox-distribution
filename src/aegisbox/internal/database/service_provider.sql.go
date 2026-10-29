@@ -173,7 +173,8 @@ SELECT
     spc.created_at,
     spc.updated_at,
     sp.name as service_provider_name,
-    sp.default_currency_code -- Include currency
+    sp.default_currency_code, -- Include currency
+    sp.status as service_provider_status
 FROM sp_credentials spc -- Use new table name
 JOIN service_providers sp ON spc.service_provider_id = sp.id
 WHERE spc.protocol = 'smpp' -- Ensure it's an SMPP credential
@@ -183,18 +184,19 @@ LIMIT 1
 `
 
 type GetSPCredentialBySystemIDRow struct {
-	ID                  int32              `json:"id"`
-	ServiceProviderID   int32              `json:"serviceProviderId"`
-	Protocol            string             `json:"protocol"`
-	Status              string             `json:"status"`
-	SystemID            *string            `json:"systemId"`
-	PasswordHash        *string            `json:"passwordHash"`
-	BindType            *string            `json:"bindType"`
-	HttpConfig          []byte             `json:"httpConfig"`
-	CreatedAt           pgtype.Timestamptz `json:"createdAt"`
-	UpdatedAt           pgtype.Timestamptz `json:"updatedAt"`
-	ServiceProviderName string             `json:"serviceProviderName"`
-	DefaultCurrencyCode string             `json:"defaultCurrencyCode"`
+	ID                    int32              `json:"id"`
+	ServiceProviderID     int32              `json:"serviceProviderId"`
+	Protocol              string             `json:"protocol"`
+	Status                string             `json:"status"`
+	SystemID              *string            `json:"systemId"`
+	PasswordHash          *string            `json:"passwordHash"`
+	BindType              *string            `json:"bindType"`
+	HttpConfig            []byte             `json:"httpConfig"`
+	CreatedAt             pgtype.Timestamptz `json:"createdAt"`
+	UpdatedAt             pgtype.Timestamptz `json:"updatedAt"`
+	ServiceProviderName   string             `json:"serviceProviderName"`
+	DefaultCurrencyCode   string             `json:"defaultCurrencyCode"`
+	ServiceProviderStatus string             `json:"serviceProviderStatus"`
 }
 
 func (q *Queries) GetSPCredentialBySystemID(ctx context.Context, systemID *string) (GetSPCredentialBySystemIDRow, error) {
@@ -213,6 +215,7 @@ func (q *Queries) GetSPCredentialBySystemID(ctx context.Context, systemID *strin
 		&i.UpdatedAt,
 		&i.ServiceProviderName,
 		&i.DefaultCurrencyCode,
+		&i.ServiceProviderStatus,
 	)
 	return i, err
 }
@@ -283,6 +286,21 @@ func (q *Queries) ListServiceProviders(ctx context.Context, arg ListServiceProvi
 		return nil, err
 	}
 	return items, nil
+}
+
+const updateSPCredentialPasswordHash = `-- name: UpdateSPCredentialPasswordHash :exec
+UPDATE sp_credentials SET password_hash = $2, updated_at = NOW() WHERE id = $1
+`
+
+type UpdateSPCredentialPasswordHashParams struct {
+	ID           int32   `json:"id"`
+	PasswordHash *string `json:"passwordHash"`
+}
+
+// Replaces a legacy plain password with its bcrypt hash after a successful bind.
+func (q *Queries) UpdateSPCredentialPasswordHash(ctx context.Context, arg UpdateSPCredentialPasswordHashParams) error {
+	_, err := q.db.Exec(ctx, updateSPCredentialPasswordHash, arg.ID, arg.PasswordHash)
+	return err
 }
 
 const updateServiceProvider = `-- name: UpdateServiceProvider :one

@@ -2,6 +2,7 @@ import { db } from '@/lib/db'
 import { serviceProviders, wallets, spCredentials } from '@/lib/schema'
 import { NextResponse } from 'next/server'
 import crypto from 'crypto'
+import { generateSmppPassword, hashSmppPassword, systemIdTaken, smppConnectionInfo, validateSmppLogin } from '@/lib/smpp-credentials'
 import { linkOrganizationToProvider } from '@/lib/service-provider'
 
 export async function GET() {
@@ -97,6 +98,19 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Name and email are required' }, { status: 400 })
     }
 
+    // Check the SMPP login before creating anything, so a bad value leaves nothing half made.
+    const smppSystemId = credentials?.smpp?.systemId || `sp_${crypto.randomBytes(4).toString('hex')}`
+    const smppPassword = credentials?.smpp?.password || generateSmppPassword()
+    if (credentials?.smpp) {
+      const invalid = validateSmppLogin(smppSystemId, smppPassword)
+      if (invalid) {
+        return NextResponse.json({ error: invalid }, { status: 400 })
+      }
+      if (await systemIdTaken(smppSystemId)) {
+        return NextResponse.json({ error: `System ID ${smppSystemId} is already in use` }, { status: 400 })
+      }
+    }
+
     let clerkOrgId = null
     let clerkInvitationId = null
 
@@ -136,16 +150,14 @@ export async function POST(request: Request) {
     const createdCredentials = []
 
     if (credentials?.smpp) {
-      const { systemId, password, bindType, routingGroupId } = credentials.smpp
-      const smppSystemId = systemId || `sp_${crypto.randomBytes(4).toString('hex')}`
-      const smppPassword = password || crypto.randomBytes(16).toString('hex')
+      const { bindType, routingGroupId } = credentials.smpp
 
       const [smppCred] = await db.insert(spCredentials).values({
         serviceProviderId: provider.id,
         protocol: 'smpp',
         status: 'pending',
         systemId: smppSystemId,
-        passwordHash: smppPassword,
+        passwordHash: await hashSmppPassword(smppPassword),
         bindType: bindType || 'trx',
         routingGroupId: routingGroupId || null,
         scope: 'default',
@@ -155,6 +167,7 @@ export async function POST(request: Request) {
         type: 'smpp',
         id: smppCred.id,
         systemId: smppSystemId,
+        password: smppPassword, // shown once; only the hash is stored
         bindType: bindType || 'trx',
       })
     }
@@ -193,6 +206,7 @@ export async function POST(request: Request) {
         email: provider.email,
       },
       credentials: createdCredentials,
+      connection: smppConnectionInfo(),
       clerk: {
         organizationId: clerkOrgId,
         invitationId: clerkInvitationId,

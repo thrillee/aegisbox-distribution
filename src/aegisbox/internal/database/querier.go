@@ -332,6 +332,8 @@ type Querier interface {
 	UpdateRoutingGroup(ctx context.Context, arg UpdateRoutingGroupParams) (RoutingGroup, error)
 	// Updates status, password hash, scope, http_config for a credential.
 	UpdateSPCredential(ctx context.Context, arg UpdateSPCredentialParams) (SpCredential, error)
+	// Replaces a legacy plain password with its bcrypt hash after a successful bind.
+	UpdateSPCredentialPasswordHash(ctx context.Context, arg UpdateSPCredentialPasswordHashParams) error
 	// Updates segment status based on received DLR
 	UpdateSegmentDLR(ctx context.Context, arg UpdateSegmentDLRParams) error
 	// Track which route was used for a segment

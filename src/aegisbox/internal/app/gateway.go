@@ -274,7 +274,7 @@ func RunGateway(ctx context.Context, cfg *config.Config) error {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		if dlrServer, err = mno.StartDLRServer(smsProcessor.UpdateSegmentDLRStatus, cfg.MNOClientConfig.DLRAddr); err != nil && !errors.Is(err, http.ErrServerClosed) {
+		if dlrServer, err = mno.StartDLRServer(smsProcessor.UpdateSegmentDLRStatus, cfg.MNOClientConfig.DLRAddr, cfg.MNOClientConfig.DLRKey); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			slog.Error("DLR HTTP Server failed", slog.Any("error", err))
 			fail(err) // Signal other components to stop
 		}

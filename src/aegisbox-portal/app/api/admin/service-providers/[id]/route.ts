@@ -2,6 +2,7 @@ import { db } from '@/lib/db'
 import { serviceProviders, wallets, spCredentials } from '@/lib/schema'
 import { NextResponse } from 'next/server'
 import { eq } from 'drizzle-orm'
+import { smppConnectionInfo } from '@/lib/smpp-credentials'
 
 export async function GET(
   request: Request,
@@ -70,6 +71,7 @@ export async function GET(
         // The provider page reads `currency` for its wallet amounts.
         currency: wallet?.currencyCode || provider.defaultCurrencyCode,
       },
+      connection: smppConnectionInfo(),
       credentials: {
         apiKeys,
         smpps: smppCreds,

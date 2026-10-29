@@ -55,6 +55,8 @@ type MNOClientConfig struct {
 	ConnectTimeout     time.Duration `envconfig:"MNO_CONNECT_TIMEOUT" default:"5s"`
 	DefaultEnquireLink time.Duration `envconfig:"MNO_ENQUIRE_LINK"    default:"30s"`
 	DLRAddr            string        `envconfig:"API_DLR_ADDR"  default:"9001"`
+	// DLRKey, when set, must accompany every DLR callback (X-API-KEY header, Bearer token or ?key=).
+	DLRKey string `envconfig:"API_DLR_KEY" default:""`
 }
 
 // workers.Config placeholder (define actual fields needed)
@@ -66,9 +68,9 @@ type WorkerConfig struct {
 	RoutingBatchSize       int           `envconfig:"WORKER_ROUTING_BATCH_SIZE"        default:"1000"`
 	PricingBatchSize       int           `envconfig:"WORKER_PRICING_BATCH_SIZE"        default:"1000"`
 	SendingBatchSize       int           `envconfig:"WORKER_SENDING_BATCH_SIZE"        default:"5000"`
-	DLRForwardingBatchSize    int           `envconfig:"WORKER_DLR_FORWARDING_BATCH_SIZE"    default:"5000"`
-	DLRForwarderInterval      time.Duration `envconfig:"WORKER_DLR_FORWARDING_INTERVAL"      default:"1s"`
-	OtpSenderResetInterval    time.Duration `envconfig:"WORKER_OTP_SENDER_RESET_INTERVAL"    default:"1h"`
+	DLRForwardingBatchSize int           `envconfig:"WORKER_DLR_FORWARDING_BATCH_SIZE"    default:"5000"`
+	DLRForwarderInterval   time.Duration `envconfig:"WORKER_DLR_FORWARDING_INTERVAL"      default:"1s"`
+	OtpSenderResetInterval time.Duration `envconfig:"WORKER_OTP_SENDER_RESET_INTERVAL"    default:"1h"`
 }
 
 type HttpConfig struct {

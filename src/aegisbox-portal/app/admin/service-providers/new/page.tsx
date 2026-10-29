@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import Link from 'next/link'
 import { ArrowLeft, Save, Building2, Route, Loader2, Mail, User, Key, Globe } from 'lucide-react'
+import { SmppLoginCreated, type SmppConnection } from '@/components/service-providers/smpp-login-created'
 import { PageLoadingSkeleton } from '@/components/routing/loading-components'
 
 interface RoutingGroup {
@@ -19,6 +20,7 @@ export default function NewServiceProviderPage() {
 
   const [loading, setLoading] = useState(false)
   const [initialLoad, setInitialLoad] = useState(true)
+  const [created, setCreated] = useState<{ systemId: string; password: string; connection: SmppConnection | null } | null>(null)
   const [routingGroups, setRoutingGroups] = useState<RoutingGroup[]>([])
   const [formData, setFormData] = useState({
     name: searchParams.get('name') || '',
@@ -92,7 +94,12 @@ export default function NewServiceProviderPage() {
       const data = await response.json()
 
       if (response.ok) {
-        router.push('/admin/service-providers')
+        const smpp = data.credentials?.find((c: { type: string }) => c.type === 'smpp')
+        if (smpp?.password) {
+          setCreated({ systemId: smpp.systemId, password: smpp.password, connection: data.connection ?? null })
+        } else {
+          router.push('/admin/service-providers')
+        }
       } else {
         alert(data.error || 'Failed to create service provider')
       }
@@ -106,6 +113,14 @@ export default function NewServiceProviderPage() {
 
   if (initialLoad) {
     return <PageLoadingSkeleton />
+  }
+
+  if (created) {
+    return (
+      <div className="p-8 max-w-2xl">
+        <SmppLoginCreated {...created} onDone={() => router.push('/admin/service-providers')} />
+      </div>
+    )
   }
 
   return (

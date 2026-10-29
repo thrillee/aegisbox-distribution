@@ -3,6 +3,7 @@ import { spCredentials } from '@/lib/schema'
 import { NextResponse } from 'next/server'
 import { eq } from 'drizzle-orm'
 import { randomBytes } from 'crypto'
+import { generateSmppPassword, hashSmppPassword, systemIdTaken, smppConnectionInfo, validateSmppLogin } from '@/lib/smpp-credentials'
 
 export async function POST(
   request: Request,
@@ -20,7 +21,14 @@ export async function POST(
     const { systemId, password, bindType, scope, routingGroupId } = body
 
     const smppSystemId = systemId || `sp_${randomBytes(4).toString('hex')}`
-    const smppPassword = password || randomBytes(16).toString('hex')
+    const smppPassword = password || generateSmppPassword()
+    const invalid = validateSmppLogin(smppSystemId, smppPassword)
+    if (invalid) {
+      return NextResponse.json({ error: invalid }, { status: 400 })
+    }
+    if (await systemIdTaken(smppSystemId)) {
+      return NextResponse.json({ error: `System ID ${smppSystemId} is already in use` }, { status: 400 })
+    }
 
     const [credential] = await db
       .insert(spCredentials)
@@ -28,7 +36,7 @@ export async function POST(
         serviceProviderId: spId,
         protocol: 'smpp',
         systemId: smppSystemId,
-        passwordHash: smppPassword,
+        passwordHash: await hashSmppPassword(smppPassword),
         bindType: bindType || 'trx',
         scope: scope || 'default',
         routingGroupId: routingGroupId || null,
@@ -46,6 +54,7 @@ export async function POST(
         scope: credential.scope,
         routingGroupId: credential.routingGroupId,
       },
+      connection: smppConnectionInfo(),
     })
   } catch (error) {
     console.error('[v0] Error creating SMPP credential:', error)
@@ -78,7 +87,7 @@ export async function GET(
       .from(spCredentials)
       .where(eq(spCredentials.serviceProviderId, spId))
 
-    return NextResponse.json({ credentials })
+    return NextResponse.json({ credentials, connection: smppConnectionInfo() })
   } catch (error) {
     console.error('[v0] Error fetching SMPP credentials:', error)
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 })

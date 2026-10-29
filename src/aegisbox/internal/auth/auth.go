@@ -1,8 +1,10 @@
 package auth
 
 import (
+	"crypto/subtle"
 	"fmt"
 	"log/slog"
+	"strings"
 
 	"golang.org/x/crypto/bcrypt"
 )
@@ -22,19 +24,19 @@ func HashPassword(password string) (string, error) {
 	return string(hashedBytes), nil
 }
 
-// CheckPasswordHash compares a plaintext password with a stored bcrypt hash.
-// Use this during SMPP bind authentication.
+// CheckPasswordHash compares a password with what is stored for an SMPP credential: a bcrypt
+// hash, or (for credentials created before hashing) the password itself, compared in constant
+// time. Use IsBcryptHash to tell which one matched, so legacy values can be upgraded.
 func CheckPasswordHash(password, hash string) bool {
-	return password == hash
-	// err := bcrypt.CompareHashAndPassword([]byte(hash), []byte(password))
-	// if err != nil {
-	// 	if !errors.Is(err, bcrypt.ErrMismatchedHashAndPassword) {
-	// 		// Log unexpected errors during comparison
-	// 		slog.Warn("Error comparing password hash", slog.Any("error", err))
-	// 	}
-	// 	return false // Passwords don't match or error occurred
-	// }
-	// return true // Passwords match
+	if IsBcryptHash(hash) {
+		return bcrypt.CompareHashAndPassword([]byte(hash), []byte(password)) == nil
+	}
+	return subtle.ConstantTimeCompare([]byte(password), []byte(hash)) == 1
+}
+
+// IsBcryptHash reports whether a stored value is a bcrypt hash rather than a legacy plain value.
+func IsBcryptHash(stored string) bool {
+	return strings.HasPrefix(stored, "$2a$") || strings.HasPrefix(stored, "$2b$") || strings.HasPrefix(stored, "$2y$")
 }
 
 // HashAPIKey generates a bcrypt hash for the given API key secret.
