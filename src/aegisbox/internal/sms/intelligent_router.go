@@ -375,6 +375,41 @@ func (r *IntelligentRouter) RouteWithCandidates(ctx context.Context, req Routing
 	return result, nil
 }
 
+// routeRetryInterval is how long a route taken out by route health waits before it gets a
+// message again. One successful send brings it back; a failure waits another interval, and
+// failover sends that message on the next route.
+const routeRetryInterval = time.Minute
+
+type routeHealthState int
+
+const (
+	routeUsable routeHealthState = iota
+	routeExcluded
+	routeRetrying
+)
+
+// routeHealthDecision says whether a candidate route can take traffic. A route an admin marked
+// unavailable stays out. A route taken out automatically (too many failed submissions in a row)
+// is retried once per routeRetryInterval, and takes traffic again once a send succeeds.
+func routeHealthDecision(c database.GetAllApplicableRoutesForRoutingRow, maxConsecutiveFailures int32, now time.Time) routeHealthState {
+	manuallyOff := !c.RouteIsAvailable && !c.RouteAutoUnavailable && c.ConsecutiveFailures < maxConsecutiveFailures
+	if manuallyOff {
+		return routeExcluded
+	}
+	autoOff := c.ConsecutiveFailures >= maxConsecutiveFailures || (!c.RouteIsAvailable && c.RouteAutoUnavailable)
+	if !autoOff {
+		return routeUsable
+	}
+	if c.ConsecutiveFailures == 0 {
+		// The last send succeeded: the route is recovering, let it take traffic.
+		return routeRetrying
+	}
+	if c.RouteLastAttemptAt.Valid && now.Sub(c.RouteLastAttemptAt.Time) < routeRetryInterval {
+		return routeExcluded
+	}
+	return routeRetrying
+}
+
 func (r *IntelligentRouter) filterViableCandidates(
 	logCtx context.Context,
 	candidates []database.GetAllApplicableRoutesForRoutingRow,
@@ -408,26 +443,23 @@ func (r *IntelligentRouter) filterViableCandidates(
 			candidate.MaxRetryAttempts = *c.MaxRetryAttempts
 		}
 
-		if c.ConsecutiveFailures >= maxConsecutiveFailures {
-			slog.WarnContext(logCtx, "Route exceeds max consecutive failures, skipping",
-				slog.Int("mno_id", int(c.MnoID)),
-				slog.Int("failures", int(c.ConsecutiveFailures)),
-				slog.Int("max_allowed", int(maxConsecutiveFailures)),
-			)
-			continue
-		}
-
 		candidate.ConsecutiveFailures = c.ConsecutiveFailures
-
 		candidate.HealthScore, _ = c.RouteHealthScore.Float64()
 		candidate.IsAvailable = c.RouteIsAvailable
 
-		if !candidate.IsAvailable {
-			slog.DebugContext(logCtx, "Route health below threshold, skipping",
+		switch routeHealthDecision(c, maxConsecutiveFailures, time.Now()) {
+		case routeExcluded:
+			slog.DebugContext(logCtx, "Route taken out by route health, skipping",
 				slog.Int("mno_id", int(c.MnoID)),
-				slog.Float64("health_score", candidate.HealthScore),
+				slog.Int("consecutive_failures", int(c.ConsecutiveFailures)),
+				slog.Bool("is_available", c.RouteIsAvailable),
 			)
 			continue
+		case routeRetrying:
+			slog.InfoContext(logCtx, "Retrying route taken out by route health",
+				slog.Int("mno_id", int(c.MnoID)),
+				slog.Int("consecutive_failures", int(c.ConsecutiveFailures)),
+			)
 		}
 
 		if c.Weight != nil {

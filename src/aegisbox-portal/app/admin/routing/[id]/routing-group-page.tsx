@@ -6,6 +6,7 @@ import { useRouter } from 'next/navigation'
 import { ArrowLeft, Plus, MapPin, ArrowRight, Settings, Edit, Trash2, Loader2 } from 'lucide-react'
 import { Dialog, Transition } from '@headlessui/react'
 import { Fragment } from 'react'
+import { TrafficSplit } from '@/components/routing/traffic-split'
 
 interface Assignment {
   id: number
@@ -242,6 +243,8 @@ export function RoutingGroupPage({ initialGroup }: RoutingGroupPageProps) {
           </div>
         </div>
       </div>
+
+      <TrafficSplit groupId={group.id} />
 
       <div className="bg-zinc-900/50 border border-white/10 rounded-2xl">
         <div className="p-4 border-b border-white/10 flex items-center justify-between">

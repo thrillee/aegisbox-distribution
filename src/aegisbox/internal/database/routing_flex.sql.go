@@ -486,7 +486,9 @@ SELECT
     COALESCE(rh.health_score, 100.00) AS route_health_score,
     COALESCE(rh.is_available, true) AS route_is_available,
     COALESCE(rh.consecutive_failures, 0) AS consecutive_failures,
-    COALESCE(rh.last_success_at, NOW()) AS last_route_success
+    COALESCE(rh.last_success_at, NOW()) AS last_route_success,
+    rh.last_attempt_at AS route_last_attempt_at,
+    COALESCE(rh.auto_unavailable, false) AS route_auto_unavailable
 FROM routing_assignments ra
 JOIN mnos m ON ra.mno_id = m.id AND m.status = 'active'
 LEFT JOIN mno_connections mc ON m.id = mc.mno_id AND mc.status = 'active'
@@ -509,23 +511,25 @@ type GetAllApplicableRoutesForRoutingParams struct {
 }
 
 type GetAllApplicableRoutesForRoutingRow struct {
-	RoutingAssignmentID int32              `json:"routingAssignmentId"`
-	MnoID               int32              `json:"mnoId"`
-	Priority            int32              `json:"priority"`
-	Weight              *int32             `json:"weight"`
-	MaxRetryAttempts    *int32             `json:"maxRetryAttempts"`
-	AssignmentStatus    string             `json:"assignmentStatus"`
-	IsActive            *bool              `json:"isActive"`
-	MnoName             string             `json:"mnoName"`
-	MnoStatus           string             `json:"mnoStatus"`
-	MnoConnectionID     *int32             `json:"mnoConnectionId"`
-	MnoProtocol         *string            `json:"mnoProtocol"`
-	ConnectionStatus    *string            `json:"connectionStatus"`
-	ConnectionPriority  *int32             `json:"connectionPriority"`
-	RouteHealthScore    decimal.Decimal    `json:"routeHealthScore"`
-	RouteIsAvailable    bool               `json:"routeIsAvailable"`
-	ConsecutiveFailures int32              `json:"consecutiveFailures"`
-	LastRouteSuccess    pgtype.Timestamptz `json:"lastRouteSuccess"`
+	RoutingAssignmentID  int32              `json:"routingAssignmentId"`
+	MnoID                int32              `json:"mnoId"`
+	Priority             int32              `json:"priority"`
+	Weight               *int32             `json:"weight"`
+	MaxRetryAttempts     *int32             `json:"maxRetryAttempts"`
+	AssignmentStatus     string             `json:"assignmentStatus"`
+	IsActive             *bool              `json:"isActive"`
+	MnoName              string             `json:"mnoName"`
+	MnoStatus            string             `json:"mnoStatus"`
+	MnoConnectionID      *int32             `json:"mnoConnectionId"`
+	MnoProtocol          *string            `json:"mnoProtocol"`
+	ConnectionStatus     *string            `json:"connectionStatus"`
+	ConnectionPriority   *int32             `json:"connectionPriority"`
+	RouteHealthScore     decimal.Decimal    `json:"routeHealthScore"`
+	RouteIsAvailable     bool               `json:"routeIsAvailable"`
+	ConsecutiveFailures  int32              `json:"consecutiveFailures"`
+	LastRouteSuccess     pgtype.Timestamptz `json:"lastRouteSuccess"`
+	RouteLastAttemptAt   pgtype.Timestamptz `json:"routeLastAttemptAt"`
+	RouteAutoUnavailable bool               `json:"routeAutoUnavailable"`
 }
 
 // =========================================
@@ -562,6 +566,8 @@ func (q *Queries) GetAllApplicableRoutesForRouting(ctx context.Context, arg GetA
 			&i.RouteIsAvailable,
 			&i.ConsecutiveFailures,
 			&i.LastRouteSuccess,
+			&i.RouteLastAttemptAt,
+			&i.RouteAutoUnavailable,
 		); err != nil {
 			return nil, err
 		}
