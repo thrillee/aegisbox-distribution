@@ -166,14 +166,12 @@ func (s *DLRService) UpdateSegmentDLRStatus(
 		dlrStatus := strings.ToUpper(dlrInfo.Status)
 		routeSuccess := dlrStatus == "DELIVRD"
 
-		err = s.routeHealthTracker.RecordRouteAttempt(
+		err = s.routeHealthTracker.RecordDeliveryOutcome(
 			logCtx,
 			*segmentInfo.RoutingAssignmentID,
-			segmentInfo.ApprovedSenderID,
 			&segmentInfo.MessageID,
 			routeSuccess,
 			&dlrInfo.ErrorCode,
-			nil,
 		)
 		if err != nil {
 			slog.WarnContext(logCtx, "Failed to record route health",

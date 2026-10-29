@@ -27,16 +27,49 @@ func NewRouteHealthTracker(q database.Querier, logger *slog.Logger) *RouteHealth
 	}
 }
 
-// RecordRouteAttempt records a route delivery attempt (success or failure)
+// RecordRouteAttempt records the outcome of submitting a message to a route. Failed submissions
+// (connection or operator errors) count toward taking the route out of service.
 func (t *RouteHealthTracker) RecordRouteAttempt(
 	ctx context.Context,
 	routingAssignmentID int32,
-	senderID *int32, // nullable - if nil, tracks route-level (not sender-specific)
+	senderID *int32, // the message's approved sender; not used for route health (see below)
 	messageID *int64,
 	success bool,
 	errorCode *string,
 	errorDescription *string,
 ) error {
+	return t.record(ctx, routingAssignmentID, messageID, success, true, errorCode, errorDescription)
+}
+
+// RecordDeliveryOutcome records a DLR result for a route. It feeds the route's health score, but a
+// failed delivery (UNDELIV, EXPIRED and the like) is about the handset or number, not the route, so
+// it does not count toward taking the route out of service. A delivered message still shows the
+// route works and clears its failure count.
+func (t *RouteHealthTracker) RecordDeliveryOutcome(
+	ctx context.Context,
+	routingAssignmentID int32,
+	messageID *int64,
+	delivered bool,
+	errorCode *string,
+) error {
+	return t.record(ctx, routingAssignmentID, messageID, delivered, false, errorCode, nil)
+}
+
+func (t *RouteHealthTracker) record(
+	ctx context.Context,
+	routingAssignmentID int32,
+	messageID *int64,
+	success bool,
+	failureCountsForAvailability bool,
+	errorCode *string,
+	errorDescription *string,
+) error {
+	// The router reads only route-wide health (sender_id NULL) when it decides whether a route is
+	// usable. Recording attempts per approved sender left that row empty for every message with an
+	// approved sender, so failing routes were never taken out. Sender performance is tracked
+	// separately in sender_id_health.
+	var senderID *int32
+
 	// Record attempt in ring buffer
 	_, err := t.dbQueries.RecordRouteDeliveryAttempt(ctx, database.RecordRouteDeliveryAttemptParams{
 		RoutingAssignmentID: routingAssignmentID,
@@ -52,7 +85,7 @@ func (t *RouteHealthTracker) RecordRouteAttempt(
 	}
 
 	// Recalculate and update route health
-	err = t.updateRouteHealth(ctx, routingAssignmentID, senderID, success)
+	err = t.updateRouteHealth(ctx, routingAssignmentID, senderID, success, failureCountsForAvailability)
 	if err != nil {
 		t.logger.Error("Failed to update route health",
 			slog.Int("routing_assignment_id", int(routingAssignmentID)),
@@ -109,6 +142,7 @@ func (t *RouteHealthTracker) updateRouteHealth(
 	routingAssignmentID int32,
 	senderID *int32,
 	latestSuccess bool,
+	failureCountsForAvailability bool,
 ) error {
 	// Get config for window size and thresholds
 	config, err := t.dbQueries.GetGlobalRoutingConfig(ctx)
@@ -152,9 +186,13 @@ func (t *RouteHealthTracker) updateRouteHealth(
 		if latestSuccess {
 			consecutiveSuccesses = int32PtrToInt32(currentHealth.ConsecutiveSuccesses, 0) + 1
 			consecutiveFailures = 0
-		} else {
+		} else if failureCountsForAvailability {
 			consecutiveFailures = int32PtrToInt32(currentHealth.ConsecutiveFailures, 0) + 1
 			consecutiveSuccesses = 0
+		} else {
+			// A failed delivery leaves the route's availability counters as they were.
+			consecutiveFailures = int32PtrToInt32(currentHealth.ConsecutiveFailures, 0)
+			consecutiveSuccesses = int32PtrToInt32(currentHealth.ConsecutiveSuccesses, 0)
 		}
 
 		// Check if should mark unavailable (5 consecutive failures)
@@ -197,7 +235,7 @@ func (t *RouteHealthTracker) updateRouteHealth(
 		// First record - initialize consecutive counters
 		if latestSuccess {
 			consecutiveSuccesses = 1
-		} else {
+		} else if failureCountsForAvailability {
 			consecutiveFailures = 1
 		}
 	}
