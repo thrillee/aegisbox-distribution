@@ -60,6 +60,8 @@ type sessionState struct {
 	boundAt           time.Time
 	lastActivity      time.Time // Track last PDU read/write for idle timeout
 	canReceive        bool      // bound as receiver or transceiver, so it can take DeliverSM (DLRs)
+	historyID         int64     // smpp_sessions row for this bind, 0 if none was recorded
+	endReason         string    // why the session ended, recorded in smpp_sessions
 }
 
 // maxSessionsPerSystemID caps concurrent binds per login. Customers commonly open several
@@ -112,6 +114,15 @@ func (s *Server) ListenAndServe() error {
 	}
 	s.listener = ln // Store listener to allow closing
 
+	// Sessions still marked connected were open when the gateway last stopped.
+	cleanupCtx, cancelCleanup := context.WithTimeout(context.Background(), 10*time.Second)
+	if n, err := s.dbQueries.CloseOrphanedSMPPSessions(cleanupCtx); err != nil {
+		slog.Warn("Could not close SMPP sessions left open by the last run", slog.Any("error", err))
+	} else if n > 0 {
+		slog.Info("Closed SMPP sessions left open by the last run", slog.Int64("count", n))
+	}
+	cancelCleanup()
+
 	// Goroutine to handle shutdown signal
 	s.wg.Add(1)
 	go func() {
@@ -157,6 +168,7 @@ func (s *Server) handleSession(ctx context.Context, ss *sessionState) {
 		if ss.systemID != "" { // Only remove if session was bound
 			s.removeSession(ss)
 		}
+		s.endSessionHistory(ss)
 		_ = ss.conn.Close()
 		slog.InfoContext(ctx, "Closed SMPP client connection")
 		s.wg.Done() // Decrement waitgroup counter
@@ -174,14 +186,18 @@ func (s *Server) handleSession(ctx context.Context, ss *sessionState) {
 		if err != nil {
 			if errors.Is(err, io.EOF) {
 				slog.InfoContext(ctx, "Client closed connection (EOF).")
+				ss.endReason = "client disconnected"
 			} else if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
 				slog.InfoContext(ctx, "Client connection read timeout/idle.")
+				ss.endReason = "idle timeout"
 				// Optional: Send EnquireLink here if idle? Or just close.
 				// Let's close for simplicity now.
 			} else if errors.Is(err, net.ErrClosed) {
 				slog.InfoContext(ctx, "Connection closed (likely during shutdown).")
+				ss.endReason = "gateway shutdown"
 			} else {
 				slog.WarnContext(ctx, "Error reading PDU", slog.Any("error", err))
+				ss.endReason = "connection error"
 			}
 			return // Exit handler on any read error/EOF/timeout
 		}
@@ -220,6 +236,7 @@ func (s *Server) handleSession(ctx context.Context, ss *sessionState) {
 		case CommandSubmitSM, CommandSubmitMultiSM:
 			s.handleGenericSubmit(logCtx, ss, hdr, body)
 		case CommandUnbind:
+			ss.endReason = "unbind"
 			s.handleUnbind(logCtx, ss, hdr)
 			return // Close connection after unbind response sent
 		case CommandEnquireLink:
@@ -377,10 +394,20 @@ func (s *Server) handleBind(ctx context.Context, ss *sessionState, hdr PDUHeader
 	var n int
 	offset := 0
 
+	// Record refused binds in the session history with the reason.
+	var refusal string
+	var credID, spID *int32
+	defer func() {
+		if refusal != "" {
+			s.recordBind(ctx, ss, systemID, hdr.CommandID, credID, spID, "refused", refusal)
+		}
+	}()
+
 	// Parse required fields carefully
 	systemID, n, ok = readCString(body[offset:])
 	if !ok || systemID == "" {
 		slog.WarnContext(ctx, "Bind failed: Cannot parse system_id or is empty")
+		refusal = "invalid system ID"
 		s.writeErrorResponse(ss, hdr, StatusInvSysID)
 		return false
 	}
@@ -390,6 +417,7 @@ func (s *Server) handleBind(ctx context.Context, ss *sessionState, hdr PDUHeader
 	password, n, ok = readCString(body[offset:])
 	if !ok { // Password can be empty, but must be terminated
 		slog.WarnContext(logCtx, "Bind failed: Cannot parse password field")
+		refusal = "invalid password field"
 		s.writeErrorResponse(ss, hdr, StatusInvPasswd) // Treat parsing error as invalid password?
 		return false
 	}
@@ -398,6 +426,7 @@ func (s *Server) handleBind(ctx context.Context, ss *sessionState, hdr PDUHeader
 	systemType, n, ok = readCString(body[offset:])
 	if !ok {
 		slog.WarnContext(logCtx, "Bind failed: Cannot parse system_type field")
+		refusal = "invalid system type field"
 		s.writeErrorResponse(ss, hdr, StatusSystemError) // Or a more specific param error if available
 		return false
 	}
@@ -413,28 +442,35 @@ func (s *Server) handleBind(ctx context.Context, ss *sessionState, hdr PDUHeader
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			slog.WarnContext(logCtx, "Bind failed: SystemID not found in DB")
+			refusal = "unknown or inactive system ID"
 			s.writeErrorResponse(ss, hdr, StatusInvSysID)
 			return false
 		}
 		slog.ErrorContext(logCtx, "Bind auth DB error", slog.Any("error", err))
+		refusal = "gateway database error"
 		s.writeErrorResponse(ss, hdr, StatusSystemError)
 		return false
 	}
 
+	credID, spID = &cred.ID, &cred.ServiceProviderID
+
 	// Check protocol and password
 	if cred.Protocol != "smpp" {
 		slog.WarnContext(logCtx, "Bind failed: Credential protocol mismatch", slog.String("expected", "smpp"), slog.String("actual", cred.Protocol))
+		refusal = "not an SMPP login"
 		s.writeErrorResponse(ss, hdr, StatusBindFailed)
 		return false
 	}
 	if disabledProviderStatuses[cred.ServiceProviderStatus] {
 		slog.WarnContext(logCtx, "Bind failed: service provider is not active", slog.String("status", cred.ServiceProviderStatus))
+		refusal = "customer is " + cred.ServiceProviderStatus
 		s.writeErrorResponse(ss, hdr, StatusBindFailed)
 		return false
 	}
 	// A credential without a stored password must not accept any password.
 	if cred.PasswordHash == nil || *cred.PasswordHash == "" || !auth.CheckPasswordHash(password, *cred.PasswordHash) {
 		slog.WarnContext(logCtx, "Bind failed: Invalid password")
+		refusal = "wrong password"
 		s.writeErrorResponse(ss, hdr, StatusInvPasswd)
 		return false
 	}
@@ -468,6 +504,7 @@ func (s *Server) handleBind(ctx context.Context, ss *sessionState, hdr PDUHeader
 	if len(s.sessions[systemID]) >= maxSessionsPerSystemID {
 		s.sessionsMu.Unlock()
 		slog.WarnContext(logCtx, "Bind failed: too many sessions for this system ID", slog.Int("max", maxSessionsPerSystemID))
+		refusal = fmt.Sprintf("too many sessions (max %d)", maxSessionsPerSystemID)
 		s.writeErrorResponse(ss, hdr, StatusBindFailed)
 		return false
 	}
@@ -475,6 +512,7 @@ func (s *Server) handleBind(ctx context.Context, ss *sessionState, hdr PDUHeader
 	sessionCount := len(s.sessions[systemID])
 	s.sessionsMu.Unlock()
 	slog.InfoContext(logCtx, "Session stored", slog.Int("sessions_for_system_id", sessionCount), slog.Bool("can_receive", ss.canReceive))
+	s.recordBind(logCtx, ss, systemID, hdr.CommandID, credID, spID, "connected", "")
 
 	// Send the response matching the bind type (bind_receiver_resp, bind_transmitter_resp or
 	// bind_transceiver_resp): the response command ID is the request's with the high bit set.
@@ -950,4 +988,66 @@ func (s *Server) removeSession(ss *sessionState) {
 	}
 	logCtx := logging.ContextWithSystemID(context.Background(), ss.systemID)
 	slog.InfoContext(logCtx, "Removed client session", slog.Int("sessions_left", len(list)))
+}
+
+// bindTypeName is the short bind type stored in the session history.
+func bindTypeName(commandID uint32) string {
+	switch commandID {
+	case CommandBindReceiver:
+		return "rx"
+	case CommandBindTransmitter:
+		return "tx"
+	default:
+		return "trx"
+	}
+}
+
+func truncate(v string, max int) string {
+	if len(v) > max {
+		return v[:max]
+	}
+	return v
+}
+
+// recordBind adds a bind attempt to the session history. A failure to record never affects the
+// bind itself.
+func (s *Server) recordBind(ctx context.Context, ss *sessionState, systemID string, commandID uint32, credID, spID *int32, status, reason string) {
+	dbCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 3*time.Second)
+	defer cancel()
+	var endReason *string
+	if reason != "" {
+		endReason = &reason
+	}
+	id, err := s.dbQueries.CreateSMPPSession(dbCtx, database.CreateSMPPSessionParams{
+		SpCredentialID:    credID,
+		ServiceProviderID: spID,
+		SystemID:          truncate(systemID, 64),
+		BindType:          bindTypeName(commandID),
+		RemoteAddr:        truncate(ss.conn.RemoteAddr().String(), 64),
+		Status:            status,
+		EndReason:         endReason,
+	})
+	if err != nil {
+		slog.WarnContext(ctx, "Could not record SMPP session history", slog.Any("error", err))
+		return
+	}
+	if status == "connected" {
+		ss.historyID = id
+	}
+}
+
+// endSessionHistory marks a recorded session as closed with the reason it ended.
+func (s *Server) endSessionHistory(ss *sessionState) {
+	if ss.historyID == 0 {
+		return
+	}
+	reason := ss.endReason
+	if reason == "" {
+		reason = "connection closed"
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	if err := s.dbQueries.EndSMPPSession(ctx, database.EndSMPPSessionParams{ID: ss.historyID, EndReason: &reason}); err != nil {
+		slog.Warn("Could not record end of SMPP session", slog.Any("error", err), slog.String("system_id", ss.systemID))
+	}
 }

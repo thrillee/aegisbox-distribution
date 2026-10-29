@@ -37,3 +37,20 @@ export function reportDayRange(start: string, end: string): { from: Date; to: Da
 }
 
 export const isReportDate = (value: string) => /^\d{4}-\d{2}-\d{2}$/.test(value) && !Number.isNaN(Date.parse(value))
+
+const dateTimeFormat = new Intl.DateTimeFormat('en-GB', {
+  timeZone: REPORT_TIME_ZONE,
+  year: 'numeric',
+  month: '2-digit',
+  day: '2-digit',
+  hour: '2-digit',
+  minute: '2-digit',
+  second: '2-digit',
+  hour12: false,
+})
+
+// An instant as Lagos date and time, YYYY-MM-DD HH:MM:SS.
+export function reportDateTime(at: Date): string {
+  const p = Object.fromEntries(dateTimeFormat.formatToParts(at).map((x) => [x.type, x.value]))
+  return `${p.year}-${p.month}-${p.day} ${p.hour}:${p.minute}:${p.second}`
+}

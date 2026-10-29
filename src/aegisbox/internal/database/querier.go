@@ -36,6 +36,8 @@ type Querier interface {
 	CleanupOldDeliveryAttempts(ctx context.Context, retentionDays int32) error
 	// Cleanup route delivery attempts older than retention period
 	CleanupOldRouteAttempts(ctx context.Context, retentionDays int32) error
+	// Sessions left 'connected' by a gateway that stopped without closing them.
+	CloseOrphanedSMPPSessions(ctx context.Context) (int64, error)
 	CountMNOConnectionsByMNO(ctx context.Context, mnoID int32) (int64, error)
 	CountMNOs(ctx context.Context) (int64, error)
 	// Counts messages based on optional filters, joining necessary tables.
@@ -75,6 +77,7 @@ type Querier interface {
 	// Queries for RoutingGroup
 	CreateRoutingGroup(ctx context.Context, arg CreateRoutingGroupParams) (RoutingGroup, error)
 	CreateSMPPCredential(ctx context.Context, arg CreateSMPPCredentialParams) (SpCredential, error)
+	CreateSMPPSession(ctx context.Context, arg CreateSMPPSessionParams) (int64, error)
 	// Creates an SP credential (SMPP or HTTP)
 	CreateSPCredential(ctx context.Context, arg CreateSPCredentialParams) (SpCredential, error)
 	CreateServiceProvider(ctx context.Context, arg CreateServiceProviderParams) (ServiceProvider, error)
@@ -101,6 +104,7 @@ type Querier interface {
 	DeleteRoutingGroup(ctx context.Context, id int32) error
 	DeleteSPCredential(ctx context.Context, id int32) error
 	DeleteServiceProvider(ctx context.Context, id int32) error
+	EndSMPPSession(ctx context.Context, arg EndSMPPSessionParams) error
 	// Inserts a new DLR forwarding job into the queue.
 	EnqueueDLRForForwarding(ctx context.Context, arg EnqueueDLRForForwardingParams) error
 	FindDebitTransactionForMessage(ctx context.Context, messageID *int64) (FindDebitTransactionForMessageRow, error)
