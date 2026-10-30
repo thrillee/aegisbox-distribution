@@ -77,6 +77,7 @@ SET
     auto_dlr_enabled = sqlc.arg(auto_dlr_enabled),
     auto_dlr_status = sqlc.arg(auto_dlr_status),
     auto_dlr_delay_seconds = sqlc.arg(auto_dlr_delay_seconds),
+    auto_dlr_include_unconfirmed = sqlc.arg(auto_dlr_include_unconfirmed),
     auto_dlr_enabled_at = CASE
         WHEN sqlc.arg(auto_dlr_enabled)::BOOLEAN AND NOT auto_dlr_enabled THEN NOW()
         WHEN sqlc.arg(auto_dlr_enabled)::BOOLEAN THEN auto_dlr_enabled_at

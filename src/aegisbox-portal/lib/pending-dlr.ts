@@ -17,7 +17,9 @@ export interface PendingDlrFilter {
 
 const FINAL = sql`('DELIVRD','UNDELIV','EXPIRED','REJECTD','DELETED')`
 const accepted = sql`ms.mno_message_id IS NOT NULL`
-const noAnswer = sql`(ms.mno_message_id IS NULL AND ms.sent_to_mno_at IS NOT NULL AND (ms.error_code IS NULL OR ms.error_code = 'TIMEOUT') AND ms.error_description IS NULL)`
+// Never answered: no error recorded (TIMEOUT only marks "no DLR in time") or the submit timed out
+// (MNO_TIMEOUT). Same rule as the gateway's include_unconfirmed; rejections are never included.
+const noAnswer = sql`(ms.mno_message_id IS NULL AND ms.sent_to_mno_at IS NOT NULL AND (((ms.error_code IS NULL OR ms.error_code = 'TIMEOUT') AND ms.error_description IS NULL) OR ms.error_code = 'MNO_TIMEOUT'))`
 const awaiting = sql`(ms.dlr_status IS NULL OR upper(ms.dlr_status) NOT IN ${FINAL})`
 
 // For a message list: messages a manual DLR can complete (waiting, accepted or no answer, no

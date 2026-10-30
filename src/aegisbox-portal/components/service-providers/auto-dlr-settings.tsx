@@ -9,6 +9,7 @@ interface AutoDlrConfig {
   enabled: boolean
   status: string
   delay_seconds: number
+  include_unconfirmed?: boolean
   enabled_at: string | null
 }
 
@@ -21,6 +22,7 @@ export function AutoDlrSettings({ providerId }: Readonly<{ providerId: number }>
   const [enabled, setEnabled] = useState(false)
   const [status, setStatus] = useState('DELIVRD')
   const [delayMinutes, setDelayMinutes] = useState('5')
+  const [includeUnconfirmed, setIncludeUnconfirmed] = useState(false)
   const [enabledAt, setEnabledAt] = useState<string | null>(null)
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
   const [savedMessage, setSavedMessage] = useState<string | null>(null)
@@ -29,6 +31,7 @@ export function AutoDlrSettings({ providerId }: Readonly<{ providerId: number }>
     setEnabled(config.enabled)
     setStatus(config.status)
     setDelayMinutes(String(Math.round(config.delay_seconds / 60)))
+    setIncludeUnconfirmed(!!config.include_unconfirmed)
     setEnabledAt(config.enabled_at)
   }
 
@@ -67,7 +70,7 @@ export function AutoDlrSettings({ providerId }: Readonly<{ providerId: number }>
       const res = await fetch(`/api/admin/service-providers/${providerId}/auto-dlr`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ enabled, status, delay_seconds: minutes * 60 }),
+        body: JSON.stringify({ enabled, status, delay_seconds: minutes * 60, include_unconfirmed: includeUnconfirmed }),
       })
       const data = await res.json().catch(() => ({}))
       if (!res.ok) {
@@ -146,6 +149,21 @@ export function AutoDlrSettings({ providerId }: Readonly<{ providerId: number }>
             />
           </div>
         </div>
+
+        <label className="flex items-start gap-2 text-sm text-zinc-300">
+          <input
+            type="checkbox"
+            checked={includeUnconfirmed}
+            onChange={(e) => setIncludeUnconfirmed(e.target.checked)}
+            className="mt-1"
+          />
+          <span>
+            Also complete messages the MNO never answered
+            <span className="block text-xs text-zinc-500">
+              Sent, but the MNO never confirmed or rejected them (for example the submit timed out), so it may not have received them. Rejected messages are never included.
+            </span>
+          </span>
+        </label>
 
         {FAILURE_DLR_STATUSES.includes(status) && (
           <p className="text-sm text-amber-400">

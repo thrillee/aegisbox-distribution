@@ -394,18 +394,19 @@ type SenderIDHealth struct {
 }
 
 type ServiceProvider struct {
-	ID                  int32              `json:"id"`
-	Name                string             `json:"name"`
-	Email               string             `json:"email"`
-	Status              string             `json:"status"`
-	DefaultCurrencyCode string             `json:"defaultCurrencyCode"`
-	CreatedAt           pgtype.Timestamptz `json:"createdAt"`
-	UpdatedAt           pgtype.Timestamptz `json:"updatedAt"`
-	AutoDlrEnabled      bool               `json:"autoDlrEnabled"`
-	AutoDlrStatus       string             `json:"autoDlrStatus"`
-	AutoDlrDelaySeconds int32              `json:"autoDlrDelaySeconds"`
-	AutoDlrEnabledAt    pgtype.Timestamptz `json:"autoDlrEnabledAt"`
-	UseRouteSenderPool  bool               `json:"useRouteSenderPool"`
+	ID                        int32              `json:"id"`
+	Name                      string             `json:"name"`
+	Email                     string             `json:"email"`
+	Status                    string             `json:"status"`
+	DefaultCurrencyCode       string             `json:"defaultCurrencyCode"`
+	CreatedAt                 pgtype.Timestamptz `json:"createdAt"`
+	UpdatedAt                 pgtype.Timestamptz `json:"updatedAt"`
+	AutoDlrEnabled            bool               `json:"autoDlrEnabled"`
+	AutoDlrStatus             string             `json:"autoDlrStatus"`
+	AutoDlrDelaySeconds       int32              `json:"autoDlrDelaySeconds"`
+	AutoDlrEnabledAt          pgtype.Timestamptz `json:"autoDlrEnabledAt"`
+	UseRouteSenderPool        bool               `json:"useRouteSenderPool"`
+	AutoDlrIncludeUnconfirmed bool               `json:"autoDlrIncludeUnconfirmed"`
 }
 
 type SmppSession struct {

@@ -109,6 +109,8 @@ func (w *AutoDLRWorker) processAutoDLRs(ctx context.Context) {
 				Status:     candidate.AutoDlrStatus,
 				Source:     DLRSourceAuto,
 				SentBefore: candidate.SentBefore.Time,
+				// Only when the SP opted in; the candidate query applies the same rule.
+				IncludeUnconfirmed: candidate.AutoDlrIncludeUnconfirmed,
 			})
 			if err != nil {
 				w.logger.Error("Failed to apply auto DLR",
