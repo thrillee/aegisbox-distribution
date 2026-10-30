@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -184,7 +185,7 @@ func (h *HTTPMNOConnector) SubmitMessage(ctx context.Context, msgDetails Prepare
 		segments[0] = SegmentSubmitInfo{
 			Seqn:      1,
 			IsSuccess: false,
-			Error:     fmt.Errorf(errorMsg),
+			Error:     errors.New(errorMsg),
 			ErrorCode: &errorCode,
 			DBSegID:   &dbSegmentID,
 		}

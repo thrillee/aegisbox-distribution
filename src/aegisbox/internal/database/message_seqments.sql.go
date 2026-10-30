@@ -298,8 +298,10 @@ SET
     mno_message_id = COALESCE($1, mno_message_id),
     mno_connection_id = $2,
     sent_to_mno_at = NOW(),
-    error_code = NULL,      -- Clear previous errors if any
-    error_description = NULL
+    -- Clear an earlier error once the MNO accepts (an ID is known). Without an ID (an SMPP submit
+    -- whose response has not been seen) keep it: a fast rejection may already have been recorded.
+    error_code = CASE WHEN COALESCE($1, mno_message_id) IS NULL THEN error_code ELSE NULL END,
+    error_description = CASE WHEN COALESCE($1, mno_message_id) IS NULL THEN error_description ELSE NULL END
 WHERE id = $3
 `
 

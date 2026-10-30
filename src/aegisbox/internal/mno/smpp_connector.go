@@ -128,7 +128,7 @@ type SMPPMNOConnector struct {
 	status         atomic.Value        // Current status string (thread-safe)
 	connMu         sync.Mutex          // Mutex for session creation/closing
 	handlerMu      sync.RWMutex        // Mutex for dlrHandler access/update
-	pendingSubmits sync.Map            // Map[uint32]*submitJob - Correlate sequence numbers with jobs
+	pendingSubmits sync.Map            // Map[int32]*submitJob, keyed by PDU sequence number (int32, as gosmpp returns it)
 	stopSignal     chan struct{}       // Signals background tasks to stop
 	wg             sync.WaitGroup      // Waits for background tasks to finish
 }
@@ -626,7 +626,7 @@ func (c *SMPPMNOConnector) handleExpectedPduResponse() func(response gosmpp.Resp
 			slog.DebugContext(logCtx, "Received SubmitSMResp")
 			// Get sequence number from original request if available
 			if reqPDU != nil {
-				c.processSubmitSMResp(logCtx, uint32(reqPDU.GetSequenceNumber()), resp)
+				c.processSubmitSMResp(logCtx, reqPDU.GetSequenceNumber(), resp)
 			} else {
 				slog.ErrorContext(logCtx, "Received SubmitSMResp but original request PDU is nil, cannot correlate")
 			}
@@ -676,7 +676,7 @@ func (c *SMPPMNOConnector) handleExpirePduRequest() func(pdu.PDU) bool {
 		case *pdu.SubmitSM:
 			// A submit timed out - MNO might have processed it or not. Ambiguous.
 			// Mark segment as failed? Or unknown? Treat as failure for now.
-			c.processSubmitSMTimeout(logCtx, uint32(p.GetSequenceNumber()))
+			c.processSubmitSMTimeout(logCtx, p.GetSequenceNumber())
 			return false // Don't close connection for submit timeout
 
 		case *pdu.EnquireLink:
@@ -703,7 +703,7 @@ func (c *SMPPMNOConnector) handleOnClosePduRequest() func(pdu.PDU) {
 		switch p.(type) {
 		case *pdu.SubmitSM:
 			// SubmitSM closed - Treat as failure.
-			c.processSubmitSMTimeout(logCtx, uint32(p.GetSequenceNumber())) // Use same logic as timeout
+			c.processSubmitSMTimeout(logCtx, p.GetSequenceNumber()) // Use same logic as timeout
 
 		default:
 			// Log others but usually no action needed
@@ -718,9 +718,9 @@ func (c *SMPPMNOConnector) handleOnClosePduRequest() func(pdu.PDU) {
 // =============================================================================
 
 // processSubmitSMResp handles the asynchronous response to a SubmitSM request.
-func (c *SMPPMNOConnector) processSubmitSMResp(ctx context.Context, sequence uint32, resp *pdu.SubmitSMResp) {
+func (c *SMPPMNOConnector) processSubmitSMResp(ctx context.Context, sequence int32, resp *pdu.SubmitSMResp) {
 	// Retrieve the job details associated with this sequence number
-	val, loaded := c.pendingSubmits.LoadAndDelete(int32(sequence))
+	val, loaded := c.pendingSubmits.LoadAndDelete(sequence)
 	if !loaded {
 		slog.WarnContext(ctx, "Received SubmitSMResp for unknown or already processed sequence number",
 			slog.String("command_status", resp.CommandStatus.String()), slog.Int("seq_num", int(sequence)), slog.String("message_id", resp.MessageID))
@@ -764,7 +764,9 @@ func (c *SMPPMNOConnector) processSubmitSMResp(ctx context.Context, sequence uin
 }
 
 // processSubmitSMTimeout handles when a SubmitSM request expires without a response.
-func (c *SMPPMNOConnector) processSubmitSMTimeout(ctx context.Context, sequence uint32) {
+// The sequence must be the same int32 used as the pendingSubmits key; a uint32 never matches, which
+// left timed out submits recorded as sent with no MNO message ID and no error.
+func (c *SMPPMNOConnector) processSubmitSMTimeout(ctx context.Context, sequence int32) {
 	val, loaded := c.pendingSubmits.LoadAndDelete(sequence)
 	if !loaded {
 		slog.WarnContext(ctx, "SubmitSM timed out for unknown or already processed sequence number")
