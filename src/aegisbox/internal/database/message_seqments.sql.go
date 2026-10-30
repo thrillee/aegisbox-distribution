@@ -132,6 +132,8 @@ SELECT
     ms.segment_seqn,
     ms.routing_assignment_id,
     ms.sent_to_mno_at,
+    ms.dlr_status,
+    ms.dlr_source,
     m.approved_sender_id,
     m.routed_mno_id
 FROM message_segments ms
@@ -146,6 +148,8 @@ type FindSegmentByMnoMessageIDRow struct {
 	SegmentSeqn         int32              `json:"segmentSeqn"`
 	RoutingAssignmentID *int32             `json:"routingAssignmentId"`
 	SentToMnoAt         pgtype.Timestamptz `json:"sentToMnoAt"`
+	DlrStatus           *string            `json:"dlrStatus"`
+	DlrSource           *string            `json:"dlrSource"`
 	ApprovedSenderID    *int32             `json:"approvedSenderId"`
 	RoutedMnoID         *int32             `json:"routedMnoId"`
 }
@@ -160,6 +164,8 @@ func (q *Queries) FindSegmentByMnoMessageID(ctx context.Context, mnoMessageID *s
 		&i.SegmentSeqn,
 		&i.RoutingAssignmentID,
 		&i.SentToMnoAt,
+		&i.DlrStatus,
+		&i.DlrSource,
 		&i.ApprovedSenderID,
 		&i.RoutedMnoID,
 	)
