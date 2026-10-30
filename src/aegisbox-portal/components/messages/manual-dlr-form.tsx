@@ -16,9 +16,30 @@ export const FAILURE_DLR_STATUSES = ['UNDELIV', 'EXPIRED', 'REJECTD', 'DELETED']
 
 const FINAL_DLR_STATUSES = DLR_STATUSES.map((s) => s.value as string)
 
-export function isAwaitingFinalDlr(segment: { dlrStatus: string | null; mnoMessageId: string | null }): boolean {
-  if (!segment.mnoMessageId) return false
-  return !segment.dlrStatus || !FINAL_DLR_STATUSES.includes(segment.dlrStatus.toUpperCase())
+interface SegmentDlrState {
+  dlrStatus: string | null
+  mnoMessageId: string | null
+  sentToMnoAt?: string | null
+  errorCode?: string | null
+  errorDescription?: string | null
+}
+
+const hasFinalDlr = (s: SegmentDlrState) => !!s.dlrStatus && FINAL_DLR_STATUSES.includes(s.dlrStatus.toUpperCase())
+
+// Sent, but the MNO never confirmed or rejected it: no MNO message ID and no submit failure
+// recorded (TIMEOUT only marks "no DLR in time"). Same rule as the gateway's include_unconfirmed.
+export function isUnconfirmedSegment(s: SegmentDlrState): boolean {
+  return !s.mnoMessageId && !!s.sentToMnoAt && (!s.errorCode || s.errorCode === 'TIMEOUT') && !s.errorDescription
+}
+
+// The MNO accepted the segment but no final DLR came.
+export function isAwaitingFinalDlr(segment: SegmentDlrState): boolean {
+  return !!segment.mnoMessageId && !hasFinalDlr(segment)
+}
+
+// Waiting for a DLR with no answer from the MNO.
+export function isAwaitingUnconfirmed(segment: SegmentDlrState): boolean {
+  return isUnconfirmedSegment(segment) && !hasFinalDlr(segment)
 }
 
 interface BulkResult {
@@ -32,11 +53,14 @@ interface ManualDlrFormProps {
   messageIds: number[]
   onDone: (summary: string) => void
   onCancel: () => void
+  // Tick "no answer from the MNO" by default (e.g. a message whose only waiting parts are unconfirmed).
+  defaultIncludeUnconfirmed?: boolean
 }
 
-export function ManualDlrForm({ messageIds, onDone, onCancel }: Readonly<ManualDlrFormProps>) {
+export function ManualDlrForm({ messageIds, onDone, onCancel, defaultIncludeUnconfirmed = false }: Readonly<ManualDlrFormProps>) {
   const [status, setStatus] = useState<string>('DELIVRD')
   const [errorCode, setErrorCode] = useState('')
+  const [includeUnconfirmed, setIncludeUnconfirmed] = useState(defaultIncludeUnconfirmed)
   const [submitting, setSubmitting] = useState(false)
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
 
@@ -48,7 +72,7 @@ export function ManualDlrForm({ messageIds, onDone, onCancel }: Readonly<ManualD
     setSubmitting(true)
     setErrorMessage(null)
     try {
-      const body = { status, error_code: errorCode.trim() || undefined }
+      const body = { status, error_code: errorCode.trim() || undefined, include_unconfirmed: includeUnconfirmed }
       const res = isBulk
         ? await fetch('/api/admin/messages/dlr/bulk', {
             method: 'POST',
@@ -70,7 +94,10 @@ export function ManualDlrForm({ messageIds, onDone, onCancel }: Readonly<ManualD
         const warning = result.warnings
           ? ` ${result.warnings} cannot reach the customer until their DLR callback/connection is configured; retry them from the DLR Queue page afterwards.`
           : ''
-        onDone(`${status} queued for forwarding to the customer for ${result.forwarded} message(s). ${result.skipped} skipped (already had a final DLR, never reached the MNO, or already refunded), ${result.failed} failed.${warning}`)
+        const skippedWhy = includeUnconfirmed
+          ? 'already had a final DLR, failed to send, or already refunded'
+          : 'already had a final DLR, no answer from the MNO (tick the option to include them), failed to send, or already refunded'
+        onDone(`${status} queued for forwarding to the customer for ${result.forwarded} message(s). ${result.skipped} skipped (${skippedWhy}), ${result.failed} failed.${warning}`)
       } else {
         const warning = data.forward_warning ? ` Warning: ${data.forward_warning}.` : ''
         onDone(`${status} DLR set on ${data.segments_updated} segment(s) and queued for forwarding to the customer (queue #${data.queue_id}).${warning}`)
@@ -85,8 +112,20 @@ export function ManualDlrForm({ messageIds, onDone, onCancel }: Readonly<ManualD
   return (
     <form onSubmit={handleSubmit} className="space-y-4">
       <p className="text-sm text-zinc-400">
-        Sets the DLR on {isBulk ? `${messageIds.length} messages` : 'this message'} for segments the MNO accepted but never sent a final DLR for, then forwards it to the service provider. Segments that already have a final DLR are left unchanged.
+        Sets the DLR on {isBulk ? `${messageIds.length} messages` : 'this message'} for segments the MNO accepted but never sent a final DLR for, then forwards it to the service provider. Segments that already have a final DLR, or that failed to send, are left unchanged.
       </p>
+      <label className="flex items-start gap-2 text-sm text-zinc-300">
+        <input
+          type="checkbox"
+          checked={includeUnconfirmed}
+          onChange={(e) => setIncludeUnconfirmed(e.target.checked)}
+          className="mt-1"
+        />
+        <span>
+          Include segments with no answer from the MNO
+          <span className="block text-xs text-zinc-500">Sent, but the MNO never confirmed or rejected them, so it may not have received them.</span>
+        </span>
+      </label>
       <div className="grid gap-4 md:grid-cols-2">
         <div>
           <label className="block text-sm font-medium text-zinc-300 mb-1">DLR Status</label>

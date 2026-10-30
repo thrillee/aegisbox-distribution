@@ -83,6 +83,14 @@ export default function MessagesPage() {
   const [selectedIds, setSelectedIds] = useState<number[]>([])
   const [showDlrForm, setShowDlrForm] = useState(false)
   const [dlrNotice, setDlrNotice] = useState<string | null>(null)
+  const [customers, setCustomers] = useState<{ id: number; name: string }[]>([])
+
+  useEffect(() => {
+    fetch('/api/admin/service-providers')
+      .then((r) => r.json())
+      .then((d) => setCustomers((d.providers ?? []).map((p: { id: number; name: string }) => ({ id: p.id, name: p.name }))))
+      .catch(() => {})
+  }, [])
 
   const fetchMessages = useCallback(async () => {
     setLoading(true)
@@ -121,7 +129,7 @@ export default function MessagesPage() {
   useEffect(() => {
     setSelectedIds([])
     setShowDlrForm(false)
-  }, [pagination.page, filters])
+  }, [pagination.page, pagination.limit, filters])
 
   const allSelected = messages.length > 0 && messages.every((msg) => selectedIds.includes(msg.id))
 
@@ -173,7 +181,20 @@ export default function MessagesPage() {
 
       {showFilters && (
         <DataCard title="Filters" className="mb-6">
-          <div className="grid gap-4 md:grid-cols-6">
+          <div className="grid gap-4 md:grid-cols-4 xl:grid-cols-8">
+            <div>
+              <label className="block text-sm font-medium text-zinc-300 mb-1">Customer</label>
+              <select
+                value={filters.sp_id}
+                onChange={(e) => handleFilterChange('sp_id', e.target.value)}
+                className="w-full px-3 py-2 border border-white/10 rounded-lg bg-zinc-800 text-white"
+              >
+                <option value="">All customers</option>
+                {customers.map((c) => (
+                  <option key={c.id} value={c.id}>{c.name}</option>
+                ))}
+              </select>
+            </div>
             <div>
               <label className="block text-sm font-medium text-zinc-300 mb-1">Status</label>
               <select
@@ -182,6 +203,7 @@ export default function MessagesPage() {
                 className="w-full px-3 py-2 border border-white/10 rounded-lg bg-zinc-800 text-white"
               >
                 <option value="all">All Statuses</option>
+                <option value="awaiting_dlr">Waiting for DLR</option>
                 <option value="received">Received</option>
                 <option value="queued">Queued</option>
                 <option value="processing">Processing</option>
@@ -238,6 +260,18 @@ export default function MessagesPage() {
                 onChange={(e) => handleFilterChange('date_to', e.target.value)}
                 className="w-full px-3 py-2 border border-white/10 rounded-lg bg-zinc-800 text-white"
               />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-zinc-300 mb-1">Per page</label>
+              <select
+                value={pagination.limit}
+                onChange={(e) => setPagination((prev) => ({ ...prev, page: 1, limit: Number(e.target.value) }))}
+                className="w-full px-3 py-2 border border-white/10 rounded-lg bg-zinc-800 text-white"
+              >
+                {[50, 100, 200].map((n) => (
+                  <option key={n} value={n}>{n}</option>
+                ))}
+              </select>
             </div>
           </div>
         </DataCard>

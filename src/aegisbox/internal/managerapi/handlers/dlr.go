@@ -63,10 +63,11 @@ func (h *DLRHandler) SendManualDLR(c *gin.Context) {
 	}
 
 	result, err := h.dlrService.ApplyManualDLR(logCtx, sms.ManualDLRRequest{
-		MessageID: messageID,
-		Status:    status,
-		ErrorCode: req.ErrorCode,
-		Source:    sms.DLRSourceManual,
+		MessageID:          messageID,
+		Status:             status,
+		ErrorCode:          req.ErrorCode,
+		Source:             sms.DLRSourceManual,
+		IncludeUnconfirmed: req.IncludeUnconfirmed,
 	})
 	if err != nil {
 		slog.ErrorContext(logCtx, "Failed to apply manual DLR", slog.Any("error", err))

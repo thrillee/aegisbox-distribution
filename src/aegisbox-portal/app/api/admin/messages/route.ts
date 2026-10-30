@@ -1,13 +1,16 @@
 import { db } from '@/lib/db'
 import { messages, messageSegments, serviceProviders, spCredentials, mnos } from '@/lib/schema'
 import { NextResponse } from 'next/server'
-import { desc, eq, and, gte, lte, like, sql } from 'drizzle-orm'
+import { desc, eq, and, gte, lt, like, sql } from 'drizzle-orm'
+import { isReportDate, reportDayRange } from '@/lib/time'
+import { waitingForDlr } from '@/lib/pending-dlr'
 
 export async function GET(request: Request) {
   try {
     const { searchParams } = new URL(request.url)
-    const page = parseInt(searchParams.get('page') || '1')
-    const limit = parseInt(searchParams.get('limit') || '50')
+    const page = Math.max(1, parseInt(searchParams.get('page') || '1') || 1)
+    // At most 200 per page: the bulk manual DLR limit, so "select all" can be sent in one go.
+    const limit = Math.min(200, Math.max(1, parseInt(searchParams.get('limit') || '50') || 50))
     const offset = (page - 1) * limit
     
     const status = searchParams.get('status')
@@ -21,7 +24,9 @@ export async function GET(request: Request) {
 
     const conditions = []
 
-    if (status && status !== 'all') {
+    if (status === 'awaiting_dlr') {
+      conditions.push(waitingForDlr(sql`${messages.id}`, sql`${messages.finalStatus}`))
+    } else if (status && status !== 'all') {
       conditions.push(eq(messages.processingStatus, status))
     }
     
@@ -45,20 +50,12 @@ export async function GET(request: Request) {
       conditions.push(like(messages.originalDestinationAddr, `%${destination}%`))
     }
 
-    let dateCondition = null
-    if (dateFrom && dateTo) {
-      dateCondition = and(
-        gte(messages.receivedAt, new Date(dateFrom)),
-        lte(messages.receivedAt, new Date(dateTo))
-      )
-    } else if (dateFrom) {
-      dateCondition = gte(messages.receivedAt, new Date(dateFrom))
-    } else if (dateTo) {
-      dateCondition = lte(messages.receivedAt, new Date(dateTo))
+    // Whole Lagos days, both dates included.
+    if (dateFrom && isReportDate(dateFrom)) {
+      conditions.push(gte(messages.receivedAt, reportDayRange(dateFrom, dateFrom).from))
     }
-    
-    if (dateCondition) {
-      conditions.push(dateCondition)
+    if (dateTo && isReportDate(dateTo)) {
+      conditions.push(lt(messages.receivedAt, reportDayRange(dateTo, dateTo).to))
     }
 
     const whereClause = conditions.length > 0 ? and(...conditions) : undefined
