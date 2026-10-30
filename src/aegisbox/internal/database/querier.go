@@ -16,6 +16,8 @@ type Querier interface {
 	// queues the DLR for forwarding to the SP. Either both happen or neither does, so a DLR
 	// can never be applied without being forwarded. No job is queued when nothing was pending.
 	// When sent_before is set, only segments sent before it are updated.
+	// include_unconfirmed also completes segments recorded as sent with no MNO message ID and no
+	// error (the submit response was never recorded); an admin must ask for it explicitly.
 	// The pending condition must match idx_message_segments_awaiting_final_dlr.
 	ApplyManualDLRAndEnqueue(ctx context.Context, arg ApplyManualDLRAndEnqueueParams) (ApplyManualDLRAndEnqueueRow, error)
 	AssignRoutingGroupToSpCredential(ctx context.Context, arg AssignRoutingGroupToSpCredentialParams) (SpCredential, error)

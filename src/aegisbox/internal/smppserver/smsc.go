@@ -262,10 +262,20 @@ func (s *Server) handleSession(ctx context.Context, ss *sessionState) {
 			// Send EnquireLinkResp
 			respHdr := makeHeader(CommandEnquireLinkResp, hdr.SequenceNumber, StatusOk)
 			s.writePDU(ss, respHdr, nil) // Response has no body
+		case CommandDeliverSMResp:
+			// The client acknowledging a DeliverSM (DLR) we sent. Responses are never answered.
+			if hdr.CommandStatus != StatusOk {
+				slog.WarnContext(logCtx, "Client rejected a DeliverSM", slog.Uint64("command_status", uint64(hdr.CommandStatus)))
+			}
 		default:
+			if hdr.CommandID&0x80000000 != 0 {
+				// Any other response PDU (enquire_link_resp, generic_nack, ...): never answer a response.
+				slog.DebugContext(logCtx, "Ignoring response PDU", slog.Any("COMMAND ID", hdr.CommandID), slog.Any("COMMAND STATUS", hdr.CommandStatus))
+				break
+			}
 			slog.WarnContext(logCtx, "Received unknown/unhandled Command ID", slog.Any("COMMAND ID", hdr.CommandID), slog.Any("COMMAND STATUS", hdr.CommandStatus))
-			// Unknown => Generic Nack with Invalid Command ID status
-			s.writeErrorResponse(ss, hdr, StatusInvCmdID)
+			// An unknown request gets generic_nack with Invalid Command ID (SMPP 3.4 section 4.3).
+			s.writePDU(ss, makeHeader(CommandGenericNack, hdr.SequenceNumber, StatusInvCmdID), nil)
 		}
 
 		// Flush buffer after handling PDU and sending response (if any)

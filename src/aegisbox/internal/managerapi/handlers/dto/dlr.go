@@ -13,6 +13,8 @@ type BulkManualDLRRequest struct {
 	MessageIDs []int64 `json:"message_ids" binding:"required,min=1,max=200"`
 	Status     string  `json:"status" binding:"required"`
 	ErrorCode  string  `json:"error_code" binding:"omitempty,max=10"`
+	// IncludeUnconfirmed also completes segments sent with no MNO message ID recorded.
+	IncludeUnconfirmed bool `json:"include_unconfirmed"`
 }
 
 // ManualDLRResult reports the outcome of a manual DLR for one message.

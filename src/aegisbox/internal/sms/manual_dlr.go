@@ -36,6 +36,9 @@ type ManualDLRRequest struct {
 	Source    string // DLRSourceManual or DLRSourceAuto
 	// SentBefore limits the update to segments sent to the MNO before this time. Zero means all pending segments.
 	SentBefore time.Time
+	// IncludeUnconfirmed also completes segments recorded as sent but with no MNO message ID and
+	// no error (the submit response was never recorded). Only for an explicit admin request.
+	IncludeUnconfirmed bool
 }
 
 // NormalizeManualDLRStatus upper cases status and checks it is allowed.
@@ -100,13 +103,14 @@ func (s *DLRService) ApplyManualDLR(ctx context.Context, req ManualDLRRequest) (
 	}
 
 	row, err := s.dbQueries.ApplyManualDLRAndEnqueue(logCtx, database.ApplyManualDLRAndEnqueueParams{
-		DlrStatus:   &status,
-		ErrorCode:   errorCode,
-		DlrSource:   &source,
-		MessageID:   req.MessageID,
-		SentBefore:  sentBefore,
-		Payload:     payload,
-		MaxAttempts: DLRMaxRetries,
+		DlrStatus:          &status,
+		ErrorCode:          errorCode,
+		DlrSource:          &source,
+		MessageID:          req.MessageID,
+		SentBefore:         sentBefore,
+		IncludeUnconfirmed: req.IncludeUnconfirmed,
+		Payload:            payload,
+		MaxAttempts:        DLRMaxRetries,
 	})
 	if err != nil {
 		return result, fmt.Errorf("failed to apply %s DLR and queue it for forwarding: %w", source, err)
