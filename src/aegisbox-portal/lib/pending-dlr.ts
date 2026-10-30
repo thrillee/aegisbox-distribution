@@ -1,4 +1,4 @@
-import { sql } from 'drizzle-orm'
+import { sql, type SQL } from 'drizzle-orm'
 import { db } from '@/lib/db'
 import { reportDayRange } from '@/lib/time'
 
@@ -19,6 +19,17 @@ const FINAL = sql`('DELIVRD','UNDELIV','EXPIRED','REJECTD','DELETED')`
 const accepted = sql`ms.mno_message_id IS NOT NULL`
 const noAnswer = sql`(ms.mno_message_id IS NULL AND ms.sent_to_mno_at IS NOT NULL AND (ms.error_code IS NULL OR ms.error_code = 'TIMEOUT') AND ms.error_description IS NULL)`
 const awaiting = sql`(ms.dlr_status IS NULL OR upper(ms.dlr_status) NOT IN ${FINAL})`
+
+// For a message list: messages a manual DLR can complete (waiting, accepted or no answer, no
+// failed or unsent part, not closed or refunded). messageId is the outer query's messages.id.
+export function waitingForDlr(messageId: SQL, finalStatus: SQL) {
+  return sql`(
+    ${finalStatus} NOT IN ('delivered', 'failed', 'rejected', 'expired')
+    AND EXISTS (SELECT 1 FROM message_segments ms WHERE ms.message_id = ${messageId} AND ${awaiting} AND (${accepted} OR ${noAnswer}))
+    AND NOT EXISTS (SELECT 1 FROM message_segments ms WHERE ms.message_id = ${messageId} AND ${awaiting} AND NOT ${accepted} AND NOT ${noAnswer})
+    AND NOT EXISTS (SELECT 1 FROM wallet_transactions wt WHERE wt.message_id = ${messageId} AND wt.transaction_type = 'reversal')
+  )`
+}
 
 // Per message: whether it has segments of each kind still waiting.
 function classified(f: PendingDlrFilter) {

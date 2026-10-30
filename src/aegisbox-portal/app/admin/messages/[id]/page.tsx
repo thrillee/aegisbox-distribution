@@ -8,7 +8,7 @@ import { PageHeader } from '@/components/dashboard/page-header'
 import { DataCard } from '@/components/dashboard/data-card'
 import { Button } from '@/components/ui/button'
 import { PageLoadingSkeleton } from '@/components/routing/loading-components'
-import { ManualDlrForm, isAwaitingFinalDlr } from '@/components/messages/manual-dlr-form'
+import { ManualDlrForm, isAwaitingFinalDlr, isAwaitingUnconfirmed } from '@/components/messages/manual-dlr-form'
 import { formatMoney } from '@/lib/money'
 
 interface Message {
@@ -124,7 +124,9 @@ export default function MessageDetailPage() {
   }, [messageId, fetchMessage])
 
   const isClosed = message ? ['failed', 'rejected', 'expired'].includes(message.finalStatus) : false
-  const hasPendingDlr = !isClosed && segments.some(isAwaitingFinalDlr)
+  const hasAccepted = segments.some(isAwaitingFinalDlr)
+  const hasUnconfirmed = segments.some(isAwaitingUnconfirmed)
+  const hasPendingDlr = !isClosed && (hasAccepted || hasUnconfirmed)
 
   if (loading) {
     return <PageLoadingSkeleton />
@@ -180,6 +182,7 @@ export default function MessageDetailPage() {
         <DataCard title="Send Manual DLR" subtitle="Use when the MNO did not return a DLR for this message">
           <ManualDlrForm
             messageIds={[message.id]}
+            defaultIncludeUnconfirmed={hasUnconfirmed && !hasAccepted}
             onCancel={() => setShowDlrForm(false)}
             onDone={(summary) => {
               setShowDlrForm(false)

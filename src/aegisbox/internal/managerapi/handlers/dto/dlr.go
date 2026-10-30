@@ -6,6 +6,8 @@ import "time"
 type ManualDLRRequest struct {
 	Status    string `json:"status" binding:"required"` // DELIVRD, UNDELIV, EXPIRED, REJECTD or DELETED
 	ErrorCode string `json:"error_code" binding:"omitempty,max=10"`
+	// IncludeUnconfirmed also completes segments sent with no MNO message ID recorded.
+	IncludeUnconfirmed bool `json:"include_unconfirmed"`
 }
 
 // BulkManualDLRRequest defines the JSON body for sending a manual DLR for many messages.
