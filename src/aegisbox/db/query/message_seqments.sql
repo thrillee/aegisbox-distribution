@@ -91,7 +91,10 @@ WITH updated AS (
     WHERE ms.message_id = sqlc.arg(message_id)::BIGINT
       AND (
         ms.mno_message_id IS NOT NULL
-        OR (sqlc.arg(include_unconfirmed)::BOOLEAN AND ms.sent_to_mno_at IS NOT NULL AND ms.error_code IS NULL)
+        -- Unconfirmed: sent, no submit error recorded. TIMEOUT is only the "no DLR in time" marker
+        -- of the DLR timeout worker; a real submit failure always leaves an error_description.
+        OR (sqlc.arg(include_unconfirmed)::BOOLEAN AND ms.sent_to_mno_at IS NOT NULL
+            AND (ms.error_code IS NULL OR ms.error_code = 'TIMEOUT') AND ms.error_description IS NULL)
       )
       AND (ms.dlr_status IS NULL OR UPPER(ms.dlr_status) NOT IN ('DELIVRD', 'UNDELIV', 'EXPIRED', 'REJECTD', 'DELETED'))
       AND NOT EXISTS (

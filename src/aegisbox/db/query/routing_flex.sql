@@ -660,6 +660,9 @@ FROM message_segments ms
 JOIN messages m ON ms.message_id = m.id
 WHERE ms.dlr_status IS NULL
   AND ms.sent_to_mno_at IS NOT NULL
+  -- A submit that failed (rejected, timed out, window full) has an error and will never get a DLR;
+  -- marking it no_dlr would overwrite that error with TIMEOUT and hide the failure.
+  AND ms.error_code IS NULL
   AND ms.sent_to_mno_at < NOW() - make_interval(secs => sqlc.arg(timeout_seconds)::numeric)
   AND m.processing_status NOT IN ('failed_validation', 'failed_routing', 'failed_pricing')
 ORDER BY ms.sent_to_mno_at ASC
