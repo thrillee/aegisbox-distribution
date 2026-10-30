@@ -6,6 +6,7 @@ import { usePathname } from 'next/navigation'
 import { useUser, useOrganization, SignOutButton } from '@clerk/nextjs'
 import {
   LayoutDashboard,
+  Send,
   Plug,
   MessageSquare,
   History,
@@ -56,6 +57,7 @@ const ADMIN_NAV_GROUPS: NavGroup[] = [
       { href: '/admin/messages', label: 'Messages', icon: MessageSquare },
       { href: '/admin/messages/analytics', label: 'Message Analytics', icon: BarChart3 },
       { href: '/admin/messages/daily-report', label: 'Daily Report', icon: FileText },
+      { href: '/admin/messages/pending-dlr', label: 'Pending DLRs', icon: Send },
       { href: '/admin/messages/queues/dlr', label: 'DLR Queue', icon: Loader2 },
       { href: '/admin/templates', label: 'Templates', icon: FileText },
       { href: '/admin/templates/dashboard', label: 'Template Dashboard', icon: FileText },
