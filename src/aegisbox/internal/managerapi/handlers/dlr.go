@@ -106,10 +106,11 @@ func (h *DLRHandler) SendBulkManualDLR(c *gin.Context) {
 		seen[messageID] = true
 
 		applied, err := h.dlrService.ApplyManualDLR(logCtx, sms.ManualDLRRequest{
-			MessageID: messageID,
-			Status:    status,
-			ErrorCode: req.ErrorCode,
-			Source:    sms.DLRSourceManual,
+			MessageID:          messageID,
+			Status:             status,
+			ErrorCode:          req.ErrorCode,
+			Source:             sms.DLRSourceManual,
+			IncludeUnconfirmed: req.IncludeUnconfirmed,
 		})
 		result := toManualDLRResult(messageID, applied)
 		switch {

@@ -78,6 +78,8 @@ ORDER BY segment_seqn;
 -- queues the DLR for forwarding to the SP. Either both happen or neither does, so a DLR
 -- can never be applied without being forwarded. No job is queued when nothing was pending.
 -- When sent_before is set, only segments sent before it are updated.
+-- include_unconfirmed also completes segments recorded as sent with no MNO message ID and no
+-- error (the submit response was never recorded); an admin must ask for it explicitly.
 -- The pending condition must match idx_message_segments_awaiting_final_dlr.
 WITH updated AS (
     UPDATE message_segments ms
@@ -87,7 +89,10 @@ WITH updated AS (
         error_code = sqlc.narg(error_code),
         dlr_source = sqlc.arg(dlr_source)
     WHERE ms.message_id = sqlc.arg(message_id)::BIGINT
-      AND ms.mno_message_id IS NOT NULL
+      AND (
+        ms.mno_message_id IS NOT NULL
+        OR (sqlc.arg(include_unconfirmed)::BOOLEAN AND ms.sent_to_mno_at IS NOT NULL AND ms.error_code IS NULL)
+      )
       AND (ms.dlr_status IS NULL OR UPPER(ms.dlr_status) NOT IN ('DELIVRD', 'UNDELIV', 'EXPIRED', 'REJECTD', 'DELETED'))
       AND NOT EXISTS (
         -- Never complete a message that was already refunded or closed as failed

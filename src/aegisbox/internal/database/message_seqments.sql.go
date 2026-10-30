@@ -20,7 +20,10 @@ WITH updated AS (
         error_code = $2,
         dlr_source = $3
     WHERE ms.message_id = $4::BIGINT
-      AND ms.mno_message_id IS NOT NULL
+      AND (
+        ms.mno_message_id IS NOT NULL
+        OR ($5::BOOLEAN AND ms.sent_to_mno_at IS NOT NULL AND ms.error_code IS NULL)
+      )
       AND (ms.dlr_status IS NULL OR UPPER(ms.dlr_status) NOT IN ('DELIVRD', 'UNDELIV', 'EXPIRED', 'REJECTD', 'DELETED'))
       AND NOT EXISTS (
         -- Never complete a message that was already refunded or closed as failed
@@ -33,14 +36,14 @@ WITH updated AS (
         WHERE m.id = ms.message_id AND m.final_status NOT IN ('failed', 'rejected', 'expired')
       )
       AND (
-        $5::TIMESTAMPTZ IS NULL
-        OR (ms.sent_to_mno_at IS NOT NULL AND ms.sent_to_mno_at < $5::TIMESTAMPTZ)
+        $6::TIMESTAMPTZ IS NULL
+        OR (ms.sent_to_mno_at IS NOT NULL AND ms.sent_to_mno_at < $6::TIMESTAMPTZ)
       )
     RETURNING ms.id
 ),
 queued AS (
     INSERT INTO dlr_forwarding_queue (message_id, payload, max_attempts, created_at, status)
-    SELECT $4::BIGINT, $6::JSONB, $7::INT, NOW(), 'pending'
+    SELECT $4::BIGINT, $7::JSONB, $8::INT, NOW(), 'pending'
     WHERE EXISTS (SELECT 1 FROM updated)
     RETURNING id
 )
@@ -50,13 +53,14 @@ SELECT
 `
 
 type ApplyManualDLRAndEnqueueParams struct {
-	DlrStatus   *string            `json:"dlrStatus"`
-	ErrorCode   *string            `json:"errorCode"`
-	DlrSource   *string            `json:"dlrSource"`
-	MessageID   int64              `json:"messageId"`
-	SentBefore  pgtype.Timestamptz `json:"sentBefore"`
-	Payload     []byte             `json:"payload"`
-	MaxAttempts int32              `json:"maxAttempts"`
+	DlrStatus          *string            `json:"dlrStatus"`
+	ErrorCode          *string            `json:"errorCode"`
+	DlrSource          *string            `json:"dlrSource"`
+	MessageID          int64              `json:"messageId"`
+	IncludeUnconfirmed bool               `json:"includeUnconfirmed"`
+	SentBefore         pgtype.Timestamptz `json:"sentBefore"`
+	Payload            []byte             `json:"payload"`
+	MaxAttempts        int32              `json:"maxAttempts"`
 }
 
 type ApplyManualDLRAndEnqueueRow struct {
@@ -69,6 +73,8 @@ type ApplyManualDLRAndEnqueueRow struct {
 // queues the DLR for forwarding to the SP. Either both happen or neither does, so a DLR
 // can never be applied without being forwarded. No job is queued when nothing was pending.
 // When sent_before is set, only segments sent before it are updated.
+// include_unconfirmed also completes segments recorded as sent with no MNO message ID and no
+// error (the submit response was never recorded); an admin must ask for it explicitly.
 // The pending condition must match idx_message_segments_awaiting_final_dlr.
 func (q *Queries) ApplyManualDLRAndEnqueue(ctx context.Context, arg ApplyManualDLRAndEnqueueParams) (ApplyManualDLRAndEnqueueRow, error) {
 	row := q.db.QueryRow(ctx, applyManualDLRAndEnqueue,
@@ -76,6 +82,7 @@ func (q *Queries) ApplyManualDLRAndEnqueue(ctx context.Context, arg ApplyManualD
 		arg.ErrorCode,
 		arg.DlrSource,
 		arg.MessageID,
+		arg.IncludeUnconfirmed,
 		arg.SentBefore,
 		arg.Payload,
 		arg.MaxAttempts,
