@@ -6,6 +6,8 @@ SELECT
     ms.segment_seqn,
     ms.routing_assignment_id,
     ms.sent_to_mno_at,
+    ms.dlr_status,
+    ms.dlr_source,
     m.approved_sender_id,
     m.routed_mno_id
 FROM message_segments ms

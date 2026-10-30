@@ -73,6 +73,17 @@ func (s *DLRService) UpdateSegmentDLRStatus(
 	logCtx = logging.ContextWithMessageID(logCtx, segmentInfo.MessageID)
 	logCtx = logging.ContextWithSegmentID(logCtx, segmentInfo.SegmentID)
 
+	// A manual or auto DLR already gave the SP a final status for this segment. A real DLR arriving
+	// later must not change it or send the SP a second, possibly contradicting, DLR.
+	if segmentInfo.DlrSource != nil && (*segmentInfo.DlrSource == DLRSourceManual || *segmentInfo.DlrSource == DLRSourceAuto) &&
+		segmentInfo.DlrStatus != nil && isFinalDLRStatus(*segmentInfo.DlrStatus) {
+		slog.InfoContext(logCtx, "Ignoring real DLR for a segment already completed by a manual or auto DLR",
+			slog.String("dlr_status", dlrInfo.Status),
+			slog.String("completed_status", *segmentInfo.DlrStatus),
+			slog.String("completed_by", *segmentInfo.DlrSource))
+		return nil
+	}
+
 	err = s.dbQueries.UpdateSegmentDLR(logCtx, database.UpdateSegmentDLRParams{
 		ID:        segmentInfo.SegmentID,
 		DlrStatus: &dlrInfo.Status,
@@ -496,4 +507,10 @@ func (s *DLRService) EnqueueFailureDLR(
 	} else {
 		slog.InfoContext(logCtx, "Successfully enqueued failure DLR")
 	}
+}
+
+// isFinalDLRStatus reports whether a DLR status is final (the same list as ManualDLRStatuses).
+func isFinalDLRStatus(status string) bool {
+	_, err := NormalizeManualDLRStatus(status)
+	return err == nil
 }
