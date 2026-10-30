@@ -3,6 +3,7 @@ package mno
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"log/slog"
 	"sync"
@@ -102,7 +103,7 @@ func (c *HTTPProviderConnector) SubmitMessage(ctx context.Context, msgDetails Pr
 			segments[i] = SegmentSubmitInfo{
 				Seqn:      int32(i + 1),
 				IsSuccess: false,
-				Error:     fmt.Errorf(errMsg),
+				Error:     errors.New(errMsg),
 				ErrorCode: &errCode,
 				DBSegID:   &dbSegID,
 			}
