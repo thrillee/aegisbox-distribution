@@ -26,10 +26,12 @@ interface SegmentDlrState {
 
 const hasFinalDlr = (s: SegmentDlrState) => !!s.dlrStatus && FINAL_DLR_STATUSES.includes(s.dlrStatus.toUpperCase())
 
-// Sent, but the MNO never confirmed or rejected it: no MNO message ID and no submit failure
-// recorded (TIMEOUT only marks "no DLR in time"). Same rule as the gateway's include_unconfirmed.
+// Sent, but the MNO never confirmed or rejected it: no MNO message ID and either no error recorded
+// (TIMEOUT only marks "no DLR in time") or the submit timed out (MNO_TIMEOUT). Same rule as the
+// gateway's include_unconfirmed; rejections are never included.
 export function isUnconfirmedSegment(s: SegmentDlrState): boolean {
-  return !s.mnoMessageId && !!s.sentToMnoAt && (!s.errorCode || s.errorCode === 'TIMEOUT') && !s.errorDescription
+  if (s.mnoMessageId || !s.sentToMnoAt) return false
+  return ((!s.errorCode || s.errorCode === 'TIMEOUT') && !s.errorDescription) || s.errorCode === 'MNO_TIMEOUT'
 }
 
 // The MNO accepted the segment but no final DLR came.

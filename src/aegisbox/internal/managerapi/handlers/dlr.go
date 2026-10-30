@@ -177,10 +177,11 @@ func (h *DLRHandler) UpdateAutoDLR(c *gin.Context) {
 	}
 
 	sp, err := h.dbQueries.UpdateServiceProviderAutoDLR(logCtx, database.UpdateServiceProviderAutoDLRParams{
-		AutoDlrEnabled:      req.Enabled,
-		AutoDlrStatus:       status,
-		AutoDlrDelaySeconds: req.DelaySeconds,
-		ID:                  id,
+		AutoDlrEnabled:            req.Enabled,
+		AutoDlrStatus:             status,
+		AutoDlrDelaySeconds:       req.DelaySeconds,
+		AutoDlrIncludeUnconfirmed: req.IncludeUnconfirmed,
+		ID:                        id,
 	})
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -195,7 +196,8 @@ func (h *DLRHandler) UpdateAutoDLR(c *gin.Context) {
 	slog.InfoContext(logCtx, "Auto DLR config updated",
 		slog.Bool("enabled", sp.AutoDlrEnabled),
 		slog.String("status", sp.AutoDlrStatus),
-		slog.Int("delay_seconds", int(sp.AutoDlrDelaySeconds)))
+		slog.Int("delay_seconds", int(sp.AutoDlrDelaySeconds)),
+		slog.Bool("include_unconfirmed", sp.AutoDlrIncludeUnconfirmed))
 	c.JSON(http.StatusOK, toAutoDLRResponse(sp))
 }
 
@@ -211,10 +213,11 @@ func toManualDLRResult(messageID int64, result sms.ManualDLRResult) dto.ManualDL
 
 func toAutoDLRResponse(sp database.ServiceProvider) dto.AutoDLRResponse {
 	resp := dto.AutoDLRResponse{
-		ServiceProviderID: sp.ID,
-		Enabled:           sp.AutoDlrEnabled,
-		Status:            sp.AutoDlrStatus,
-		DelaySeconds:      sp.AutoDlrDelaySeconds,
+		ServiceProviderID:  sp.ID,
+		Enabled:            sp.AutoDlrEnabled,
+		Status:             sp.AutoDlrStatus,
+		DelaySeconds:       sp.AutoDlrDelaySeconds,
+		IncludeUnconfirmed: sp.AutoDlrIncludeUnconfirmed,
 	}
 	if sp.AutoDlrEnabledAt.Valid {
 		resp.EnabledAt = &sp.AutoDlrEnabledAt.Time

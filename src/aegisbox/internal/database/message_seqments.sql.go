@@ -22,10 +22,11 @@ WITH updated AS (
     WHERE ms.message_id = $4::BIGINT
       AND (
         ms.mno_message_id IS NOT NULL
-        -- Unconfirmed: sent, no submit error recorded. TIMEOUT is only the "no DLR in time" marker
-        -- of the DLR timeout worker; a real submit failure always leaves an error_description.
-        OR ($5::BOOLEAN AND ms.sent_to_mno_at IS NOT NULL
-            AND (ms.error_code IS NULL OR ms.error_code = 'TIMEOUT') AND ms.error_description IS NULL)
+        OR ($5::BOOLEAN AND ms.mno_message_id IS NULL AND ms.sent_to_mno_at IS NOT NULL
+            AND (
+              ((ms.error_code IS NULL OR ms.error_code = 'TIMEOUT') AND ms.error_description IS NULL)
+              OR ms.error_code = 'MNO_TIMEOUT'
+            ))
       )
       AND (ms.dlr_status IS NULL OR UPPER(ms.dlr_status) NOT IN ('DELIVRD', 'UNDELIV', 'EXPIRED', 'REJECTD', 'DELETED'))
       AND NOT EXISTS (
@@ -76,8 +77,9 @@ type ApplyManualDLRAndEnqueueRow struct {
 // queues the DLR for forwarding to the SP. Either both happen or neither does, so a DLR
 // can never be applied without being forwarded. No job is queued when nothing was pending.
 // When sent_before is set, only segments sent before it are updated.
-// include_unconfirmed also completes segments recorded as sent with no MNO message ID and no
-// error (the submit response was never recorded); an admin must ask for it explicitly.
+// include_unconfirmed also completes segments the MNO never answered: sent with no MNO message ID
+// and no rejection, i.e. no error recorded (TIMEOUT only marks "no DLR in time") or the submit
+// timed out (MNO_TIMEOUT). Explicit rejections are never included.
 // The pending condition must match idx_message_segments_awaiting_final_dlr.
 func (q *Queries) ApplyManualDLRAndEnqueue(ctx context.Context, arg ApplyManualDLRAndEnqueueParams) (ApplyManualDLRAndEnqueueRow, error) {
 	row := q.db.QueryRow(ctx, applyManualDLRAndEnqueue,
@@ -168,12 +170,20 @@ const getAutoDLRCandidates = `-- name: GetAutoDLRCandidates :many
 SELECT DISTINCT ON (m.id)
     m.id AS message_id,
     sp.auto_dlr_status,
+    sp.auto_dlr_include_unconfirmed,
     (NOW() - make_interval(secs => sp.auto_dlr_delay_seconds))::TIMESTAMPTZ AS sent_before
 FROM message_segments ms
 JOIN messages m ON ms.message_id = m.id
 JOIN service_providers sp ON m.service_provider_id = sp.id
 WHERE sp.auto_dlr_enabled
-  AND ms.mno_message_id IS NOT NULL
+  AND (
+    ms.mno_message_id IS NOT NULL
+    OR (sp.auto_dlr_include_unconfirmed AND ms.mno_message_id IS NULL AND ms.sent_to_mno_at IS NOT NULL
+      AND (
+        ((ms.error_code IS NULL OR ms.error_code = 'TIMEOUT') AND ms.error_description IS NULL)
+        OR ms.error_code = 'MNO_TIMEOUT'
+      ))
+  )
   AND (ms.dlr_status IS NULL OR UPPER(ms.dlr_status) NOT IN ('DELIVRD', 'UNDELIV', 'EXPIRED', 'REJECTD', 'DELETED'))
   AND ms.sent_to_mno_at >= $1::TIMESTAMPTZ
   AND ms.sent_to_mno_at >= sp.auto_dlr_enabled_at
@@ -194,14 +204,16 @@ type GetAutoDLRCandidatesParams struct {
 }
 
 type GetAutoDLRCandidatesRow struct {
-	MessageID     int64              `json:"messageId"`
-	AutoDlrStatus string             `json:"autoDlrStatus"`
-	SentBefore    pgtype.Timestamptz `json:"sentBefore"`
+	MessageID                 int64              `json:"messageId"`
+	AutoDlrStatus             string             `json:"autoDlrStatus"`
+	AutoDlrIncludeUnconfirmed bool               `json:"autoDlrIncludeUnconfirmed"`
+	SentBefore                pgtype.Timestamptz `json:"sentBefore"`
 }
 
 // Finds messages of SPs with auto DLR enabled that have segments still waiting for a
-// final DLR past the SP's configured delay. not_before bounds the scan of
-// idx_message_segments_awaiting_final_dlr so old undelivered segments are not rescanned.
+// final DLR past the SP's configured delay (with auto_dlr_include_unconfirmed, also segments
+// the MNO never answered). not_before bounds the scan of idx_message_segments_awaiting_final_dlr
+// and idx_message_segments_awaiting_unconfirmed so old undelivered segments are not rescanned.
 func (q *Queries) GetAutoDLRCandidates(ctx context.Context, arg GetAutoDLRCandidatesParams) ([]GetAutoDLRCandidatesRow, error) {
 	rows, err := q.db.Query(ctx, getAutoDLRCandidates, arg.NotBefore, arg.MaxResults)
 	if err != nil {
@@ -211,7 +223,12 @@ func (q *Queries) GetAutoDLRCandidates(ctx context.Context, arg GetAutoDLRCandid
 	var items []GetAutoDLRCandidatesRow
 	for rows.Next() {
 		var i GetAutoDLRCandidatesRow
-		if err := rows.Scan(&i.MessageID, &i.AutoDlrStatus, &i.SentBefore); err != nil {
+		if err := rows.Scan(
+			&i.MessageID,
+			&i.AutoDlrStatus,
+			&i.AutoDlrIncludeUnconfirmed,
+			&i.SentBefore,
+		); err != nil {
 			return nil, err
 		}
 		items = append(items, i)

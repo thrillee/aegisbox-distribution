@@ -46,15 +46,18 @@ type UpdateAutoDLRRequest struct {
 	Enabled      bool   `json:"enabled"`
 	Status       string `json:"status" binding:"required"`
 	DelaySeconds int32  `json:"delay_seconds" binding:"required,min=60,max=172800"`
+	// IncludeUnconfirmed also completes messages the upstream never answered.
+	IncludeUnconfirmed bool `json:"include_unconfirmed"`
 }
 
 // AutoDLRResponse is a service provider's auto DLR config.
 type AutoDLRResponse struct {
-	ServiceProviderID int32      `json:"service_provider_id"`
-	Enabled           bool       `json:"enabled"`
-	Status            string     `json:"status"`
-	DelaySeconds      int32      `json:"delay_seconds"`
-	EnabledAt         *time.Time `json:"enabled_at"`
+	ServiceProviderID  int32      `json:"service_provider_id"`
+	Enabled            bool       `json:"enabled"`
+	Status             string     `json:"status"`
+	DelaySeconds       int32      `json:"delay_seconds"`
+	IncludeUnconfirmed bool       `json:"include_unconfirmed"`
+	EnabledAt          *time.Time `json:"enabled_at"`
 }
 
 // RetryDLRForwardingRequest defines the JSON body for requeueing failed DLR forwarding jobs.
