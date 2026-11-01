@@ -43,6 +43,35 @@ services:
           - manager-api
           - smpp-gateway
 
+  # Simulated MNO for test traffic (aegisbox mnosim): accepts SMPP binds and submits like an upstream
+  # and sends delivery receipts, without sending anything. Internal only: no published port. Add it
+  # in the portal as an MNO marked as simulator, with an SMPP connection to host mnosim, port 2776;
+  # the gateway only lets customers marked as test use it.
+  mnosim:
+    build:
+      context: ./src/aegisbox
+      dockerfile: deploy/aegisbox/Dockerfile
+    command: ["mnosim"]
+    restart: unless-stopped
+    environment:
+      MNOSIM_ADDR: ":2776"
+      MNOSIM_SYSTEM_ID: ${MNOSIM_SYSTEM_ID:-simulator}
+      MNOSIM_PASSWORD: ${MNOSIM_PASSWORD:-change_me}
+      MNOSIM_DLR_DELAY_MIN: ${MNOSIM_DLR_DELAY_MIN:-2s}
+      MNOSIM_DLR_DELAY_MAX: ${MNOSIM_DLR_DELAY_MAX:-10s}
+      MNOSIM_DLR_MIX: ${MNOSIM_DLR_MIX:-DELIVRD:90,UNDELIV:5,EXPIRED:2,NONE:3}
+      MNOSIM_REJECT_PERCENT: ${MNOSIM_REJECT_PERCENT:-0}
+      MNOSIM_NO_RESPONSE_PERCENT: ${MNOSIM_NO_RESPONSE_PERCENT:-0}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+        tag: "mnosim"
+    networks:
+      - aegisbox-network
+
   portal:
     build:
       context: ./src/aegisbox-portal

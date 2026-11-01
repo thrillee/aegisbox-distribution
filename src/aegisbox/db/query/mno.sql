@@ -35,3 +35,12 @@ DELETE FROM mnos WHERE id = $1;
 -- Optional: Query to set MNO status to inactive instead of deleting
 -- name: DeactivateMNO :one
 UPDATE mnos SET status = 'inactive', updated_at = NOW() WHERE id = $1 RETURNING *;
+
+-- name: IsSimulatorBlockedForSP :one
+-- True when the MNO is a simulator and the service provider is not a test customer: the message must
+-- not be sent through it.
+SELECT COALESCE((
+    SELECT m.is_simulator AND NOT sp.is_test
+    FROM mnos m, service_providers sp
+    WHERE m.id = sqlc.arg(mno_id) AND sp.id = sqlc.arg(service_provider_id)
+), FALSE)::BOOLEAN AS blocked;

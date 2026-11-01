@@ -54,12 +54,7 @@ func (f *SMPSPForwarder) ForwardDLR(ctx context.Context, spDetails sp.SPDetails,
 	slog.InfoContext(logCtx, "Constructing raw DeliverSM PDU for DLR forwarding", slog.String("dlr_status", dlr.Status))
 
 	// 1. Format Short Message Text (Appendix B)
-	var smppErrCode string
-	if dlr.ErrorCode != nil {
-		smppErrCode = errormapper.MapErrorCode(*dlr.ErrorCode, "smpp")
-	} else {
-		smppErrCode = "000"
-	}
+	smppErrCode := receiptErrorCode(strings.ToUpper(dlr.Status), dlr.ErrorCode)
 	// idField := fmt.Sprintf("%d", dlr.ClientMessageID)
 	// if dlr.ClientMessageRef != nil && *dlr.ClientMessageRef != "" {
 	// 	ref := *dlr.ClientMessageRef
@@ -160,4 +155,27 @@ func (f *SMPSPForwarder) ForwardDLR(ctx context.Context, spDetails sp.SPDetails,
 
 	slog.InfoContext(logCtx, "Successfully forwarded raw DLR PDU via SMPP", slog.String("dlr_status", dlr.Status))
 	return nil
+}
+
+// receiptErrorCode is the err: field of a forwarded receipt. A delivered message always has 000.
+// Upstream SMPP receipts already carry a 3 character code (000, 001, 0BF...), which is passed on
+// as is; only Aegisbox's own codes (MNO_TIMEOUT, VAL_FAILED...) go through the error mapper, which
+// maps anything it does not know to 008 (system error).
+func receiptErrorCode(status string, code *string) string {
+	if status == "DELIVRD" || code == nil || *code == "" {
+		return "000"
+	}
+	if c := strings.TrimSpace(*code); len(c) == 3 && isAlnum(c) {
+		return strings.ToUpper(c)
+	}
+	return errormapper.MapErrorCode(*code, "smpp")
+}
+
+func isAlnum(s string) bool {
+	for _, r := range s {
+		if !(r >= '0' && r <= '9' || r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z') {
+			return false
+		}
+	}
+	return true
 }

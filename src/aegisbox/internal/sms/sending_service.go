@@ -131,7 +131,8 @@ func (s *SendingService) SendMessage(
 		}
 		submitResult.MnoID = *fullMsg.RoutedMnoID
 
-		if s.routeHealthTracker != nil && routingAssignmentID != nil {
+		blockedBySimulatorGuard := errors.Is(submitResult.Error, ErrSimulatorRouteBlocked)
+		if s.routeHealthTracker != nil && routingAssignmentID != nil && !blockedBySimulatorGuard {
 			routeSuccess := (sendErr == nil && submitResult != nil && submitResult.WasSubmitted && submitResult.Error == nil)
 			var errorCode *string
 			var errorDesc *string
