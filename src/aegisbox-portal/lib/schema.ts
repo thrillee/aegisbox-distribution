@@ -18,6 +18,8 @@ export const serviceProviders = pgTable('service_providers', {
   autoDlrStatus: varchar('auto_dlr_status', { length: 20 }).notNull().default('DELIVRD'),
   autoDlrDelaySeconds: integer('auto_dlr_delay_seconds').notNull().default(300),
   autoDlrEnabledAt: timestamp('auto_dlr_enabled_at'),
+  // Test customer: may use simulator MNOs; left out of platform totals.
+  isTest: boolean('is_test').notNull().default(false),
   createdAt: timestamp('created_at').defaultNow().notNull(),
   updatedAt: timestamp('updated_at').defaultNow().notNull(),
 })
@@ -45,6 +47,8 @@ export const mnos = pgTable('mnos', {
   countryCode: varchar('country_code', { length: 5 }).notNull(),
   networkCode: varchar('network_code', { length: 10 }),
   status: statusEnum('status').default('active').notNull(),
+  // A simulated MNO (aegisbox mnosim): only test customers may be routed to it.
+  isSimulator: boolean('is_simulator').notNull().default(false),
   createdAt: timestamp('created_at').defaultNow().notNull(),
   updatedAt: timestamp('updated_at').defaultNow().notNull(),
 })

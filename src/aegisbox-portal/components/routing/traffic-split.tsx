@@ -3,12 +3,14 @@
 import { useState, useEffect, useCallback, useId } from 'react'
 import { Loader2, Save, Shuffle, AlertTriangle } from 'lucide-react'
 import { Button } from '@/components/ui/button'
+import { SimulatorBadge } from '@/components/dashboard/flag-switch'
 
 interface RouteRow {
   assignment_id: number
   network: string
   mno_id: number
   mno_name: string
+  mno_simulator: boolean
   weight: number
   assignment_active: boolean
   mno_active: boolean
@@ -47,6 +49,7 @@ export function TrafficSplit({ groupId }: Readonly<{ groupId: number }>) {
   const ids = useId()
   const [loading, setLoading] = useState(true)
   const [routes, setRoutes] = useState<RouteRow[]>([])
+  const [realLogins, setRealLogins] = useState(0)
   const [draft, setDraft] = useState<Record<number, string>>({})
   const [saving, setSaving] = useState(false)
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
@@ -66,8 +69,10 @@ export function TrafficSplit({ groupId }: Readonly<{ groupId: number }>) {
     try {
       const res = await fetch(`/api/admin/routing-groups/${groupId}/split`)
       const data = await res.json().catch(() => ({}))
-      if (res.ok) apply(data.routes)
-      else setErrorMessage(data.error || 'Failed to load the traffic split')
+      if (res.ok) {
+        apply(data.routes)
+        setRealLogins(Number(data.realCustomerLogins ?? 0))
+      } else setErrorMessage(data.error || 'Failed to load the traffic split')
     } catch {
       setErrorMessage('Failed to load the traffic split')
     } finally {
@@ -89,6 +94,7 @@ export function TrafficSplit({ groupId }: Readonly<{ groupId: number }>) {
   if (routes.length === 0) return null
 
   const mnos = [...new Map(routes.map((r) => [r.mno_id, r.mno_name])).entries()]
+  const simulatorIds = new Set(routes.filter((r) => r.mno_simulator).map((r) => r.mno_id))
   const networks = [...new Set(routes.map((r) => r.network))]
   const mixed = mnos.filter(([id]) => new Set(routes.filter((r) => r.mno_id === id).map((r) => r.weight)).size > 1)
 
@@ -139,6 +145,14 @@ export function TrafficSplit({ groupId }: Readonly<{ groupId: number }>) {
         traffic when the others are unavailable. The same weights apply to every network in this group.
       </p>
 
+      {simulatorIds.size > 0 && realLogins > 0 && (
+        <p className="text-sm text-amber-400 mb-4 flex items-start gap-2">
+          <AlertTriangle className="h-4 w-4 mt-0.5 shrink-0" />
+          This group has a simulated MNO and is used by {realLogins} login(s) of customers not marked as test. Their
+          messages are refused on the simulated route; give them a group without it, or mark the customer as test.
+        </p>
+      )}
+
       {mixed.length > 0 && (
         <p className="text-sm text-amber-400 mb-4 flex items-start gap-2">
           <AlertTriangle className="h-4 w-4 mt-0.5 shrink-0" />
@@ -153,7 +167,10 @@ export function TrafficSplit({ groupId }: Readonly<{ groupId: number }>) {
           const share = !Number.isNaN(n) && draftTotal > 0 ? n / draftTotal : 0
           return (
             <div key={id} className="rounded-lg border border-white/10 px-4 py-3">
-              <label htmlFor={`${ids}-${id}`} className="block text-sm font-medium text-white mb-2">{name}</label>
+              <label htmlFor={`${ids}-${id}`} className="flex items-center gap-2 text-sm font-medium text-white mb-2">
+                {name}
+                {simulatorIds.has(id) && <SimulatorBadge />}
+              </label>
               <div className="flex items-center gap-3">
                 <input
                   id={`${ids}-${id}`}
@@ -181,7 +198,7 @@ export function TrafficSplit({ groupId }: Readonly<{ groupId: number }>) {
             <tr className="text-left text-zinc-400 border-b border-white/10">
               <th className="py-2 pr-4 font-medium">Network</th>
               {mnos.map(([id, name]) => (
-                <th key={id} className="py-2 pr-4 font-medium">{name}</th>
+                <th key={id} className="py-2 pr-4 font-medium">{name}{simulatorIds.has(id) && <span className="ml-2"><SimulatorBadge /></span>}</th>
               ))}
             </tr>
           </thead>

@@ -71,6 +71,7 @@ export default function DailyReportPage() {
       end_date: reportDate(),
       sp_id: '',
       status: '',
+      include_test: false,
     }
   })
   const [exportFields, setExportFields] = useState(EXPORT_FIELDS.map(f => ({ ...f })))
@@ -109,6 +110,7 @@ export default function DailyReportPage() {
       params.set('end_date', filters.end_date)
       if (filters.sp_id) params.set('sp_id', filters.sp_id)
       if (filters.status) params.set('status', filters.status)
+      if (filters.include_test) params.set('include_test', '1')
 
       const res = await fetch(`/api/admin/messages/daily-report?${params}`)
       if (res.ok) {
@@ -308,6 +310,14 @@ export default function DailyReportPage() {
                 <option key={opt.value} value={opt.value}>{opt.label}</option>
               ))}
             </select>
+            <label className="flex items-center gap-2 text-sm text-zinc-400 mt-2">
+              <input
+                type="checkbox"
+                checked={filters.include_test}
+                onChange={(e) => setFilters(prev => ({ ...prev, include_test: e.target.checked }))}
+              />
+              Include test customers
+            </label>
           </div>
           <div className="flex items-end">
             <Button

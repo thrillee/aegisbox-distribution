@@ -22,6 +22,7 @@ export async function GET(
         name: serviceProviders.name,
         email: serviceProviders.email,
         status: serviceProviders.status,
+        isTest: serviceProviders.isTest,
         defaultCurrencyCode: serviceProviders.defaultCurrencyCode,
         createdAt: serviceProviders.createdAt,
         updatedAt: serviceProviders.updatedAt,

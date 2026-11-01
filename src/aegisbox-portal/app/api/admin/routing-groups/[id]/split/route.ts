@@ -13,6 +13,7 @@ interface RouteRow {
   network: string
   mno_id: number
   mno_name: string
+  mno_simulator: boolean
   weight: number
   priority: number
   assignment_active: boolean
@@ -36,6 +37,7 @@ async function loadRoutes(groupId: number) {
            regexp_replace(pg.name, '\\s*Prefixes$', '') AS network,
            m.id AS mno_id,
            m.name AS mno_name,
+           m.is_simulator AS mno_simulator,
            COALESCE(ra.weight, 100) AS weight,
            ra.priority,
            (ra.status = 'active' AND COALESCE(ra.is_active, true)) AS assignment_active,
@@ -59,6 +61,17 @@ async function loadRoutes(groupId: number) {
   return result.rows as unknown as RouteRow[]
 }
 
+// Active logins of customers not marked as test that use this group. The gateway refuses to send
+// their messages through a simulator MNO, so a simulator route here would make them fail.
+async function realCustomerLogins(groupId: number) {
+  const result = await db.execute(sql`
+    SELECT count(*) AS n
+    FROM sp_credentials c
+    JOIN service_providers sp ON sp.id = c.service_provider_id
+    WHERE c.routing_group_id = ${groupId} AND c.status = 'active' AND NOT sp.is_test`)
+  return Number(result.rows[0]?.n ?? 0)
+}
+
 function parseGroupId(id: string) {
   return /^\d+$/.test(id) ? Number(id) : null
 }
@@ -72,7 +85,7 @@ export async function GET(
     return NextResponse.json({ error: 'Invalid ID' }, { status: 400 })
   }
   try {
-    return NextResponse.json({ routes: await loadRoutes(groupId) })
+    return NextResponse.json({ routes: await loadRoutes(groupId), realCustomerLogins: await realCustomerLogins(groupId) })
   } catch (error) {
     console.error('Error loading routing split:', error)
     return NextResponse.json({ error: 'Failed to load the traffic split' }, { status: 500 })

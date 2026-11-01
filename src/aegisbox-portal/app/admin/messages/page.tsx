@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import Link from 'next/link'
 import { Search, Filter, Download, ChevronLeft, ChevronRight, Eye, MessageSquare, BarChart2, FileCheck } from 'lucide-react'
+import { TestBadge } from '@/components/dashboard/flag-switch'
 import { PageHeader } from '@/components/dashboard/page-header'
 import { DataCard } from '@/components/dashboard/data-card'
 import { Button } from '@/components/ui/button'
@@ -26,6 +27,7 @@ interface Message {
   currencyCode: string
   serviceProviderId: number
   spName: string | null
+  spIsTest: boolean | null
   spSystemId: string | null
   routedMnoId: number | null
   mnoName: string | null
@@ -393,7 +395,10 @@ export default function MessagesPage() {
                     <td className="px-4 py-3 text-sm max-w-xs truncate text-zinc-400">
                       {msg.shortMessage}
                     </td>
-                    <td className="px-4 py-3 text-sm text-white">{msg.spName || '-'}</td>
+                    <td className="px-4 py-3 text-sm text-white">
+                      {msg.spName || '-'}
+                      {msg.spIsTest && <span className="ml-2"><TestBadge /></span>}
+                    </td>
                     <td className="px-4 py-3 text-sm text-white">{msg.mnoName || '-'}</td>
                     <td className="px-4 py-3">{getStatusBadge(msg.processingStatus)}</td>
                     <td className="px-4 py-3 text-sm font-medium text-white">

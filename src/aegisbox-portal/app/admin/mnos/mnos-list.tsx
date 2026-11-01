@@ -3,6 +3,7 @@
 import { useState, useEffect, useMemo } from 'react'
 import Link from 'next/link'
 import { Plus, Search, Radio, RefreshCw, Globe, Settings, Activity } from 'lucide-react'
+import { SimulatorBadge } from '@/components/dashboard/flag-switch'
 import { PageHeader } from '@/components/dashboard/page-header'
 import { DataCard } from '@/components/dashboard/data-card'
 import { Button } from '@/components/ui/button'
@@ -12,6 +13,7 @@ interface MNO {
   name: string
   countryCode: string
   status: string
+  isSimulator: boolean
   connectionsCount: number
   activeConnections: number
   lastActivity: string
@@ -188,7 +190,7 @@ export function MNOsList({ initialMNOs }: MNOsListProps) {
                     <Globe className="h-6 w-6" />
                   </div>
                   <div>
-                    <h3 className="font-semibold text-white">{mno.name}</h3>
+                    <h3 className="font-semibold text-white flex items-center gap-2">{mno.name}{mno.isSimulator && <SimulatorBadge />}</h3>
                     <p className="text-sm text-zinc-400">+{mno.countryCode}</p>
                   </div>
                 </div>

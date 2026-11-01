@@ -79,6 +79,7 @@ export async function GET(request: Request) {
           currencyCode: messages.currencyCode,
           serviceProviderId: messages.serviceProviderId,
           spName: serviceProviders.name,
+          spIsTest: serviceProviders.isTest,
           spCredentialId: messages.spCredentialId,
           spSystemId: spCredentials.systemId,
           routedMnoId: messages.routedMnoId,

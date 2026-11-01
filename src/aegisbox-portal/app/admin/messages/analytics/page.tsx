@@ -73,6 +73,7 @@ export default function AnalyticsPage() {
   const [filters, setFilters] = useState(() => ({
     date_from: reportDate(reportDayStart(29)),
     date_to: reportDate(),
+    include_test: false,
   }));
   const [activeTab, setActiveTab] = useState<"bySP" | "byMno">("byMno");
 
@@ -82,6 +83,7 @@ export default function AnalyticsPage() {
       const params = new URLSearchParams();
       if (filters.date_from) params.set("date_from", filters.date_from);
       if (filters.date_to) params.set("date_to", filters.date_to);
+      if (filters.include_test) params.set("include_test", "1");
 
       const res = await fetch(`/api/admin/messages/analytics?${params}`);
       if (res.ok) {
@@ -156,6 +158,14 @@ export default function AnalyticsPage() {
               }
               className="px-3 py-2 border border-white/10 rounded-lg bg-zinc-800 text-white"
             />
+            <label className="flex items-center gap-2 text-sm text-zinc-400 ml-2">
+              <input
+                type="checkbox"
+                checked={filters.include_test}
+                onChange={(e) => setFilters((prev) => ({ ...prev, include_test: e.target.checked }))}
+              />
+              Include test customers
+            </label>
           </div>
         }
       />

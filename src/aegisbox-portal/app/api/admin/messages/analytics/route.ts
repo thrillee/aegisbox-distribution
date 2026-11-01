@@ -3,6 +3,7 @@ import { NextResponse } from 'next/server'
 import { sql, type SQL } from 'drizzle-orm'
 import { isReportDate, reportDayRange } from '@/lib/time'
 import { REPORT_TIME_ZONE_SQL } from '@/lib/time-sql'
+import { includeTestParam, notTestCustomer } from '@/lib/test-traffic'
 
 // The gateway sets final_status to pending, delivered, failed or rejected. Rejected counts as
 // failed; anything not final yet counts as pending.
@@ -42,6 +43,8 @@ export async function GET(request: Request) {
     if (dateTo) conditions.push(sql`m.submitted_at < ${reportDayRange(dateTo, dateTo).to}`)
     if (spId) conditions.push(sql`m.service_provider_id = ${spId}`)
     if (mnoId) conditions.push(sql`m.routed_mno_id = ${mnoId}`)
+    // Test customers (simulated MNO traffic) are left out unless asked for.
+    if (!includeTestParam(searchParams.get('include_test'))) conditions.push(notTestCustomer(sql`m.service_provider_id`))
     const where = conditions.length > 0 ? sql`WHERE ${sql.join(conditions, sql` AND `)}` : sql``
     const day = sql`to_char(m.submitted_at AT TIME ZONE ${REPORT_TIME_ZONE_SQL}, 'YYYY-MM-DD')`
 
