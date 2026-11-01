@@ -44,6 +44,7 @@ type DlrForwardingQueue struct {
 	CreatedAt     pgtype.Timestamptz `json:"createdAt"`
 	LockedAt      pgtype.Timestamptz `json:"lockedAt"`
 	LockedBy      *string            `json:"lockedBy"`
+	DedupeKey     *string            `json:"dedupeKey"`
 }
 
 // Configuration for automatic cleanup of ring buffer tables
@@ -54,6 +55,24 @@ type HealthRingBufferConfig struct {
 	CleanupEnabled *bool              `json:"cleanupEnabled"`
 	LastCleanupAt  pgtype.Timestamptz `json:"lastCleanupAt"`
 	UpdatedAt      pgtype.Timestamptz `json:"updatedAt"`
+}
+
+type IncomingConcatPart struct {
+	ID                int64              `json:"id"`
+	ServiceProviderID int32              `json:"serviceProviderId"`
+	SpCredentialID    int32              `json:"spCredentialId"`
+	SourceAddr        string             `json:"sourceAddr"`
+	DestinationAddr   string             `json:"destinationAddr"`
+	ConcatRef         int32              `json:"concatRef"`
+	TotalParts        int32              `json:"totalParts"`
+	PartNum           int32              `json:"partNum"`
+	Content           string             `json:"content"`
+	ClientMessageID   string             `json:"clientMessageId"`
+	RequestDlr        bool               `json:"requestDlr"`
+	IsFlash           bool               `json:"isFlash"`
+	ReceivedAt        pgtype.Timestamptz `json:"receivedAt"`
+	ClaimedAt         pgtype.Timestamptz `json:"claimedAt"`
+	MessageID         *int64             `json:"messageId"`
 }
 
 type Message struct {
@@ -82,8 +101,9 @@ type Message struct {
 	RetryCount              int32              `json:"retryCount"`
 	NextRetryAt             pgtype.Timestamptz `json:"nextRetryAt"`
 	// Tracks which route was selected for this message (for health feedback loop)
-	RoutingAssignmentID *int32  `json:"routingAssignmentId"`
-	SentSourceAddr      *string `json:"sentSourceAddr"`
+	RoutingAssignmentID   *int32   `json:"routingAssignmentId"`
+	SentSourceAddr        *string  `json:"sentSourceAddr"`
+	ExtraClientMessageIds []string `json:"extraClientMessageIds"`
 }
 
 type MessageSegment struct {

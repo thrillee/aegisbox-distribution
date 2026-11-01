@@ -29,6 +29,36 @@ func (q *Queries) EnqueueDLRForForwarding(ctx context.Context, arg EnqueueDLRFor
 	return err
 }
 
+const enqueueDLRForForwardingOnce = `-- name: EnqueueDLRForForwardingOnce :execrows
+INSERT INTO dlr_forwarding_queue (
+    message_id, payload, max_attempts, created_at, status, dedupe_key
+) VALUES (
+    $1, $2, $3, NOW(), 'pending', $4
+)
+ON CONFLICT (dedupe_key) WHERE dedupe_key IS NOT NULL DO NOTHING
+`
+
+type EnqueueDLRForForwardingOnceParams struct {
+	MessageID   int64   `json:"messageId"`
+	Payload     []byte  `json:"payload"`
+	MaxAttempts int32   `json:"maxAttempts"`
+	DedupeKey   *string `json:"dedupeKey"`
+}
+
+// Like EnqueueDLRForForwarding, but does nothing if a job with the same dedupe_key exists.
+func (q *Queries) EnqueueDLRForForwardingOnce(ctx context.Context, arg EnqueueDLRForForwardingOnceParams) (int64, error) {
+	result, err := q.db.Exec(ctx, enqueueDLRForForwardingOnce,
+		arg.MessageID,
+		arg.Payload,
+		arg.MaxAttempts,
+		arg.DedupeKey,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const getPendingDLRsToForward = `-- name: GetPendingDLRsToForward :many
 WITH candidates AS (
     SELECT id

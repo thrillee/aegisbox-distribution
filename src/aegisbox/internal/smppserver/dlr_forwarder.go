@@ -39,8 +39,26 @@ func writeCString(buf *bytes.Buffer, s string) {
 	buf.WriteByte(0x00)
 }
 
-// ForwardDLR implements the DLRForwarder interface for SMPP using raw PDU construction.
+// ForwardDLR implements the DLRForwarder interface for SMPP using raw PDU construction. A long SMS the
+// client sent as separate parts was answered with one message ID per part, so the receipt is sent
+// once for each of them.
 func (f *SMPSPForwarder) ForwardDLR(ctx context.Context, spDetails sp.SPDetails, dlr sp.ForwardedDLRInfo) error {
+	if err := f.forwardOne(ctx, spDetails, dlr); err != nil {
+		return err
+	}
+	var errs []error
+	for _, id := range dlr.ExtraClientMessageIDs {
+		part := dlr
+		part.ClientMessageID = &id
+		part.ExtraClientMessageIDs = nil
+		if err := f.forwardOne(ctx, spDetails, part); err != nil {
+			errs = append(errs, fmt.Errorf("part %s: %w", id, err))
+		}
+	}
+	return errors.Join(errs...)
+}
+
+func (f *SMPSPForwarder) forwardOne(ctx context.Context, spDetails sp.SPDetails, dlr sp.ForwardedDLRInfo) error {
 	if spDetails.SMPPSystemID == "" {
 		return errors.New("cannot forward DLR via SMPP: missing SystemID in SPDetails")
 	}

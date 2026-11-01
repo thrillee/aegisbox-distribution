@@ -233,6 +233,14 @@ func RunGateway(ctx context.Context, cfg *config.Config) error {
 		slog.Info("Auto DLR Worker stopped.")
 	}()
 
+	// Long SMS sent as separate SMPP parts: send groups whose missing parts never arrived.
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		incomingMessageHandler.RunConcatFlusher(appCtx, 15*time.Second)
+		slog.Info("Message part flusher stopped.")
+	}()
+
 	wg.Add(1)
 	go func() {
 		defer wg.Done()

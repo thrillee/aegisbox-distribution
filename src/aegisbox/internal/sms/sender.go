@@ -102,14 +102,26 @@ func (s *DefaultSender) Send(ctx context.Context, msg database.GetMessageDetails
 	// 3. Create Segment Records in DB *before* submission attempt
 	// The connector will update these with MNO Msg IDs / errors.
 	// We store the segment IDs to link back the results.
-	segmentIDs := make([]int64, msg.TotalSegments)
-	for i := range msg.TotalSegments {
+	// One row per unit the connector submits: each SMPP segment, or the whole message for an HTTP
+	// API. This is independent of msg.TotalSegments, the billed SMS segment count.
+	units := int32(1)
+	if counter, ok := connector.(mno.SegmentCounter); ok {
+		n, countErr := counter.SegmentCount(msg.ShortMessage)
+		if countErr != nil {
+			err = fmt.Errorf("failed to segment message: %w", countErr)
+			slog.ErrorContext(logCtx, err.Error())
+			return &mno.SubmitResult{WasSubmitted: false, Error: err}, nil
+		}
+		units = int32(max(n, 1))
+	}
+	segmentIDs := make([]int64, units)
+	for i := range units {
 		segID, dbErr := s.dbQueries.CreateMessageSegment(logCtx, database.CreateMessageSegmentParams{
 			MessageID:   msg.ID,
 			SegmentSeqn: int32(i + 1),
 		})
 		if dbErr != nil {
-			err = fmt.Errorf("failed to create DB record for segment %d/%d: %w", i+1, msg.TotalSegments, dbErr)
+			err = fmt.Errorf("failed to create DB record for segment %d/%d: %w", i+1, units, dbErr)
 			slog.ErrorContext(logCtx, err.Error())
 			// This is critical, fail the whole submission
 			return &mno.SubmitResult{WasSubmitted: false, Error: err}, err // Return internal error

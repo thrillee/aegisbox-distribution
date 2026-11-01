@@ -361,8 +361,10 @@ func (c *SMPPMNOConnector) SubmitMessage(ctx context.Context, msg PreparedMessag
 		return result, nil // Return logical error
 	}
 	totalSegments := len(msg.DBSeqs)
-	if totalSegments == 0 {
-		err = errors.New("segmentation resulted in zero segments")
+	if totalSegments == 0 || len(segments) != totalSegments {
+		// The sender creates one row per segment from SegmentCount; a mismatch would leave rows that
+		// are never sent, or index past the rows. Fail the attempt cleanly instead.
+		err = fmt.Errorf("segment rows (%d) do not match the message's segments (%d)", totalSegments, len(segments))
 		slog.ErrorContext(logCtx, err.Error())
 		result.Error = err
 		return result, nil
@@ -961,4 +963,13 @@ func (c *SMPPMNOConnector) RegisterDLRHandler(handler DLRHandlerFunc) {
 	defer c.handlerMu.Unlock()
 	slog.Info("Registering DLR Handler", slog.Int("conn_id", int(c.config.ConnectionID)))
 	c.dlrHandler = handler
+}
+
+// SegmentCount implements SegmentCounter: one submit_sm per SMS segment of the text.
+func (c *SMPPMNOConnector) SegmentCount(text string) (int, error) {
+	segs, _, err := c.segmenter.GetSegments(text)
+	if err != nil {
+		return 0, err
+	}
+	return len(segs), nil
 }

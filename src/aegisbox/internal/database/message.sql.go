@@ -366,6 +366,7 @@ SELECT
     m.submitted_at,
     m.completed_at, -- May not be set when DLR arrives
     m.total_segments,
+    m.extra_client_message_ids,
     spc.protocol,
     spc.system_id,    -- This column is nullable
     spc.http_config   -- This is JSONB (likely []byte or custom type in Go)
@@ -385,6 +386,7 @@ type GetSPMessageInfoForDLRRow struct {
 	SubmittedAt             pgtype.Timestamptz `json:"submittedAt"`
 	CompletedAt             pgtype.Timestamptz `json:"completedAt"`
 	TotalSegments           int32              `json:"totalSegments"`
+	ExtraClientMessageIds   []string           `json:"extraClientMessageIds"`
 	Protocol                string             `json:"protocol"`
 	SystemID                *string            `json:"systemId"`
 	HttpConfig              []byte             `json:"httpConfig"`
@@ -405,6 +407,7 @@ func (q *Queries) GetSPMessageInfoForDLR(ctx context.Context, id int64) (GetSPMe
 		&i.SubmittedAt,
 		&i.CompletedAt,
 		&i.TotalSegments,
+		&i.ExtraClientMessageIds,
 		&i.Protocol,
 		&i.SystemID,
 		&i.HttpConfig,
@@ -427,9 +430,10 @@ INSERT INTO messages (
     routed_mno_id,
     processing_status, -- Initial status
     received_at,
-    final_status       -- Initial status
+    final_status,      -- Initial status
+    extra_client_message_ids
 ) VALUES (
-    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, NOW(), 'pending'
+    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, NOW(), 'pending', $13::TEXT[]
 ) RETURNING id
 `
 
@@ -446,6 +450,7 @@ type InsertMessageInParams struct {
 	SubmittedAt             pgtype.Timestamptz `json:"submittedAt"`
 	RoutedMnoID             *int32             `json:"routedMnoId"`
 	ProcessingStatus        string             `json:"processingStatus"`
+	ExtraClientMessageIds   []string           `json:"extraClientMessageIds"`
 }
 
 func (q *Queries) InsertMessageIn(ctx context.Context, arg InsertMessageInParams) (int64, error) {
@@ -462,6 +467,7 @@ func (q *Queries) InsertMessageIn(ctx context.Context, arg InsertMessageInParams
 		arg.SubmittedAt,
 		arg.RoutedMnoID,
 		arg.ProcessingStatus,
+		arg.ExtraClientMessageIds,
 	)
 	var id int64
 	err := row.Scan(&id)
