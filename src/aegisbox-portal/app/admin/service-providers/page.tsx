@@ -8,6 +8,7 @@ import { PageHeader } from '@/components/dashboard/page-header'
 import { DataCard } from '@/components/dashboard/data-card'
 import { Button } from '@/components/ui/button'
 import { formatMoney } from '@/lib/money'
+import { TestBadge } from '@/components/dashboard/flag-switch'
 
 async function getServiceProviders(search: string | undefined, status: string | undefined) {
   try {
@@ -16,6 +17,7 @@ async function getServiceProviders(search: string | undefined, status: string | 
       name: serviceProviders.name,
       email: serviceProviders.email,
       status: serviceProviders.status,
+      isTest: serviceProviders.isTest,
       defaultCurrencyCode: serviceProviders.defaultCurrencyCode,
       createdAt: serviceProviders.createdAt,
     })
@@ -70,6 +72,7 @@ async function getServiceProviders(search: string | undefined, status: string | 
         name: sp.name,
         email: sp.email,
         status: sp.status,
+        isTest: sp.isTest,
         currency: wallet?.currencyCode || sp.defaultCurrencyCode,
         walletBalance: parseFloat(wallet?.balance || '0'),
         messagesToday: parseInt(String(messageCount?.count || '0')),
@@ -187,6 +190,7 @@ export default async function ServiceProvidersPage({
                       >
                         {provider.name}
                       </Link>
+                      {provider.isTest && <span className="ml-2"><TestBadge /></span>}
                       <p className="text-sm text-zinc-400">{provider.email}</p>
                     </div>
                   </td>

@@ -10,25 +10,31 @@ import { DataCard } from '@/components/dashboard/data-card'
 import { Users, MessageSquare, TrendingUp, DollarSign } from 'lucide-react'
 import Link from 'next/link'
 import { formatMoney } from '@/lib/money'
+import { notTestCustomer } from '@/lib/test-traffic'
+
+// Platform totals leave out test customers (their traffic goes to simulated MNOs).
+const realMessages = notTestCustomer(messages.serviceProviderId)
+const realWallets = notTestCustomer(wallets.serviceProviderId)
 
 async function getDashboardStats() {
   try {
     const [totalSPs] = await db.select({ count: count() })
       .from(serviceProviders)
-      .where(eq(serviceProviders.status, 'active'))
+      .where(and(eq(serviceProviders.status, 'active'), eq(serviceProviders.isTest, false)))
 
     const today = reportDayStart()
 
     const [messagesToday] = await db.select({ count: count() })
       .from(messages)
-      .where(gte(messages.receivedAt, today))
+      .where(and(gte(messages.receivedAt, today), realMessages))
 
     const [totalMessages] = await db.select({ count: count() })
       .from(messages)
+      .where(realMessages)
 
     const [deliveredMessages] = await db.select({ count: count() })
       .from(messages)
-      .where(eq(messages.finalStatus, 'delivered'))
+      .where(and(eq(messages.finalStatus, 'delivered'), realMessages))
 
     // Revenue is what was charged for messages today (debits less refunds), per wallet currency.
     // Top-up credits are not revenue, and amounts in different currencies cannot be added up.
@@ -41,7 +47,7 @@ async function getDashboardStats() {
     })
       .from(walletTransactions)
       .innerJoin(wallets, eq(wallets.id, walletTransactions.walletId))
-      .where(gte(walletTransactions.transactionDate, today))
+      .where(and(gte(walletTransactions.transactionDate, today), realWallets))
       .groupBy(wallets.currencyCode)
 
     return {
@@ -85,14 +91,14 @@ async function get7DayAnalytics() {
         failed: sql<number>`sum(case when ${messages.finalStatus} = 'failed' then 1 else 0 end)`,
       })
         .from(messages)
-        .where(and(gte(messages.receivedAt, date), lt(messages.receivedAt, nextDate)))
+        .where(and(gte(messages.receivedAt, date), lt(messages.receivedAt, nextDate), realMessages))
 
       const [revenue] = await db.select({
         total: sum(walletTransactions.amount),
       })
         .from(walletTransactions)
         .innerJoin(wallets, eq(walletTransactions.walletId, wallets.id))
-        .where(and(gte(walletTransactions.transactionDate, date), lt(walletTransactions.transactionDate, nextDate)))
+        .where(and(gte(walletTransactions.transactionDate, date), lt(walletTransactions.transactionDate, nextDate), realWallets))
 
       days.push({
         date: date.toISOString(),
@@ -130,6 +136,7 @@ async function getTopSPs() {
       name: serviceProviders.name,
     })
       .from(serviceProviders)
+      .where(eq(serviceProviders.isTest, false))
       .orderBy(desc(serviceProviders.createdAt))
       .limit(5)
 

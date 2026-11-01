@@ -6,6 +6,7 @@ import { desc, eq } from 'drizzle-orm'
 import { PageHeader } from '@/components/dashboard/page-header'
 import { DataCard } from '@/components/dashboard/data-card'
 import { Button } from '@/components/ui/button'
+import { FlagSwitch, SimulatorBadge } from '@/components/dashboard/flag-switch'
 
 async function getMNO(id: string) {
   try {
@@ -15,6 +16,7 @@ async function getMNO(id: string) {
       countryCode: mnos.countryCode,
       networkCode: mnos.networkCode,
       status: mnos.status,
+      isSimulator: mnos.isSimulator,
       createdAt: mnos.createdAt,
     })
       .from(mnos)
@@ -94,6 +96,23 @@ export default async function MNODetailPage({ params }: { params: Promise<{ id: 
             </Button>
           </Link>
         }
+      />
+
+      {mno.isSimulator && (
+        <div className="flex items-center gap-2 rounded-xl border border-amber-500/30 bg-amber-500/10 p-4 text-sm text-amber-300">
+          <SimulatorBadge />
+          Messages sent here are not delivered: it is the simulated MNO. Only test customers can be routed to it.
+        </div>
+      )}
+
+      <FlagSwitch
+        endpoint={`/api/admin/mnos/${id}`}
+        field="is_simulator"
+        initial={mno.isSimulator}
+        label="Simulated MNO"
+        description="Turn on for an MNO whose connection points to the simulator (aegisbox mnosim). The gateway then only sends test customers' messages through it."
+        confirmOn="Mark this MNO as a simulator? Customers not marked as test will no longer be able to send through it."
+        confirmOff="Mark this MNO as a real operator? Any customer routed to it will be able to send through it again."
       />
 
       <div className="grid gap-4 md:grid-cols-3">

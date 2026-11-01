@@ -4,6 +4,7 @@ import { NextResponse } from 'next/server'
 import { desc, eq, and, gte, lt, sql, or } from 'drizzle-orm'
 import { REPORT_TIME_ZONE_SQL } from '@/lib/time-sql'
 import { isReportDate, reportDayRange } from '@/lib/time'
+import { includeTestParam, notTestCustomer } from '@/lib/test-traffic'
 
 export async function GET(request: Request) {
   try {
@@ -36,6 +37,8 @@ export async function GET(request: Request) {
     const reportDay = sql`DATE(${messages.submittedAt} AT TIME ZONE ${REPORT_TIME_ZONE_SQL})`
 
     const conditions = [dateCondition]
+    // Test customers (simulated MNO traffic) are left out unless asked for.
+    if (!includeTestParam(searchParams.get('include_test'))) conditions.push(notTestCustomer(messages.serviceProviderId))
     if (spCondition) conditions.push(spCondition)
     if (statusCondition) conditions.push(statusCondition)
 

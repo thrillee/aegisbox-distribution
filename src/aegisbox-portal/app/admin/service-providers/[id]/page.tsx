@@ -3,6 +3,7 @@
 import { use, useState, useEffect } from 'react'
 import Link from 'next/link'
 import { ArrowLeft, Plus, Copy, Check, X, RefreshCw, Key, Wallet, DollarSign, Settings, Loader2, MessageSquare, TrendingUp, Globe, Server, Eye, EyeOff, ToggleLeft, ToggleRight, BarChart3, Edit, Trash2, FileCheck, Users, Shuffle } from 'lucide-react'
+import { FlagSwitch, TestBadge } from '@/components/dashboard/flag-switch'
 import { PageLoadingSkeleton } from '@/components/routing/loading-components'
 import { AutoDlrSettings } from '@/components/service-providers/auto-dlr-settings'
 import { PortalAccessSettings } from '@/components/service-providers/portal-access-settings'
@@ -31,6 +32,7 @@ interface ServiceProvider {
   name: string
   email: string
   status: string
+  isTest: boolean
   currency: string
   walletBalance: string | number
   createdAt: string
@@ -245,7 +247,7 @@ export default function ServiceProviderDetailPage({ params }: { params: Promise<
           <ArrowLeft className="h-5 w-5 text-zinc-400" />
         </Link>
         <div className="flex-1">
-          <h1 className="text-3xl font-bold text-white">{provider.name}</h1>
+          <h1 className="text-3xl font-bold text-white flex items-center gap-3">{provider.name}{provider.isTest && <TestBadge />}</h1>
           <p className="text-zinc-400">{provider.email}</p>
         </div>
         {getStatusBadge(provider.status)}
@@ -279,6 +281,19 @@ export default function ServiceProviderDetailPage({ params }: { params: Promise<
 
       {activeTab === 'analytics' && (
         <AnalyticsTab providerId={provider.id} />
+      )}
+
+      {activeTab === 'overview' && (
+        <FlagSwitch
+          endpoint={`/api/admin/service-providers/${provider.id}/test-flag`}
+          field="is_test"
+          initial={provider.isTest}
+          label="Test customer"
+          description="Test customers can be routed to simulated MNOs, and are left out of platform totals (dashboard, analytics, daily report)."
+          confirmOn="Mark this customer as a test customer? Their messages can then go to simulated MNOs, which do not deliver, and they are left out of platform totals."
+          confirmOff="Mark this customer as a real customer? Their messages can no longer go to simulated MNOs, and they count in platform totals again."
+          onChange={(isTest) => setProvider((p) => (p ? { ...p, isTest } : p))}
+        />
       )}
 
       {activeTab === 'overview' && (

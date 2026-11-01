@@ -11,6 +11,7 @@ async function getMNOs() {
       name: mnos.name,
       countryCode: mnos.countryCode,
       status: mnos.status,
+      isSimulator: mnos.isSimulator,
       createdAt: mnos.createdAt,
     })
       .from(mnos)
@@ -32,6 +33,7 @@ async function getMNOs() {
         name: mno.name,
         countryCode: mno.countryCode,
         status: mno.status,
+        isSimulator: mno.isSimulator,
         connectionsCount: connections.length,
         activeConnections,
         lastActivity: 'N/A',
