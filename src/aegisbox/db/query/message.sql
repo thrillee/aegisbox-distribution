@@ -13,9 +13,10 @@ INSERT INTO messages (
     routed_mno_id,
     processing_status, -- Initial status
     received_at,
-    final_status       -- Initial status
+    final_status,      -- Initial status
+    extra_client_message_ids
 ) VALUES (
-    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, NOW(), 'pending'
+    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, NOW(), 'pending', sqlc.narg(extra_client_message_ids)::TEXT[]
 ) RETURNING id;
 
 -- name: UpdateMessageRoutingInfo :exec
@@ -183,6 +184,7 @@ SELECT
     m.submitted_at,
     m.completed_at, -- May not be set when DLR arrives
     m.total_segments,
+    m.extra_client_message_ids,
     spc.protocol,
     spc.system_id,    -- This column is nullable
     spc.http_config   -- This is JSONB (likely []byte or custom type in Go)

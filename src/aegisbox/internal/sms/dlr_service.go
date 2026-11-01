@@ -192,14 +192,62 @@ func (s *DLRService) UpdateSegmentDLRStatus(
 	}
 
 	go s.aggregateMessageStatus(logCtx, segmentInfo.MessageID)
-	go s.enqueueDLRForForwarding(
+	go s.forwardFinalDLRIfComplete(
 		logging.ContextWithMessageID(context.Background(), segmentInfo.MessageID),
 		segmentInfo.MessageID,
-		dlrInfo,
 	)
 
 	return nil
 }
+
+// forwardFinalDLRIfComplete queues the message's DLR for the SP once every segment has a final status:
+// one DLR per message (and per client message ID of a joined long SMS), not one per segment. The
+// status is the message's: the first failed segment's status and error code, else DELIVRD.
+// Intermediate statuses (ENROUTE, ACCEPTD...) are not forwarded.
+func (s *DLRService) forwardFinalDLRIfComplete(ctx context.Context, messageID int64) {
+	segments, err := s.dbQueries.GetSegmentStatusesForMessage(ctx, messageID)
+	if err != nil || len(segments) == 0 {
+		if err != nil {
+			slog.ErrorContext(ctx, "Failed to read segments for DLR forwarding", slog.Any("error", err))
+		}
+		return
+	}
+	status, errorCode := "DELIVRD", ""
+	for _, seg := range segments {
+		if seg.DlrStatus == nil || !isFinalDLRStatus(*seg.DlrStatus) {
+			return // wait for the last segment
+		}
+		if st := strings.ToUpper(*seg.DlrStatus); st != "DELIVRD" && status == "DELIVRD" {
+			status = st
+			if seg.ErrorCode != nil {
+				errorCode = *seg.ErrorCode
+			}
+		}
+	}
+
+	payload, _, err := s.buildDLRForwardingPayload(ctx, messageID, mno.DLRInfo{
+		Status:    status,
+		ErrorCode: errorCode,
+		Timestamp: time.Now(),
+	})
+	if err != nil {
+		slog.ErrorContext(ctx, "CRITICAL: Cannot forward DLR: failed to build forwarding payload", slog.Any("error", err))
+		return
+	}
+	n, err := s.dbQueries.EnqueueDLRForForwardingOnce(ctx, database.EnqueueDLRForForwardingOnceParams{
+		MessageID:   messageID,
+		Payload:     payload,
+		MaxAttempts: DLRMaxRetries,
+		DedupeKey:   ptr(fmt.Sprintf("final:%d", messageID)),
+	})
+	if err != nil {
+		slog.ErrorContext(ctx, "Failed to enqueue DLR forwarding job to DB", slog.Any("error", err))
+	} else if n > 0 {
+		slog.InfoContext(ctx, "Queued final DLR for forwarding", slog.String("dlr_status", status))
+	}
+}
+
+func ptr[T any](v T) *T { return &v }
 
 func (s *DLRService) aggregateMessageStatus(ctx context.Context, messageID int64) {
 	slog.DebugContext(ctx, "Starting message status aggregation")
@@ -208,7 +256,6 @@ func (s *DLRService) aggregateMessageStatus(ctx context.Context, messageID int64
 	baseDelay := 50 * time.Millisecond
 
 	var segments []database.GetSegmentStatusesForMessageRow
-	var totalSegmentsDB int32
 
 	for attempt := 0; attempt < maxRetries; attempt++ {
 		var err error
@@ -222,17 +269,9 @@ func (s *DLRService) aggregateMessageStatus(ctx context.Context, messageID int64
 			return
 		}
 
-		totalSegmentsDB, err = s.dbQueries.GetMessageTotalSegments(ctx, messageID)
-		if err != nil {
-			slog.ErrorContext(
-				ctx,
-				"Error fetching total segment count for status aggregation",
-				slog.Any("error", err),
-			)
-			return
-		}
-
-		if len(segments) >= int(totalSegmentsDB) {
+		// Rows are all created before submission; total_segments (billed SMS count) can differ, so
+		// the rows alone decide when the message is complete.
+		if len(segments) > 0 {
 			break
 		}
 
@@ -270,7 +309,7 @@ func (s *DLRService) aggregateMessageStatus(ctx context.Context, messageID int64
 		finalStatus = codes.MsgFinalStatusProcessing
 	} else if failedCount > 0 {
 		finalStatus = codes.MsgFinalStatusFailed
-	} else if deliveredCount > 0 && deliveredCount >= int(totalSegmentsDB) {
+	} else if deliveredCount > 0 && deliveredCount == len(segments) {
 		finalStatus = codes.MsgFinalStatusDelivered
 	}
 
@@ -359,16 +398,17 @@ func (s *DLRService) buildDLRForwardingPayload(
 	}
 
 	forwardedDLR := sp.ForwardedDLRInfo{
-		InternalMessageID: messageID,
-		ClientMessageRef:  spMsgInfo.ClientRef,
-		ClientMessageID:   spMsgInfo.ClientMessageID,
-		SourceAddr:        spMsgInfo.OriginalDestinationAddr,
-		DestAddr:          spMsgInfo.OriginalSourceAddr,
-		SubmitDate:        spMsgInfo.SubmittedAt.Time,
-		DoneDate:          dlrInfo.Timestamp,
-		Status:            dlrInfo.Status,
-		ErrorCode:         errorCode,
-		TotalSegments:     spMsgInfo.TotalSegments,
+		InternalMessageID:     messageID,
+		ClientMessageRef:      spMsgInfo.ClientRef,
+		ClientMessageID:       spMsgInfo.ClientMessageID,
+		ExtraClientMessageIDs: spMsgInfo.ExtraClientMessageIds,
+		SourceAddr:            spMsgInfo.OriginalDestinationAddr,
+		DestAddr:              spMsgInfo.OriginalSourceAddr,
+		SubmitDate:            spMsgInfo.SubmittedAt.Time,
+		DoneDate:              dlrInfo.Timestamp,
+		Status:                dlrInfo.Status,
+		ErrorCode:             errorCode,
+		TotalSegments:         spMsgInfo.TotalSegments,
 	}
 
 	payloadData := map[string]interface{}{
@@ -380,44 +420,6 @@ func (s *DLRService) buildDLRForwardingPayload(
 		return nil, spDetails, fmt.Errorf("failed to marshal DLR forwarding payload: %w", err)
 	}
 	return payloadBytes, spDetails, nil
-}
-
-func (s *DLRService) enqueueDLRForForwarding(
-	ctx context.Context,
-	messageID int64,
-	dlrInfo mno.DLRInfo,
-) {
-	logCtx := logging.ContextWithMessageID(ctx, messageID)
-	slog.DebugContext(
-		logCtx,
-		"Attempting to enqueue success/failure DLR",
-		slog.String("dlr_status", dlrInfo.Status),
-	)
-
-	payloadBytes, _, err := s.buildDLRForwardingPayload(logCtx, messageID, dlrInfo)
-	if err != nil {
-		slog.ErrorContext(
-			logCtx,
-			"CRITICAL: Cannot forward DLR: failed to build forwarding payload",
-			slog.Any("error", err),
-		)
-		return
-	}
-
-	err = s.dbQueries.EnqueueDLRForForwarding(logCtx, database.EnqueueDLRForForwardingParams{
-		MessageID:   messageID,
-		Payload:     payloadBytes,
-		MaxAttempts: DLRMaxRetries,
-	})
-	if err != nil {
-		slog.ErrorContext(
-			logCtx,
-			"Failed to enqueue DLR forwarding job to DB",
-			slog.Any("error", err),
-		)
-	} else {
-		slog.InfoContext(logCtx, "Successfully enqueued DLR forwarding job to DB")
-	}
 }
 
 func (s *DLRService) EnqueueFailureDLR(
@@ -475,16 +477,17 @@ func (s *DLRService) EnqueueFailureDLR(
 	}
 
 	forwardedDLR := sp.ForwardedDLRInfo{
-		InternalMessageID: messageID,
-		ClientMessageRef:  spMsgInfo.ClientRef,
-		ClientMessageID:   spMsgInfo.ClientMessageID,
-		SourceAddr:        spMsgInfo.OriginalDestinationAddr,
-		DestAddr:          spMsgInfo.OriginalSourceAddr,
-		SubmitDate:        spMsgInfo.SubmittedAt.Time,
-		DoneDate:          time.Now(),
-		Status:            dlrStatusString,
-		ErrorCode:         errorCode,
-		TotalSegments:     spMsgInfo.TotalSegments,
+		InternalMessageID:     messageID,
+		ClientMessageRef:      spMsgInfo.ClientRef,
+		ClientMessageID:       spMsgInfo.ClientMessageID,
+		ExtraClientMessageIDs: spMsgInfo.ExtraClientMessageIds,
+		SourceAddr:            spMsgInfo.OriginalDestinationAddr,
+		DestAddr:              spMsgInfo.OriginalSourceAddr,
+		SubmitDate:            spMsgInfo.SubmittedAt.Time,
+		DoneDate:              time.Now(),
+		Status:                dlrStatusString,
+		ErrorCode:             errorCode,
+		TotalSegments:         spMsgInfo.TotalSegments,
 	}
 
 	payloadData := map[string]interface{}{

@@ -68,6 +68,12 @@ type RoutingResult struct {
 }
 
 // Connector defines the interface for interacting with a specific MNO connection (SMPP or HTTP).
+// SegmentCounter is implemented by connectors that submit a message as several units (one per SMS
+// segment, like SMPP). Connectors without it submit each message as one unit (HTTP APIs).
+type SegmentCounter interface {
+	SegmentCount(text string) (int, error)
+}
+
 type Connector interface {
 	// SubmitMessage sends a logical message, handling segmentation internally.
 	SubmitMessage(ctx context.Context, msgDetails PreparedMessage) (SubmitResult, error)

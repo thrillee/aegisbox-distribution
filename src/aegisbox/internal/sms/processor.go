@@ -455,9 +455,10 @@ func (p *Processor) aggregateMessageStatus(ctx context.Context, messageID int64)
 		return
 	}
 
-	if len(segments) < int(totalSegmentsDB) {
-		slog.DebugContext(ctx, "Skipping aggregation: Not all segment statuses received yet",
-			slog.Int("found", len(segments)), slog.Int("expected", int(totalSegmentsDB)))
+	// Segment rows (one per submitted unit) are all created before submission; total_segments is
+	// the billed SMS count and can differ (an HTTP API takes the whole text as one unit).
+	if len(segments) == 0 {
+		slog.DebugContext(ctx, "Skipping aggregation: no segment rows yet", slog.Int("total_segments", int(totalSegmentsDB)))
 		return
 	}
 	// Optional: Handle len(segments) > int(totalSegmentsDB) warning
@@ -487,7 +488,7 @@ func (p *Processor) aggregateMessageStatus(ctx context.Context, messageID int64)
 		finalStatus = "processing"
 	} else if failedCount > 0 {
 		finalStatus = "failed"
-	} else if deliveredCount > 0 && deliveredCount >= int(totalSegmentsDB) {
+	} else if deliveredCount > 0 && deliveredCount == len(segments) {
 		finalStatus = "delivered"
 	}
 

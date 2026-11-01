@@ -34,6 +34,12 @@ type Querier interface {
 	// $2: mno_id
 	// $3: window_size (e.g., 1000)
 	CalculateSenderHealthFromRingBuffer(ctx context.Context, arg CalculateSenderHealthFromRingBufferParams) (CalculateSenderHealthFromRingBufferRow, error)
+	// Atomically claims a group's parts once all of them are in. A concurrent call for the same group
+	// waits on the row locks, then finds them claimed and returns nothing, so only one caller joins it.
+	ClaimCompleteConcatGroup(ctx context.Context, arg ClaimCompleteConcatGroupParams) ([]ClaimCompleteConcatGroupRow, error)
+	// Claims the parts of one incomplete group whose first part is older than the cutoff, so what
+	// arrived is still sent. Picks the oldest such group.
+	ClaimStaleConcatGroup(ctx context.Context, cutoff pgtype.Timestamptz) ([]ClaimStaleConcatGroupRow, error)
 	// =========================================
 	// RING BUFFER CLEANUP QUERIES
 	// =========================================
@@ -99,6 +105,8 @@ type Querier interface {
 	// Note: This will fail if the group is referenced in routing_assignments due to ON DELETE RESTRICT.
 	// Handle this in application logic (e.g., unassign first or provide a force option).
 	DeleteMsisdnPrefixGroup(ctx context.Context, id int32) error
+	// Retention: joined parts are only kept for a while.
+	DeleteOldConcatParts(ctx context.Context, cutoff pgtype.Timestamptz) (int64, error)
 	DeleteOtpAlternativeSender(ctx context.Context, id int32) error
 	DeleteOtpMessageTemplate(ctx context.Context, id int32) error
 	DeleteOtpSenderTemplateAssignment(ctx context.Context, id int32) error
@@ -114,6 +122,8 @@ type Querier interface {
 	EndSMPPSession(ctx context.Context, arg EndSMPPSessionParams) error
 	// Inserts a new DLR forwarding job into the queue.
 	EnqueueDLRForForwarding(ctx context.Context, arg EnqueueDLRForForwardingParams) error
+	// Like EnqueueDLRForForwarding, but does nothing if a job with the same dedupe_key exists.
+	EnqueueDLRForForwardingOnce(ctx context.Context, arg EnqueueDLRForForwardingOnceParams) (int64, error)
 	FindDebitTransactionForMessage(ctx context.Context, messageID *int64) (FindDebitTransactionForMessageRow, error)
 	// Finds the msisdn_prefix_group_id for a given MSISDN by longest prefix match.
 	// $1: full_msisdn (e.g., '2348031234567')
@@ -302,6 +312,8 @@ type Querier interface {
 	// =========================================
 	// Record individual delivery attempt in ring buffer
 	RecordSenderDeliveryAttempt(ctx context.Context, arg RecordSenderDeliveryAttemptParams) (SenderIDDeliveryAttempt, error)
+	// Gives claimed parts back when the joined message could not be created, so it is retried.
+	ReleaseConcatParts(ctx context.Context, ids []int64) error
 	RemoveRoutingGroupFromSpCredential(ctx context.Context, spCredentialID int32) (SpCredential, error)
 	// Adjust stale timeout
 	// Puts failed DLR forwarding jobs back in the queue with a fresh set of attempts.
@@ -309,6 +321,7 @@ type Querier interface {
 	// Resets current_usage_count for senders whose reset interval has elapsed.
 	// Returns the ids and sender strings that were reset, for logging.
 	ResetDepletedOtpAlternativeSenders(ctx context.Context) ([]ResetDepletedOtpAlternativeSendersRow, error)
+	SetConcatPartsMessage(ctx context.Context, arg SetConcatPartsMessageParams) error
 	SetMessageSentSourceAddr(ctx context.Context, arg SetMessageSentSourceAddrParams) error
 	// Optional: Periodically run to unlock jobs held by dead workers.
 	UnlockStaleDLRs(ctx context.Context) error
@@ -364,6 +377,9 @@ type Querier interface {
 	UpdateServiceProviderRouteSenderPool(ctx context.Context, arg UpdateServiceProviderRouteSenderPoolParams) (UpdateServiceProviderRouteSenderPoolRow, error)
 	// Lock the row for atomic update
 	UpdateWalletBalance(ctx context.Context, arg UpdateWalletBalanceParams) (Wallet, error)
+	// Stores a part; a resent part (same group and number, not yet joined) replaces the stored copy and
+	// keeps its message ID.
+	UpsertConcatPart(ctx context.Context, arg UpsertConcatPartParams) (string, error)
 	// Create or update route health record
 	UpsertRouteHealth(ctx context.Context, arg UpsertRouteHealthParams) (RouteHealth, error)
 	// Create or update routing configuration

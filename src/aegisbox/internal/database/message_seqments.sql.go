@@ -246,7 +246,7 @@ func (q *Queries) GetAutoDLRCandidates(ctx context.Context, arg GetAutoDLRCandid
 }
 
 const getSegmentStatusesForMessage = `-- name: GetSegmentStatusesForMessage :many
-SELECT segment_seqn, dlr_status -- dlr_status is sql.NullString
+SELECT segment_seqn, dlr_status, error_code
 FROM message_segments
 WHERE message_id = $1
 ORDER BY segment_seqn
@@ -255,6 +255,7 @@ ORDER BY segment_seqn
 type GetSegmentStatusesForMessageRow struct {
 	SegmentSeqn int32   `json:"segmentSeqn"`
 	DlrStatus   *string `json:"dlrStatus"`
+	ErrorCode   *string `json:"errorCode"`
 }
 
 // Gets all segment statuses for final status aggregation
@@ -267,7 +268,7 @@ func (q *Queries) GetSegmentStatusesForMessage(ctx context.Context, messageID in
 	var items []GetSegmentStatusesForMessageRow
 	for rows.Next() {
 		var i GetSegmentStatusesForMessageRow
-		if err := rows.Scan(&i.SegmentSeqn, &i.DlrStatus); err != nil {
+		if err := rows.Scan(&i.SegmentSeqn, &i.DlrStatus, &i.ErrorCode); err != nil {
 			return nil, err
 		}
 		items = append(items, i)

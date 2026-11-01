@@ -102,3 +102,12 @@ SET status = 'pending',
 WHERE id = ANY(sqlc.arg(ids)::BIGINT[])
   AND status = 'failed'
 RETURNING id;
+
+-- name: EnqueueDLRForForwardingOnce :execrows
+-- Like EnqueueDLRForForwarding, but does nothing if a job with the same dedupe_key exists.
+INSERT INTO dlr_forwarding_queue (
+    message_id, payload, max_attempts, created_at, status, dedupe_key
+) VALUES (
+    sqlc.arg(message_id), sqlc.arg(payload), sqlc.arg(max_attempts), NOW(), 'pending', sqlc.arg(dedupe_key)
+)
+ON CONFLICT (dedupe_key) WHERE dedupe_key IS NOT NULL DO NOTHING;

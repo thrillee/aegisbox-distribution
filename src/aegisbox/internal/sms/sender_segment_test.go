@@ -38,6 +38,9 @@ type smppLikeConnector struct {
 
 func (c *smppLikeConnector) ConnectionID() int32 { return 9 }
 
+// SegmentCount: like the SMPP connector, this message is submitted as 2 segments.
+func (c *smppLikeConnector) SegmentCount(string) (int, error) { return 2, nil }
+
 func (c *smppLikeConnector) SubmitMessage(ctx context.Context, msg mno.PreparedMessage) (mno.SubmitResult, error) {
 	res := mno.SubmitResult{WasSubmitted: true}
 	for i := range msg.DBSeqs {
@@ -71,4 +74,25 @@ func TestSend_UpdatesTheMessagesOwnSegmentRows(t *testing.T) {
 
 func (m *segmentMockQuerier) IsSimulatorBlockedForSP(context.Context, database.IsSimulatorBlockedForSPParams) (bool, error) {
 	return false, nil
+}
+
+// httpLikeConnector submits the whole text as one unit, like an HTTP API (no SegmentCount).
+type httpLikeConnector struct{ smppLikeConnector }
+
+func (c *httpLikeConnector) SegmentCount() {} // shadows smppLikeConnector.SegmentCount: not a SegmentCounter
+
+// A long message (billed as 2 SMS segments) sent to an HTTP API is one submitted unit, so one
+// segment row: the API returns one ID, and a second row would never be completed.
+func TestSend_HTTPConnectorUsesOneRowForLongMessage(t *testing.T) {
+	q := &segmentMockQuerier{nextSegID: 87}
+	s := &DefaultSender{dbQueries: q, mnoConnectorProvider: fixedConnectorProvider{conn: &httpLikeConnector{}}}
+	mnoID := int32(12)
+	if _, err := s.Send(context.Background(), database.GetMessageDetailsForSendingRow{
+		ID: 99, ServiceProviderID: 6, TotalSegments: 2, RoutedMnoID: &mnoID, OriginalSourceAddr: "HKKF",
+	}); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(q.sentRowIDs) != 1 {
+		t.Fatalf("expected 1 segment row for an HTTP API, got %v", q.sentRowIDs)
+	}
 }

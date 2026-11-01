@@ -69,7 +69,7 @@ WHERE id = $3;
 
 -- name: GetSegmentStatusesForMessage :many
 -- Gets all segment statuses for final status aggregation
-SELECT segment_seqn, dlr_status -- dlr_status is sql.NullString
+SELECT segment_seqn, dlr_status, error_code
 FROM message_segments
 WHERE message_id = $1
 ORDER BY segment_seqn;
