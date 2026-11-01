@@ -25,7 +25,7 @@ INSERT INTO mnos (
     name, country_code, network_code, status
 ) VALUES (
     $1, $2, $3, COALESCE($4, 'active') -- Use input status or default to 'active'
-) RETURNING id, name, country_code, network_code, status, created_at, updated_at
+) RETURNING id, name, country_code, network_code, status, created_at, updated_at, is_simulator
 `
 
 type CreateMNOParams struct {
@@ -51,12 +51,13 @@ func (q *Queries) CreateMNO(ctx context.Context, arg CreateMNOParams) (Mno, erro
 		&i.Status,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.IsSimulator,
 	)
 	return i, err
 }
 
 const deactivateMNO = `-- name: DeactivateMNO :one
-UPDATE mnos SET status = 'inactive', updated_at = NOW() WHERE id = $1 RETURNING id, name, country_code, network_code, status, created_at, updated_at
+UPDATE mnos SET status = 'inactive', updated_at = NOW() WHERE id = $1 RETURNING id, name, country_code, network_code, status, created_at, updated_at, is_simulator
 `
 
 // Optional: Query to set MNO status to inactive instead of deleting
@@ -71,6 +72,7 @@ func (q *Queries) DeactivateMNO(ctx context.Context, id int32) (Mno, error) {
 		&i.Status,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.IsSimulator,
 	)
 	return i, err
 }
@@ -87,7 +89,7 @@ func (q *Queries) DeleteMNO(ctx context.Context, id int32) error {
 }
 
 const getMNOByID = `-- name: GetMNOByID :one
-SELECT id, name, country_code, network_code, status, created_at, updated_at FROM mnos WHERE id = $1 LIMIT 1
+SELECT id, name, country_code, network_code, status, created_at, updated_at, is_simulator FROM mnos WHERE id = $1 LIMIT 1
 `
 
 func (q *Queries) GetMNOByID(ctx context.Context, id int32) (Mno, error) {
@@ -101,12 +103,35 @@ func (q *Queries) GetMNOByID(ctx context.Context, id int32) (Mno, error) {
 		&i.Status,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.IsSimulator,
 	)
 	return i, err
 }
 
+const isSimulatorBlockedForSP = `-- name: IsSimulatorBlockedForSP :one
+SELECT COALESCE((
+    SELECT m.is_simulator AND NOT sp.is_test
+    FROM mnos m, service_providers sp
+    WHERE m.id = $1 AND sp.id = $2
+), FALSE)::BOOLEAN AS blocked
+`
+
+type IsSimulatorBlockedForSPParams struct {
+	MnoID             int32 `json:"mnoId"`
+	ServiceProviderID int32 `json:"serviceProviderId"`
+}
+
+// True when the MNO is a simulator and the service provider is not a test customer: the message must
+// not be sent through it.
+func (q *Queries) IsSimulatorBlockedForSP(ctx context.Context, arg IsSimulatorBlockedForSPParams) (bool, error) {
+	row := q.db.QueryRow(ctx, isSimulatorBlockedForSP, arg.MnoID, arg.ServiceProviderID)
+	var blocked bool
+	err := row.Scan(&blocked)
+	return blocked, err
+}
+
 const listMNOs = `-- name: ListMNOs :many
-SELECT id, name, country_code, network_code, status, created_at, updated_at FROM mnos
+SELECT id, name, country_code, network_code, status, created_at, updated_at, is_simulator FROM mnos
 ORDER BY name -- Or country_code, name
 LIMIT $1 OFFSET $2
 `
@@ -133,6 +158,7 @@ func (q *Queries) ListMNOs(ctx context.Context, arg ListMNOsParams) ([]Mno, erro
 			&i.Status,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.IsSimulator,
 		); err != nil {
 			return nil, err
 		}
@@ -153,7 +179,7 @@ SET
     status = COALESCE($4, status),
     updated_at = NOW()
 WHERE id = $5
-RETURNING id, name, country_code, network_code, status, created_at, updated_at
+RETURNING id, name, country_code, network_code, status, created_at, updated_at, is_simulator
 `
 
 type UpdateMNOParams struct {
@@ -181,6 +207,7 @@ func (q *Queries) UpdateMNO(ctx context.Context, arg UpdateMNOParams) (Mno, erro
 		&i.Status,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.IsSimulator,
 	)
 	return i, err
 }

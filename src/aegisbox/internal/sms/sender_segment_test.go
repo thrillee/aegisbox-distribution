@@ -68,3 +68,7 @@ func TestSend_UpdatesTheMessagesOwnSegmentRows(t *testing.T) {
 		t.Fatalf("expected segment rows [88 89] to be updated, got %v", q.sentRowIDs)
 	}
 }
+
+func (m *segmentMockQuerier) IsSimulatorBlockedForSP(context.Context, database.IsSimulatorBlockedForSPParams) (bool, error) {
+	return false, nil
+}

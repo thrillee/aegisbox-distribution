@@ -111,6 +111,7 @@ type Mno struct {
 	Status      string             `json:"status"`
 	CreatedAt   pgtype.Timestamptz `json:"createdAt"`
 	UpdatedAt   pgtype.Timestamptz `json:"updatedAt"`
+	IsSimulator bool               `json:"isSimulator"`
 }
 
 type MnoConnection struct {
@@ -407,6 +408,7 @@ type ServiceProvider struct {
 	AutoDlrEnabledAt          pgtype.Timestamptz `json:"autoDlrEnabledAt"`
 	UseRouteSenderPool        bool               `json:"useRouteSenderPool"`
 	AutoDlrIncludeUnconfirmed bool               `json:"autoDlrIncludeUnconfirmed"`
+	IsTest                    bool               `json:"isTest"`
 }
 
 type SmppSession struct {

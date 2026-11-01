@@ -135,3 +135,7 @@ func TestOrderAttempts(t *testing.T) {
 		t.Fatalf("input slice was modified: %v", got)
 	}
 }
+
+func (m *routeSenderMockQuerier) IsSimulatorBlockedForSP(context.Context, database.IsSimulatorBlockedForSPParams) (bool, error) {
+	return false, nil
+}

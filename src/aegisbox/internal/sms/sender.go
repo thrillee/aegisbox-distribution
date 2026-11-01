@@ -33,6 +33,10 @@ func NewDefaultSender(q database.Querier, provider mno.ConnectorProvider, seg se
 }
 
 // Send handles segmentation, MNO connector interaction, and recording segment results.
+// ErrSimulatorRouteBlocked is returned for an attempt to send a non-test customer's message through a
+// simulator MNO. The route did not fail, so it is not counted against route health.
+var ErrSimulatorRouteBlocked = errors.New("simulator MNO is only for test customers")
+
 func (s *DefaultSender) Send(ctx context.Context, msg database.GetMessageDetailsForSendingRow) (*mno.SubmitResult, error) {
 	// Use context enriched by the caller (Processor) which includes msgID, spID, mnoID
 	logCtx := ctx
@@ -47,6 +51,22 @@ func (s *DefaultSender) Send(ctx context.Context, msg database.GetMessageDetails
 		return &mno.SubmitResult{WasSubmitted: false, Error: err}, nil // Return nil error for logical failure
 	}
 	mnoID := msg.RoutedMnoID
+
+	// A simulator MNO reports messages as delivered without sending them: only test customers may
+	// use it. Checked here, where every attempt (first route, failover) passes, and fails closed.
+	blocked, err := s.dbQueries.IsSimulatorBlockedForSP(logCtx, database.IsSimulatorBlockedForSPParams{
+		MnoID:             *mnoID,
+		ServiceProviderID: msg.ServiceProviderID,
+	})
+	if err != nil || blocked {
+		if err == nil {
+			err = ErrSimulatorRouteBlocked
+		} else {
+			err = fmt.Errorf("%w: could not check the route: %v", ErrSimulatorRouteBlocked, err)
+		}
+		slog.ErrorContext(logCtx, "Refused to send through a simulator MNO", slog.Any("error", err))
+		return &mno.SubmitResult{WasSubmitted: false, Error: err}, nil
+	}
 
 	connector, err := s.mnoConnectorProvider.GetConnector(logCtx, *mnoID)
 	if err != nil {

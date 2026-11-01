@@ -233,6 +233,9 @@ type Querier interface {
 	IncrementOtpAlternativeSenderUsage(ctx context.Context, id int32) (OtpAlternativeSender, error)
 	IncrementOtpAssignmentUsage(ctx context.Context, id int32) (IncrementOtpAssignmentUsageRow, error)
 	InsertMessageIn(ctx context.Context, arg InsertMessageInParams) (int64, error)
+	// True when the MNO is a simulator and the service provider is not a test customer: the message must
+	// not be sent through it.
+	IsSimulatorBlockedForSP(ctx context.Context, arg IsSimulatorBlockedForSPParams) (bool, error)
 	ListAlternativeSendersWithAssignedTemplates(ctx context.Context, arg ListAlternativeSendersWithAssignedTemplatesParams) ([]ListAlternativeSendersWithAssignedTemplatesRow, error)
 	// Selects active senders that are not depleted, optionally for a specific MNO or global ones (MNO ID IS NULL).
 	// Orders by least recently used to attempt rotation.
