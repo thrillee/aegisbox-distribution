@@ -6,6 +6,7 @@ import (
 
 	"github.com/joho/godotenv"
 	"github.com/kelseyhightower/envconfig"
+	"github.com/thrillee/aegisbox/internal/linkscan"
 )
 
 type ManagerAPIConfig struct {
@@ -31,6 +32,7 @@ type Config struct {
 	DLRForwardBatchSize        int           `envconfig:"WORKER_DLR_BATCH_SIZE"                     default:"100"`
 	DefaultRoutingGroupRef     string        `envconfig:"DEFAULT_ROUTING_GROUP_REF"                 default:"SYS_DEFAULT_ROUTE"`
 	ManagerAPI                 ManagerAPIConfig
+	LinkScan                   linkscan.Config
 }
 
 // ServerConfig holds SMPP Server specific configuration.

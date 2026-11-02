@@ -13,6 +13,7 @@ import (
 	"github.com/thrillee/aegisbox/internal/config"
 	"github.com/thrillee/aegisbox/internal/database"
 	"github.com/thrillee/aegisbox/internal/httpserver"
+	"github.com/thrillee/aegisbox/internal/linkscan"
 	"github.com/thrillee/aegisbox/internal/mno"
 	"github.com/thrillee/aegisbox/internal/mno/http_providers"
 	"github.com/thrillee/aegisbox/internal/notification"
@@ -104,7 +105,10 @@ func RunGateway(ctx context.Context, cfg *config.Config) error {
 		logger)
 
 	// --- Initialize SMS Processor (Needs initialized dependencies) ---
-	smsProcessor.SetSender(sms.NewDefaultSender(dbQueries, mnoManager, mainSegmenter))
+	defaultSender := sms.NewDefaultSender(dbQueries, mnoManager, mainSegmenter)
+	// Links in messages sent through a simulator MNO are queued for the link scanner.
+	defaultSender.SetLinkEnqueuer(linkscan.NewEnqueuer(dbQueries, cfg.LinkScan))
+	smsProcessor.SetSender(defaultSender)
 
 	// --- Initialize SMPP Server (Implements Session Manager) ---
 	smppServer := smppserver.NewServer(

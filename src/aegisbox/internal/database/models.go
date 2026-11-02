@@ -75,6 +75,27 @@ type IncomingConcatPart struct {
 	MessageID         *int64             `json:"messageId"`
 }
 
+type LinkScanJob struct {
+	ID                int64              `json:"id"`
+	MessageID         int64              `json:"messageId"`
+	ServiceProviderID int32              `json:"serviceProviderId"`
+	Url               string             `json:"url"`
+	NormalizedUrl     string             `json:"normalizedUrl"`
+	Host              string             `json:"host"`
+	GroupKey          string             `json:"groupKey"`
+	LinkKind          string             `json:"linkKind"`
+	ScanMode          string             `json:"scanMode"`
+	ModeReason        *string            `json:"modeReason"`
+	Status            string             `json:"status"`
+	Attempts          int32              `json:"attempts"`
+	LastError         *string            `json:"lastError"`
+	NextAttemptAt     pgtype.Timestamptz `json:"nextAttemptAt"`
+	LockedAt          pgtype.Timestamptz `json:"lockedAt"`
+	CreatedAt         pgtype.Timestamptz `json:"createdAt"`
+	UpdatedAt         pgtype.Timestamptz `json:"updatedAt"`
+	CompletedAt       pgtype.Timestamptz `json:"completedAt"`
+}
+
 type Message struct {
 	ID                      int64              `json:"id"`
 	ServiceProviderID       int32              `json:"serviceProviderId"`
@@ -104,6 +125,13 @@ type Message struct {
 	RoutingAssignmentID   *int32   `json:"routingAssignmentId"`
 	SentSourceAddr        *string  `json:"sentSourceAddr"`
 	ExtraClientMessageIds []string `json:"extraClientMessageIds"`
+}
+
+type MessageLinkExtraction struct {
+	MessageID   int64              `json:"messageId"`
+	Outcome     string             `json:"outcome"`
+	LinkCount   int32              `json:"linkCount"`
+	ExtractedAt pgtype.Timestamptz `json:"extractedAt"`
 }
 
 type MessageSegment struct {

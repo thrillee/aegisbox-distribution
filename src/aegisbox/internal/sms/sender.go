@@ -21,6 +21,18 @@ type DefaultSender struct {
 	dbQueries            database.Querier
 	mnoConnectorProvider mno.ConnectorProvider // Use the interface to get MNO connectors
 	segmenter            segmenter.Segmenter   // Interface for message segmentation
+	linkEnqueuer         LinkEnqueuer          // optional: queues links of simulator messages
+}
+
+// LinkEnqueuer queues the links of a message accepted by an MNO for the link scanner. It decides
+// itself whether the MNO is one whose traffic is scanned (a simulator).
+type LinkEnqueuer interface {
+	MessageSent(ctx context.Context, messageID int64, spID int32, mnoID int32, text string) error
+}
+
+// SetLinkEnqueuer enables link extraction after successful submits.
+func (s *DefaultSender) SetLinkEnqueuer(e LinkEnqueuer) {
+	s.linkEnqueuer = e
 }
 
 // NewDefaultSender creates a sender instance.
@@ -163,6 +175,7 @@ func (s *DefaultSender) Send(ctx context.Context, msg database.GetMessageDetails
 		slog.Any("segements", submitResult.Segments),
 		slog.Int("segment_results_count", len(submitResult.Segments)))
 	updateErrors := false
+	anySent := false
 	for _, segResult := range submitResult.Segments {
 		// Find the corresponding DB segment ID (using Seqn assumes order is preserved)
 		// A map might be safer if order isn't guaranteed.
@@ -198,6 +211,7 @@ func (s *DefaultSender) Send(ctx context.Context, msg database.GetMessageDetails
 				slog.ErrorContext(segLogCtx, "Failed to update DB for successfully sent segment", slog.Any("error", err))
 				updateErrors = true // Log DB error but continue processing results
 			} else {
+				anySent = true
 				slog.InfoContext(segLogCtx, "Segment sent successfully to MNO", slog.Any("dbSegmentID", dbSegmentID), slog.Any("mno_msg_id", segResult.MnoMessageID))
 			}
 		} else {
@@ -224,6 +238,14 @@ func (s *DefaultSender) Send(ctx context.Context, msg database.GetMessageDetails
 		// If DB updates failed, the overall SubmitResult might need adjustment or specific error flagging
 		slog.ErrorContext(logCtx, "Encountered one or more errors updating segment statuses in DB after submission")
 		// Set overall error? submitResult.Error = errors.New("failed to update segment statuses in DB")
+	}
+
+	// Queue the message's links for scanning once a submit is recorded as sent. Scanning is a side
+	// job: a failure here is logged and never fails the send.
+	if anySent && s.linkEnqueuer != nil {
+		if err := s.linkEnqueuer.MessageSent(logCtx, msg.ID, msg.ServiceProviderID, *mnoID, msg.ShortMessage); err != nil {
+			slog.ErrorContext(logCtx, "Failed to queue message links for scanning", slog.Any("error", err))
+		}
 	}
 
 	// Return the result received from the connector (potentially modified if DB updates failed critically)
