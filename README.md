@@ -1,5 +1,7 @@
 # Aegisbox Distribution
 
+> **Working on Aegisbox?** Start with [docs/HANDOFF.md](docs/HANDOFF.md): current state, working rules, open work and local testing. The link scanning plan is in [docs/LINK_SCANNING_PLAN.md](docs/LINK_SCANNING_PLAN.md).
+
 Pre-built Docker Compose deployment for Aegisbox SMPP Gateway.
 
 ## Images
