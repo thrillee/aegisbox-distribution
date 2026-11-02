@@ -37,6 +37,9 @@ type Querier interface {
 	// Atomically claims a group's parts once all of them are in. A concurrent call for the same group
 	// waits on the row locks, then finds them claimed and returns nothing, so only one caller joins it.
 	ClaimCompleteConcatGroup(ctx context.Context, arg ClaimCompleteConcatGroupParams) ([]ClaimCompleteConcatGroupRow, error)
+	// Takes due jobs for scanning. A job left in processing for 5 minutes (a crashed worker) is taken
+	// again.
+	ClaimLinkScanJobs(ctx context.Context, batchSize int32) ([]LinkScanJob, error)
 	// Claims the parts of one incomplete group whose first part is older than the cutoff, so what
 	// arrived is still sent. Picks the oldest such group.
 	ClaimStaleConcatGroup(ctx context.Context, cutoff pgtype.Timestamptz) ([]ClaimStaleConcatGroupRow, error)
@@ -49,6 +52,7 @@ type Querier interface {
 	CleanupOldRouteAttempts(ctx context.Context, retentionDays int32) error
 	// Sessions left 'connected' by a gateway that stopped without closing them.
 	CloseOrphanedSMPPSessions(ctx context.Context) (int64, error)
+	CompleteLinkScanJob(ctx context.Context, id int64) error
 	CountMNOConnectionsByMNO(ctx context.Context, mnoID int32) (int64, error)
 	CountMNOs(ctx context.Context) (int64, error)
 	// Counts messages based on optional filters, joining necessary tables.
@@ -61,6 +65,9 @@ type Querier interface {
 	CountOtpSenderTemplateAssignments(ctx context.Context, arg CountOtpSenderTemplateAssignmentsParams) (int64, error)
 	// Counts pricing rules for a specific Service Provider.
 	CountPricingRulesBySP(ctx context.Context, serviceProviderID int32) (int64, error)
+	// Visits queued in the last hour for links of the same customer that share a group key, used to
+	// visit only a sample of per recipient links.
+	CountRecentVisitsForGroup(ctx context.Context, arg CountRecentVisitsForGroupParams) (int32, error)
 	CountRoutingAssignmentsByRoutingGroup(ctx context.Context, routingGroupID int32) (int64, error)
 	CountRoutingGroups(ctx context.Context) (int64, error)
 	// Counts credentials, optionally filtered by Service Provider ID
@@ -124,6 +131,8 @@ type Querier interface {
 	EnqueueDLRForForwarding(ctx context.Context, arg EnqueueDLRForForwardingParams) error
 	// Like EnqueueDLRForForwarding, but does nothing if a job with the same dedupe_key exists.
 	EnqueueDLRForForwardingOnce(ctx context.Context, arg EnqueueDLRForForwardingOnceParams) (int64, error)
+	// A failed attempt: retried after 30 s, 60 s, 120 s... until max_attempts, then failed.
+	FailLinkScanJob(ctx context.Context, arg FailLinkScanJobParams) error
 	FindDebitTransactionForMessage(ctx context.Context, messageID *int64) (FindDebitTransactionForMessageRow, error)
 	// Finds the msisdn_prefix_group_id for a given MSISDN by longest prefix match.
 	// $1: full_msisdn (e.g., '2348031234567')
@@ -242,16 +251,19 @@ type Querier interface {
 	HasReversalForMessage(ctx context.Context, messageID *int64) (bool, error)
 	IncrementOtpAlternativeSenderUsage(ctx context.Context, id int32) (OtpAlternativeSender, error)
 	IncrementOtpAssignmentUsage(ctx context.Context, id int32) (IncrementOtpAssignmentUsageRow, error)
+	InsertLinkScanJob(ctx context.Context, arg InsertLinkScanJobParams) error
 	InsertMessageIn(ctx context.Context, arg InsertMessageInParams) (int64, error)
 	// True when the MNO is a simulator and the service provider is not a test customer: the message must
 	// not be sent through it.
 	IsSimulatorBlockedForSP(ctx context.Context, arg IsSimulatorBlockedForSPParams) (bool, error)
+	IsSimulatorMNO(ctx context.Context, mnoID int32) (bool, error)
 	ListAlternativeSendersWithAssignedTemplates(ctx context.Context, arg ListAlternativeSendersWithAssignedTemplatesParams) ([]ListAlternativeSendersWithAssignedTemplatesRow, error)
 	// Selects active senders that are not depleted, optionally for a specific MNO or global ones (MNO ID IS NULL).
 	// Orders by least recently used to attempt rotation.
 	ListGlobalOtpAlternativeSenders(ctx context.Context, arg ListGlobalOtpAlternativeSendersParams) ([]OtpAlternativeSender, error)
 	// Per routing group configs (the global default row has a NULL group and is read separately)
 	ListGroupRoutingConfigs(ctx context.Context) ([]ListGroupRoutingConfigsRow, error)
+	ListLinkScanJobsForMessage(ctx context.Context, messageID int64) ([]LinkScanJob, error)
 	ListMNOConnectionsByMNO(ctx context.Context, arg ListMNOConnectionsByMNOParams) ([]MnoConnection, error)
 	ListMNOs(ctx context.Context, arg ListMNOsParams) ([]Mno, error)
 	// Lists detailed message information based on optional filters with pagination. Excludes message content.
@@ -302,6 +314,9 @@ type Querier interface {
 	// Picks a sender from a connection's pool by the connection's sender_pool_strategy and records
 	// the use in the same statement. No row when the pool has no active sender.
 	PickRouteSender(ctx context.Context, mnoConnectionID int32) (PickRouteSenderRow, error)
+	// Records that a message was checked for links (also when it had none). Written after its jobs;
+	// a second send attempt after failover leaves the first record.
+	RecordMessageLinkExtraction(ctx context.Context, arg RecordMessageLinkExtractionParams) error
 	// =========================================
 	// ROUTE HEALTH QUERIES
 	// =========================================

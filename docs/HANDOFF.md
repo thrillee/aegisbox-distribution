@@ -111,13 +111,13 @@ Highlights of recent work, newest first. See each repo's merged PRs for detail.
 | Lagos time zone; analytics fixes; customer Connection page | done |
 | SMPP security (sessions, bcrypt, bind responses, DLR port key) | done |
 
-Migrations up to **00015** exist; they run automatically on start.
+Migrations up to **00016** exist; they run automatically on start.
 
 ## 5. Open work
 
-### 5.1 Link scanning (in progress; steps 1 and 1b done)
+### 5.1 Link scanning (in progress; steps 1, 1b and 2 done)
 The full plan, including the gaps already resolved, is in [LINK_SCANNING_PLAN.md](LINK_SCANNING_PLAN.md).
-Next is **step 2**: link extraction and the scan queue.
+Next is **step 3**: the `linkscanner` service. Step 2 (aegisbox #57) queues links in `link_scan_jobs`; the claim, complete and fail queries for the scanner worker are already in `db/query/link_scan.sql`.
 
 ### 5.2 Waiting on the owner
 * Two billing questions for one customer (a small test refund, and a one off charge for traffic

@@ -24,8 +24,8 @@ Later (Phase 2, separate approval) the same verdicts can hold or block real mess
 |---|---|---|
 | 1 | `aegisbox mnosim` and the simulator guard | **done** (aegisbox #53) |
 | 1b | Portal switches, badges, test traffic out of totals | **done** (portal #35) |
-| 2 | Link extraction and scan queue | next |
-| 3 | `linkscanner` service with SSRF protection and isolation | |
+| 2 | Link extraction and scan queue | **done** (aegisbox #57) |
+| 3 | `linkscanner` service with SSRF protection and isolation | next |
 | 4 | Scoring, reputation, cache | |
 | 5 | Portal "Link Scans" page | |
 | 6 | End to end and load tests, deployment | |
