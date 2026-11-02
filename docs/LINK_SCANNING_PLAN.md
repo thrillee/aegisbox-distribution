@@ -20,14 +20,18 @@ Later (Phase 2, separate approval) the same verdicts can hold or block real mess
 
 ## Steps
 
+Turning it on in production: [LINK_SCANNING_ENABLE.md](LINK_SCANNING_ENABLE.md).
+
+
 | Step | What | State |
 |---|---|---|
 | 1 | `aegisbox mnosim` and the simulator guard | **done** (aegisbox #53) |
 | 1b | Portal switches, badges, test traffic out of totals | **done** (portal #35) |
 | 2 | Link extraction and scan queue | **done** (aegisbox #57) |
-| 3 | `linkscanner` service with SSRF protection and isolation | next |
-| 4 | Scoring, reputation, cache | |
-| 5 | Portal "Link Scans" page | |
+| 3 | `linkscanner` service with SSRF protection and isolation | **done** (aegisbox, this round) |
+| 4 | Scoring, reputation, cache | **partly done**: own signals, bands, cache, retention. Not yet: RDAP domain age, URLhaus, admin overrides and allow/block lists |
+| 4b | Simulator whitelist: test messages to listed numbers use real routes | **done** (aegisbox, portal) |
+| 5 | Portal "Link Scans" page | next |
 | 6 | End to end and load tests, deployment | |
 
 ### Step 2: extraction and queue (gateway)
