@@ -1,5 +1,10 @@
 # Aegisbox Distribution Guide
 
+> **Start here: [docs/HANDOFF.md](docs/HANDOFF.md).** It describes the system as deployed now
+> (Dokploy, `docker-compose.dokploy.yml`, sources vendored in `src/`), the working rules, open work
+> and local testing. Much of the rest of this file describes an older setup (GHCR images, the
+> monitoring stack, separate API and gateway containers) and is kept for reference.
+
 This document provides comprehensive information about Aegisbox for AI agents and developers working with this deployment package.
 
 ## Project Overview

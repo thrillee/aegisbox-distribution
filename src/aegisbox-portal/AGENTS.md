@@ -1,5 +1,10 @@
 # Agent Guidelines for Aegisbox Portal
 
+> **Start here:** the current state of Aegisbox, the working rules (PR to main, sync the
+> distribution), the domain rules settled with the owner, open work and how to test locally are in
+> [aegisbox-distribution/docs/HANDOFF.md](https://github.com/thrillee/aegisbox-distribution/blob/main/docs/HANDOFF.md).
+> Where this file disagrees with the handoff guide, the guide is current.
+
 ## Project Overview
 
 This is a Next.js 16 application with TypeScript, using Tailwind CSS and Radix UI for UI components. The project follows shadcn/ui conventions and is configured with strict TypeScript mode.
