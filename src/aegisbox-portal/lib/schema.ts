@@ -584,3 +584,15 @@ export const senderIdDeliveryAttemptsRelations = relations(senderIdDeliveryAttem
     references: [mnos.id],
   }),
 }))
+
+// Whitelisted numbers: a test customer's message to one of these numbers is sent through a real
+// network instead of the simulator, so the phone gets it and the real DLR comes back.
+// serviceProviderId null applies to every test customer. msisdn: digits, international format.
+export const simulatorWhitelistNumbers = pgTable('simulator_whitelist_numbers', {
+  id: serial('id').primaryKey(),
+  msisdn: varchar('msisdn', { length: 20 }).notNull(),
+  serviceProviderId: integer('service_provider_id'),
+  note: text('note'),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+  updatedAt: timestamp('updated_at').defaultNow().notNull(),
+})

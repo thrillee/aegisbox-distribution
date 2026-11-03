@@ -281,7 +281,8 @@ SELECT
     COALESCE(rh.consecutive_failures, 0) AS consecutive_failures,
     COALESCE(rh.last_success_at, NOW()) AS last_route_success,
     rh.last_attempt_at AS route_last_attempt_at,
-    COALESCE(rh.auto_unavailable, false) AS route_auto_unavailable
+    COALESCE(rh.auto_unavailable, false) AS route_auto_unavailable,
+    m.is_simulator AS mno_is_simulator
 FROM routing_assignments ra
 JOIN mnos m ON ra.mno_id = m.id AND m.status = 'active'
 LEFT JOIN mno_connections mc ON m.id = mc.mno_id AND mc.status = 'active'

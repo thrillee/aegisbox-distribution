@@ -7,6 +7,8 @@ package database
 
 import (
 	"context"
+
+	"github.com/jackc/pgx/v5/pgtype"
 )
 
 const claimLinkScanJobs = `-- name: ClaimLinkScanJobs :many
@@ -16,11 +18,12 @@ WHERE j.id IN (
     SELECT c.id FROM link_scan_jobs c
     WHERE (c.status = 'queued' AND c.next_attempt_at <= NOW())
        OR (c.status = 'processing' AND c.locked_at < NOW() - INTERVAL '5 minutes')
-    ORDER BY c.next_attempt_at
+    -- Jobs of held real messages (priority 1) first.
+    ORDER BY c.priority DESC, c.next_attempt_at
     LIMIT $1
     FOR UPDATE SKIP LOCKED
 )
-RETURNING j.id, j.message_id, j.service_provider_id, j.url, j.normalized_url, j.host, j.group_key, j.link_kind, j.scan_mode, j.mode_reason, j.status, j.attempts, j.last_error, j.next_attempt_at, j.locked_at, j.created_at, j.updated_at, j.completed_at
+RETURNING j.id, j.message_id, j.service_provider_id, j.url, j.normalized_url, j.host, j.group_key, j.link_kind, j.scan_mode, j.mode_reason, j.status, j.attempts, j.last_error, j.next_attempt_at, j.locked_at, j.created_at, j.updated_at, j.completed_at, j.link_scan_id, j.priority
 `
 
 // Takes due jobs for scanning. A job left in processing for 5 minutes (a crashed worker) is taken
@@ -53,6 +56,8 @@ func (q *Queries) ClaimLinkScanJobs(ctx context.Context, batchSize int32) ([]Lin
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.CompletedAt,
+			&i.LinkScanID,
+			&i.Priority,
 		); err != nil {
 			return nil, err
 		}
@@ -64,15 +69,49 @@ func (q *Queries) ClaimLinkScanJobs(ctx context.Context, batchSize int32) ([]Lin
 	return items, nil
 }
 
-const completeLinkScanJob = `-- name: CompleteLinkScanJob :exec
-UPDATE link_scan_jobs
-SET status = 'done', last_error = NULL, locked_at = NULL, completed_at = NOW(), updated_at = NOW()
-WHERE id = $1 AND status = 'processing'
+const clearScreenshotPath = `-- name: ClearScreenshotPath :exec
+UPDATE link_scans SET screenshot_path = NULL WHERE id = $1
 `
 
-func (q *Queries) CompleteLinkScanJob(ctx context.Context, id int64) error {
-	_, err := q.db.Exec(ctx, completeLinkScanJob, id)
+func (q *Queries) ClearScreenshotPath(ctx context.Context, id int64) error {
+	_, err := q.db.Exec(ctx, clearScreenshotPath, id)
 	return err
+}
+
+const completeLinkScanJob = `-- name: CompleteLinkScanJob :exec
+UPDATE link_scan_jobs
+SET status = 'done', link_scan_id = $1, last_error = NULL, locked_at = NULL,
+    completed_at = NOW(), updated_at = NOW()
+WHERE id = $2 AND status = 'processing'
+`
+
+type CompleteLinkScanJobParams struct {
+	LinkScanID *int64 `json:"linkScanId"`
+	ID         int64  `json:"id"`
+}
+
+func (q *Queries) CompleteLinkScanJob(ctx context.Context, arg CompleteLinkScanJobParams) error {
+	_, err := q.db.Exec(ctx, completeLinkScanJob, arg.LinkScanID, arg.ID)
+	return err
+}
+
+const countLinkScanBacklog = `-- name: CountLinkScanBacklog :one
+SELECT COUNT(*)::INT AS queued,
+       COALESCE(EXTRACT(EPOCH FROM NOW() - MIN(created_at)), 0)::INT AS oldest_seconds
+FROM link_scan_jobs
+WHERE status IN ('queued', 'processing')
+`
+
+type CountLinkScanBacklogRow struct {
+	Queued        int32 `json:"queued"`
+	OldestSeconds int32 `json:"oldestSeconds"`
+}
+
+func (q *Queries) CountLinkScanBacklog(ctx context.Context) (CountLinkScanBacklogRow, error) {
+	row := q.db.QueryRow(ctx, countLinkScanBacklog)
+	var i CountLinkScanBacklogRow
+	err := row.Scan(&i.Queued, &i.OldestSeconds)
+	return i, err
 }
 
 const countRecentVisitsForGroup = `-- name: CountRecentVisitsForGroup :one
@@ -98,38 +137,201 @@ func (q *Queries) CountRecentVisitsForGroup(ctx context.Context, arg CountRecent
 	return visits, err
 }
 
+const deferLinkScanJob = `-- name: DeferLinkScanJob :exec
+UPDATE link_scan_jobs
+SET status = 'queued', attempts = GREATEST(attempts - 1, 0), last_error = $1,
+    locked_at = NULL, next_attempt_at = NOW() + INTERVAL '1 minute', updated_at = NOW()
+WHERE id = $2 AND status = 'processing'
+`
+
+type DeferLinkScanJobParams struct {
+	LastError *string `json:"lastError"`
+	ID        int64   `json:"id"`
+}
+
+// The scanner is down, busy or not configured: not the page's fault, so the attempt the claim
+// counted is given back and the job waits a minute. Links are never lost while the scanner is out.
+func (q *Queries) DeferLinkScanJob(ctx context.Context, arg DeferLinkScanJobParams) error {
+	_, err := q.db.Exec(ctx, deferLinkScanJob, arg.LastError, arg.ID)
+	return err
+}
+
+const deleteOldLinkScanData = `-- name: DeleteOldLinkScanData :one
+WITH j AS (
+    DELETE FROM link_scan_jobs lj
+    WHERE lj.created_at < $1 AND lj.status <> 'processing'
+), e AS (
+    DELETE FROM message_link_extractions WHERE extracted_at < $1
+), h AS (
+    DELETE FROM message_link_holds mh
+    WHERE mh.created_at < $1 AND mh.status IN ('released', 'rejected')
+), s AS (
+    DELETE FROM link_scans WHERE scanned_at < $1 AND screenshot_path IS NULL
+    RETURNING id
+)
+SELECT COUNT(*)::INT FROM s
+`
+
+// Deletes scan results, finished jobs and extraction records older than the cutoff. Returns the
+// number of scan results deleted.
+// Jobs still queued by then (scanning was off) are deleted too: their messages are too old to matter.
+func (q *Queries) DeleteOldLinkScanData(ctx context.Context, before pgtype.Timestamptz) (int32, error) {
+	row := q.db.QueryRow(ctx, deleteOldLinkScanData, before)
+	var column_1 int32
+	err := row.Scan(&column_1)
+	return column_1, err
+}
+
 const failLinkScanJob = `-- name: FailLinkScanJob :exec
 UPDATE link_scan_jobs
 SET status = CASE WHEN attempts >= $1::INT THEN 'failed' ELSE 'queued' END,
     last_error = $2,
     locked_at = NULL,
-    next_attempt_at = NOW() + make_interval(secs => 30 * power(2, GREATEST(attempts - 1, 0))),
+    next_attempt_at = NOW() + make_interval(secs => $3::INT * power(2, GREATEST(attempts - 1, 0))),
     completed_at = CASE WHEN attempts >= $1::INT THEN NOW() ELSE NULL END,
     updated_at = NOW()
-WHERE id = $3 AND status = 'processing'
+WHERE id = $4 AND status = 'processing'
 `
 
 type FailLinkScanJobParams struct {
 	MaxAttempts int32   `json:"maxAttempts"`
 	LastError   *string `json:"lastError"`
+	BaseSeconds int32   `json:"baseSeconds"`
 	ID          int64   `json:"id"`
 }
 
-// A failed attempt: retried after 30 s, 60 s, 120 s... until max_attempts, then failed.
+// A failed attempt: retried after base, 2 x base, 4 x base seconds... until max_attempts, then
+// failed. The worker uses a 30 s base, and a short one for jobs of held messages.
 func (q *Queries) FailLinkScanJob(ctx context.Context, arg FailLinkScanJobParams) error {
-	_, err := q.db.Exec(ctx, failLinkScanJob, arg.MaxAttempts, arg.LastError, arg.ID)
+	_, err := q.db.Exec(ctx, failLinkScanJob,
+		arg.MaxAttempts,
+		arg.LastError,
+		arg.BaseSeconds,
+		arg.ID,
+	)
 	return err
+}
+
+const findCachedLinkScan = `-- name: FindCachedLinkScan :one
+SELECT id, COALESCE(override_verdict, verdict)::TEXT AS verdict, final_host FROM link_scans
+WHERE normalized_url = $1 AND scan_kind = 'visit' AND expires_at > NOW()
+ORDER BY scanned_at DESC
+LIMIT 1
+`
+
+type FindCachedLinkScanRow struct {
+	ID        int64   `json:"id"`
+	Verdict   string  `json:"verdict"`
+	FinalHost *string `json:"finalHost"`
+}
+
+// A recent visit of the same URL that is still valid (24 h, 7 days when malicious). verdict is
+// the effective one (an admin override wins).
+func (q *Queries) FindCachedLinkScan(ctx context.Context, normalizedUrl string) (FindCachedLinkScanRow, error) {
+	row := q.db.QueryRow(ctx, findCachedLinkScan, normalizedUrl)
+	var i FindCachedLinkScanRow
+	err := row.Scan(&i.ID, &i.Verdict, &i.FinalHost)
+	return i, err
+}
+
+const findRecentGroupVisit = `-- name: FindRecentGroupVisit :one
+SELECT id, COALESCE(override_verdict, verdict)::TEXT AS verdict, final_host FROM link_scans
+WHERE group_key = $1 AND scan_kind = 'visit' AND expires_at > NOW()
+ORDER BY scanned_at DESC
+LIMIT 1
+`
+
+type FindRecentGroupVisitRow struct {
+	ID        int64   `json:"id"`
+	Verdict   string  `json:"verdict"`
+	FinalHost *string `json:"finalHost"`
+}
+
+// The latest visit of a link in the same group (per recipient links that differ only by a token),
+// used for links that were sampled out instead of visited.
+func (q *Queries) FindRecentGroupVisit(ctx context.Context, groupKey string) (FindRecentGroupVisitRow, error) {
+	row := q.db.QueryRow(ctx, findRecentGroupVisit, groupKey)
+	var i FindRecentGroupVisitRow
+	err := row.Scan(&i.ID, &i.Verdict, &i.FinalHost)
+	return i, err
+}
+
+const insertLinkScan = `-- name: InsertLinkScan :one
+INSERT INTO link_scans (
+    normalized_url, group_key, scan_kind, final_url, final_host, http_status, verdict, score,
+    reasons, title, text_excerpt, redirects, forms, downloads, blocked, tls_issuer,
+    screenshot_path, scan_error, duration_ms, expires_at
+) VALUES (
+    $1, $2, $3, $4,
+    $5, $6, $7, $8,
+    $9, $10, $11, $12,
+    $13, $14, $15, $16,
+    $17, $18, $19, $20
+)
+RETURNING id
+`
+
+type InsertLinkScanParams struct {
+	NormalizedUrl  string             `json:"normalizedUrl"`
+	GroupKey       string             `json:"groupKey"`
+	ScanKind       string             `json:"scanKind"`
+	FinalUrl       *string            `json:"finalUrl"`
+	FinalHost      *string            `json:"finalHost"`
+	HttpStatus     *int32             `json:"httpStatus"`
+	Verdict        string             `json:"verdict"`
+	Score          int32              `json:"score"`
+	Reasons        []byte             `json:"reasons"`
+	Title          *string            `json:"title"`
+	TextExcerpt    *string            `json:"textExcerpt"`
+	Redirects      []byte             `json:"redirects"`
+	Forms          []byte             `json:"forms"`
+	Downloads      []byte             `json:"downloads"`
+	Blocked        []byte             `json:"blocked"`
+	TlsIssuer      *string            `json:"tlsIssuer"`
+	ScreenshotPath *string            `json:"screenshotPath"`
+	ScanError      *string            `json:"scanError"`
+	DurationMs     *int32             `json:"durationMs"`
+	ExpiresAt      pgtype.Timestamptz `json:"expiresAt"`
+}
+
+func (q *Queries) InsertLinkScan(ctx context.Context, arg InsertLinkScanParams) (int64, error) {
+	row := q.db.QueryRow(ctx, insertLinkScan,
+		arg.NormalizedUrl,
+		arg.GroupKey,
+		arg.ScanKind,
+		arg.FinalUrl,
+		arg.FinalHost,
+		arg.HttpStatus,
+		arg.Verdict,
+		arg.Score,
+		arg.Reasons,
+		arg.Title,
+		arg.TextExcerpt,
+		arg.Redirects,
+		arg.Forms,
+		arg.Downloads,
+		arg.Blocked,
+		arg.TlsIssuer,
+		arg.ScreenshotPath,
+		arg.ScanError,
+		arg.DurationMs,
+		arg.ExpiresAt,
+	)
+	var id int64
+	err := row.Scan(&id)
+	return id, err
 }
 
 const insertLinkScanJob = `-- name: InsertLinkScanJob :exec
 INSERT INTO link_scan_jobs (
     message_id, service_provider_id, url, normalized_url, host, group_key,
-    link_kind, scan_mode, mode_reason, status, completed_at
+    link_kind, scan_mode, mode_reason, status, completed_at, priority
 ) VALUES (
     $1, $2, $3, $4,
     $5, $6, $7, $8,
     $9, $10::TEXT,
-    CASE WHEN $10::TEXT = 'skipped' THEN NOW() ELSE NULL END
+    CASE WHEN $10::TEXT = 'skipped' THEN NOW() ELSE NULL END,
+    $11::SMALLINT
 )
 ON CONFLICT (message_id, normalized_url) DO NOTHING
 `
@@ -145,6 +347,7 @@ type InsertLinkScanJobParams struct {
 	ScanMode          string  `json:"scanMode"`
 	ModeReason        *string `json:"modeReason"`
 	Status            string  `json:"status"`
+	Priority          int16   `json:"priority"`
 }
 
 func (q *Queries) InsertLinkScanJob(ctx context.Context, arg InsertLinkScanJobParams) error {
@@ -159,6 +362,7 @@ func (q *Queries) InsertLinkScanJob(ctx context.Context, arg InsertLinkScanJobPa
 		arg.ScanMode,
 		arg.ModeReason,
 		arg.Status,
+		arg.Priority,
 	)
 	return err
 }
@@ -175,7 +379,7 @@ func (q *Queries) IsSimulatorMNO(ctx context.Context, mnoID int32) (bool, error)
 }
 
 const listLinkScanJobsForMessage = `-- name: ListLinkScanJobsForMessage :many
-SELECT id, message_id, service_provider_id, url, normalized_url, host, group_key, link_kind, scan_mode, mode_reason, status, attempts, last_error, next_attempt_at, locked_at, created_at, updated_at, completed_at FROM link_scan_jobs WHERE message_id = $1 ORDER BY id
+SELECT id, message_id, service_provider_id, url, normalized_url, host, group_key, link_kind, scan_mode, mode_reason, status, attempts, last_error, next_attempt_at, locked_at, created_at, updated_at, completed_at, link_scan_id, priority FROM link_scan_jobs WHERE message_id = $1 ORDER BY id
 `
 
 func (q *Queries) ListLinkScanJobsForMessage(ctx context.Context, messageID int64) ([]LinkScanJob, error) {
@@ -206,7 +410,41 @@ func (q *Queries) ListLinkScanJobsForMessage(ctx context.Context, messageID int6
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.CompletedAt,
+			&i.LinkScanID,
+			&i.Priority,
 		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listOldScreenshots = `-- name: ListOldScreenshots :many
+SELECT id, screenshot_path FROM link_scans
+WHERE screenshot_path IS NOT NULL AND scanned_at < $1
+ORDER BY id
+LIMIT 500
+`
+
+type ListOldScreenshotsRow struct {
+	ID             int64   `json:"id"`
+	ScreenshotPath *string `json:"screenshotPath"`
+}
+
+func (q *Queries) ListOldScreenshots(ctx context.Context, before pgtype.Timestamptz) ([]ListOldScreenshotsRow, error) {
+	rows, err := q.db.Query(ctx, listOldScreenshots, before)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListOldScreenshotsRow
+	for rows.Next() {
+		var i ListOldScreenshotsRow
+		if err := rows.Scan(&i.ID, &i.ScreenshotPath); err != nil {
 			return nil, err
 		}
 		items = append(items, i)

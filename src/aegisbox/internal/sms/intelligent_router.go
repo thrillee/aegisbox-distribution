@@ -172,6 +172,18 @@ func (r *IntelligentRouter) Route(ctx context.Context, req RoutingRequest) (*mno
 
 	slog.InfoContext(logCtx, "Found candidate routes", slog.Int("count", len(candidates)))
 
+	candidates, err = r.applySimulatorPolicy(logCtx, req, candidates)
+	if err != nil {
+		slog.ErrorContext(logCtx, "Simulator routing policy failed", slog.Any("error", err))
+		result.Error = err
+		return result, err
+	}
+	if len(candidates) == 0 {
+		result.Error = noRouteAfterSimulatorPolicy(routingParams.RoutingGroupID, routingParams.MsisdnPrefixGroupID)
+		slog.WarnContext(logCtx, result.Error.Error())
+		return result, nil
+	}
+
 	viableCandidates := r.filterViableCandidates(logCtx, candidates, req.SenderID, config)
 
 	if len(viableCandidates) == 0 {
@@ -335,6 +347,18 @@ func (r *IntelligentRouter) RouteWithCandidates(ctx context.Context, req Routing
 	}
 
 	slog.InfoContext(logCtx, "Found candidate routes", slog.Int("count", len(candidates)))
+
+	candidates, err = r.applySimulatorPolicy(logCtx, req, candidates)
+	if err != nil {
+		slog.ErrorContext(logCtx, "Simulator routing policy failed", slog.Any("error", err))
+		result.RoutingResult.Error = err
+		return result, err
+	}
+	if len(candidates) == 0 {
+		result.RoutingResult.Error = noRouteAfterSimulatorPolicy(routingParams.RoutingGroupID, routingParams.MsisdnPrefixGroupID)
+		slog.WarnContext(logCtx, result.RoutingResult.Error.Error())
+		return result, nil
+	}
 
 	viableCandidates := r.filterViableCandidates(logCtx, candidates, req.SenderID, config)
 

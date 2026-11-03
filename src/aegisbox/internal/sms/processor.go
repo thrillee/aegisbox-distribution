@@ -84,6 +84,9 @@ type Processor struct {
 	senderHealthTracker *SenderHealthTracker
 	routeHealthTracker  *RouteHealthTracker
 
+	// sendGate may hold a message before sending (link scanning, Phase 2). Optional.
+	sendGate SendGate
+
 	// Extracted Services
 	routingService *RoutingService
 	sendingService *SendingService
@@ -175,6 +178,19 @@ func NewProcessor(deps ProcessorDependencies) *Processor {
 		sendingService:      sendingService,
 		dlrService:          dlrService,
 	}
+}
+
+// SendGate decides whether a message may be sent now. BeforeSend returns true to hold it.
+type SendGate interface {
+	BeforeSend(ctx context.Context, messageID int64, spID int32) (bool, error)
+}
+
+// SetSendGate installs the link scan gate (Phase 2).
+func (p *Processor) SetSendGate(g SendGate) { p.sendGate = g }
+
+// LinkHoldRejecter returns the rejecter the link scan gate uses for blocked messages.
+func (p *Processor) LinkHoldRejecter() *LinkHoldRejecter {
+	return &LinkHoldRejecter{q: p.dbQueries, dlr: p.dlrService, wallet: p.walletService}
 }
 
 func (p *Processor) SetSender(sender Sender) {
@@ -399,6 +415,16 @@ func (p *Processor) ProcessSendingStep(
 					})
 				}
 			}()
+
+			if p.sendGate != nil {
+				held, gateErr := p.sendGate.BeforeSend(logCtx, msg.ID, msg.ServiceProviderID)
+				if gateErr != nil {
+					slog.ErrorContext(logCtx, "Link scan gate failed", slog.Any("error", gateErr), slog.Bool("held", held))
+				}
+				if held {
+					return
+				}
+			}
 
 			success, sendErr := p.sendingService.SendMessage(logCtx, msg, p.router)
 			if sendErr != nil {

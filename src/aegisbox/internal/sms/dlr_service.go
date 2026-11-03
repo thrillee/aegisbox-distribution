@@ -466,13 +466,16 @@ func (s *DLRService) EnqueueFailureDLR(
 	spDetails := sp.SPDetails{
 		ServiceProviderID: spMsgInfo.ServiceProviderID,
 		Protocol:          spMsgInfo.Protocol,
-		SMPPSystemID:      *spMsgInfo.SystemID,
 		HTTPCallbackURL:   callbackURL,
 		HTTPAuthConfig:    callbackKey,
 	}
+	if spMsgInfo.SystemID != nil { // NULL for HTTP credentials
+		spDetails.SMPPSystemID = *spMsgInfo.SystemID
+	}
 
 	dlrStatusString := "UNDELIV"
-	if failureStatus == codes.MsgStatusFailedValidation || failureStatus == codes.MsgStatusFailedRouting {
+	if failureStatus == codes.MsgStatusFailedValidation || failureStatus == codes.MsgStatusFailedRouting ||
+		failureStatus == codes.MsgStatusBlockedLinkScan {
 		dlrStatusString = "REJECTD"
 	}
 

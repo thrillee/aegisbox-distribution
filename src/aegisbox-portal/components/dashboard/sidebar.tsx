@@ -30,6 +30,8 @@ import {
   Link2,
   Activity,
   Settings2,
+  PhoneForwarded,
+  ScanSearch,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
@@ -74,6 +76,8 @@ const ADMIN_NAV_GROUPS: NavGroup[] = [
       { href: '/admin/routing', label: 'Routing', icon: TrendingUp },
       { href: '/admin/routing/health', label: 'Health Monitoring', icon: Activity },
       { href: '/admin/routing/config', label: 'Routing Config', icon: Settings2 },
+      { href: '/admin/simulator-whitelist', label: 'Simulator Whitelist', icon: PhoneForwarded },
+      { href: '/admin/link-scans', label: 'Link Scans', icon: ScanSearch },
     ],
   },
   {

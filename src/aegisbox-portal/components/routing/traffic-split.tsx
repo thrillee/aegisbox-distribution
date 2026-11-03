@@ -145,11 +145,20 @@ export function TrafficSplit({ groupId }: Readonly<{ groupId: number }>) {
         traffic when the others are unavailable. The same weights apply to every network in this group.
       </p>
 
+      {simulatorIds.size > 0 && (
+        <p className="text-sm text-zinc-400 mb-4">
+          This group has a simulated MNO. Test customers&apos; messages use only the simulated route, except messages to
+          numbers on the <a href="/admin/simulator-whitelist" className="underline hover:text-white">Simulator Whitelist</a>,
+          which use the real routes here. Other customers always use the real routes. The split below only matters
+          between routes of the same kind.
+        </p>
+      )}
+
       {simulatorIds.size > 0 && realLogins > 0 && (
         <p className="text-sm text-amber-400 mb-4 flex items-start gap-2">
           <AlertTriangle className="h-4 w-4 mt-0.5 shrink-0" />
-          This group has a simulated MNO and is used by {realLogins} login(s) of customers not marked as test. Their
-          messages are refused on the simulated route; give them a group without it, or mark the customer as test.
+          This group is also used by {realLogins} login(s) of customers not marked as test. Their messages skip the
+          simulated route and go through the real routes in this group; they fail if the group has none for a network.
         </p>
       )}
 

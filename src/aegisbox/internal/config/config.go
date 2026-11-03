@@ -33,6 +33,7 @@ type Config struct {
 	DefaultRoutingGroupRef     string        `envconfig:"DEFAULT_ROUTING_GROUP_REF"                 default:"SYS_DEFAULT_ROUTE"`
 	ManagerAPI                 ManagerAPIConfig
 	LinkScan                   linkscan.Config
+	LinkScanWorker             linkscan.ScanConfig
 }
 
 // ServerConfig holds SMPP Server specific configuration.

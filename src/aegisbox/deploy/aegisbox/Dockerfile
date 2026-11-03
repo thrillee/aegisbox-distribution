@@ -19,6 +19,8 @@ COPY . .
 ARG TARGETOS=linux
 ARG TARGETARCH=amd64
 RUN CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} go build -ldflags='-s -w' -o=aegisbox ./cmd/aegisbox
+# Screenshot folder for link scans, owned by the runtime user so a fresh volume is writable
+RUN mkdir -p /out/data/linkscans
 
 # Stage 2: Final stage
 FROM gcr.io/distroless/base-debian12:nonroot
@@ -28,6 +30,7 @@ WORKDIR /app
 
 # Copy only the binary; migrations are embedded in it
 COPY --from=builder --chown=nonroot:nonroot /app/aegisbox /app/aegisbox
+COPY --from=builder --chown=nonroot:nonroot /out/data /data
 
 # Manager API, SMPP server, SP HTTP API, MNO DLR receiver
 EXPOSE 8001 6886 8000 9001

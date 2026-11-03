@@ -1,0 +1,15 @@
+{
+  "name": "aegisbox-linkscanner",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Opens links from simulator traffic in a locked-down Chromium and reports what the pages do",
+  "main": "src/server.js",
+  "scripts": {
+    "start": "node src/server.js",
+    "test": "node --test test/*.test.js"
+  },
+  "engines": { "node": ">=20" },
+  "dependencies": {
+    "playwright": "1.63.0"
+  }
+}

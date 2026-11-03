@@ -106,9 +106,15 @@ func RunGateway(ctx context.Context, cfg *config.Config) error {
 
 	// --- Initialize SMS Processor (Needs initialized dependencies) ---
 	defaultSender := sms.NewDefaultSender(dbQueries, mnoManager, mainSegmenter)
-	// Links in messages sent through a simulator MNO are queued for the link scanner.
-	defaultSender.SetLinkEnqueuer(linkscan.NewEnqueuer(dbQueries, cfg.LinkScan))
+	// Links in messages sent through a simulator MNO are queued for the link scanner. Phase 2:
+	// real messages too, for customers with a scan mode (link_scan_settings; none by default).
+	linkSettings := linkscan.NewSettingsCache(dbQueries.ListActiveLinkScanSettings, 30*time.Second)
+	linkEnqueuer := linkscan.NewEnqueuer(dbQueries, cfg.LinkScan)
+	linkEnqueuer.SetSettings(linkSettings)
+	defaultSender.SetLinkEnqueuer(linkEnqueuer)
 	smsProcessor.SetSender(defaultSender)
+	linkGate := linkscan.NewGate(dbQueries, linkSettings, linkEnqueuer, smsProcessor.LinkHoldRejecter())
+	smsProcessor.SetSendGate(linkGate)
 
 	// --- Initialize SMPP Server (Implements Session Manager) ---
 	smppServer := smppserver.NewServer(
@@ -205,6 +211,34 @@ func RunGateway(ctx context.Context, cfg *config.Config) error {
 	var wg sync.WaitGroup // Use waitgroup for graceful shutdown
 
 	slog.Info("Starting application components...")
+
+	// Link scanning (steps 3 and 4): opens queued links through the linkscanner service.
+	// The hold gate (Phase 2) always runs: with scanning off, held messages are decided when
+	// their hold time is up (sent when the customer fails open).
+	linkGate.Start(appCtx, &wg, time.Second)
+	if cfg.LinkScanWorker.Enabled {
+		scanCfg := cfg.LinkScanWorker
+		scanCfg.DatabaseHost = linkscan.DatabaseHostFromURL(cfg.DatabaseURL)
+		if err := scanCfg.Validate(); err != nil {
+			slog.Error("Link scanning is enabled but not configured; links stay queued", slog.Any("error", err))
+			linkscan.NewWorker(dbQueries, scanCfg).StartCleanupOnly(appCtx, &wg)
+		} else {
+			worker := linkscan.NewWorker(dbQueries, scanCfg)
+			var ager *linkscan.DomainAger
+			if scanCfg.RDAPEnabled {
+				ager = linkscan.NewDomainAger(dbQueries, nil)
+			}
+			worker.SetChecks(
+				linkscan.NewDomainLists(dbQueries.ListLinkDomainLists, 30*time.Second),
+				ager,
+				linkscan.NewURLhaus(scanCfg.URLhausAuthKey, nil),
+			)
+			worker.Start(appCtx, &wg)
+		}
+	} else {
+		slog.Info("Link scanning is off (LINKSCAN_ENABLED); links of simulator messages are only queued")
+		linkscan.NewWorker(dbQueries, cfg.LinkScanWorker).StartCleanupOnly(appCtx, &wg)
+	}
 
 	// Start MNO Client Manager (connects to MNOs)
 	wg.Add(1)
