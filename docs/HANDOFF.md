@@ -106,7 +106,8 @@ Highlights of recent work, newest first. See each repo's merged PRs for detail.
 
 | Area | Status |
 |---|---|
-| Link scanning steps 3 and 4: `linkscanner` service, scan worker, scoring; simulator whitelist | PRs open (aegisbox, portal, distribution) |
+| Link scanning steps 3 to 6 and Phase 2 (off by default): `linkscanner` service, scan worker, scoring, RDAP, URLhaus option, lists, overrides, Link Scans page, hold and block gate; simulator whitelist | PRs open (aegisbox #59, portal #38, distribution #36) |
+| SMPP: bursts above the MNO window were dropped silently, and fast `submit_sm_resp` replies lost; both fixed | PR open (aegisbox #59) |
 | Link extraction and scan queue | done (aegisbox #57) |
 | Portal switches "Simulated MNO" and "Test customer"; test traffic out of totals | done (portal #35) |
 | Long SMS: segments from text, SMPP part joining, one DLR per message | done (aegisbox #55) |
@@ -120,13 +121,18 @@ Highlights of recent work, newest first. See each repo's merged PRs for detail.
 | Lagos time zone; analytics fixes; customer Connection page | done |
 | SMPP security (sessions, bcrypt, bind responses, DLR port key) | done |
 
-Migrations up to **00017** exist; they run automatically on start.
+Migrations up to **00018** exist; they run automatically on start.
 
 ## 5. Open work
 
-### 5.1 Link scanning (in progress; steps 1 to 3 done, 4 partly)
-The full plan, including the gaps already resolved, is in [LINK_SCANNING_PLAN.md](LINK_SCANNING_PLAN.md).
-How to turn it on: [LINK_SCANNING_ENABLE.md](LINK_SCANNING_ENABLE.md). The scanner lives in `aegisbox/linkscanner` (Node, Playwright, Chromium; SSRF guard in `src/guard.js`), the worker and scoring in `aegisbox/internal/linkscan`. Next is **step 5**: the portal "Link Scans" page over `link_scans` and `link_scan_jobs`; then the rest of step 4 (RDAP, URLhaus after a terms check, admin overrides).
+### 5.1 Link scanning (steps 1 to 6 done; Phase 2 built and off)
+The full plan is in [LINK_SCANNING_PLAN.md](LINK_SCANNING_PLAN.md).
+How to turn it on: [LINK_SCANNING_ENABLE.md](LINK_SCANNING_ENABLE.md). The scanner lives in `aegisbox/linkscanner` (Node, Playwright, Chromium; SSRF guard in `src/guard.js`), the worker, scoring, lists, RDAP and URLhaus in `aegisbox/internal/linkscan`, the Phase 2 gate in `internal/linkscan/gate.go` (called from the send step in `internal/sms/processor.go`). Portal: `app/admin/link-scans`, and the Link Check tab on a service provider.
+
+Phase 2 rules: every customer is **Off** unless a `link_scan_settings` row says otherwise. Hold or
+Block must not be turned on for a customer until the owner confirms the contract and NCC check.
+Rejected messages are refunded by default. Open: whether to use URLhaus (accept abuse.ch terms
+first), and a scanning location in Nigeria if "may hide content outside Nigeria" is common.
 
 ### 5.2 Waiting on the owner
 * Two billing questions for one customer (a small test refund, and a one off charge for traffic

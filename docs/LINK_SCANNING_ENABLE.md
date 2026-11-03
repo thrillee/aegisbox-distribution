@@ -2,7 +2,9 @@
 
 This guide covers the whole path, start to finish: test traffic goes to the simulated MNO, every
 link in it is opened in a locked-down browser and judged **safe, suspicious or malicious**, and
-whitelisted numbers still get real delivery.
+whitelisted numbers still get real delivery. Results, corrections and the allow and block lists
+are on the portal's **Link Scans** page. Section 11 covers Phase 2 (checking real customers'
+messages), which is off for every customer until you turn it on.
 
 What happens to a message from a **test customer**:
 
@@ -22,8 +24,9 @@ a simulated route, they skip it and use the real routes.
 
 ## 1. Before you start
 
-* These must be merged and the distribution synced: aegisbox (link scanning steps 3 and 4,
-  whitelist), aegisbox-portal (Simulator Whitelist page), and this repo's compose change.
+* These must be merged and the distribution synced: aegisbox (link scanning steps 3 to 5, Phase 2,
+  whitelist; migrations up to `00018`), aegisbox-portal (Simulator Whitelist and Link Scans pages,
+  Link Check tab), and this repo's compose change. Migrations run when `aegisbox` starts.
 * **Server memory:** Chromium needs about 1 to 2 GB. The scanner is limited to 2 GB
   (`LINKSCAN_MEMORY`). Check that the server has that free next to the other services.
 * The first deploy pulls the Playwright image (about 1.5 GB) once.
@@ -41,6 +44,13 @@ Optional: `LINKSCAN_MAX_CONCURRENCY` (default 2, pages open at once; keep the sa
 services), `LINKSCAN_MEMORY` (2g), `LINKSCAN_CPUS` (1.5), `LINKSCAN_SKIP_OTP` (true),
 `LINKSCAN_SAMPLE_PER_HOUR` (3), `LINKSCAN_SCREENSHOT_RETENTION` (168h), `LINKSCAN_RESULT_RETENTION`
 (672h). All are listed in `.env.example`.
+
+Two more checks, both run by `aegisbox` (not the scanner):
+
+| Variable | Default | What it does |
+|---|---|---|
+| `LINKSCAN_RDAP_ENABLED` | `true` | Looks up when a link's domain was registered (RDAP, starting at `data.iana.org`). Under 30 days old adds 20 points, under 90 days 10. Needs outbound HTTPS from `aegisbox`. Answers are cached (30 days). `.ng` has no public RDAP, so `.ng` domains get no age and no points. |
+| `LINKSCAN_URLHAUS_AUTH_KEY` | empty (off) | Checks links against abuse.ch URLhaus, a list of known malware links; a hit adds 70 points. **Leave it empty until you have read and accepted abuse.ch's terms for commercial use.** Get a key at https://auth.abuse.ch/. |
 
 Do **not** give the `linkscanner` service a domain or a published port in Dokploy. It must stay
 alone on its own network.
@@ -97,7 +107,28 @@ Then send to a whitelisted number: the phone receives it, and the routed MNO is 
 
 ## 7. See the results
 
-The portal page for scan results is the next step (step 5 of the plan). Until then, read only SQL:
+**Network > Link Scans** in the portal (admins only):
+
+* **Warnings** at the top when the queue is older than 15 minutes or longer than 500 links, and
+  when scans failed in the last day.
+* **Held for review** (Phase 2): messages waiting for an admin, with Release and Reject buttons.
+* Totals, scanner speed and the domains with the most bad verdicts.
+* The message list, filtered by customer, sender, verdict (or pending), test or real traffic and a
+  date range in Lagos time. Open a message to see each link: the reasons and points, the final
+  page, redirects, forms, downloads, blocked requests and the screenshot.
+* **Correct a verdict**: on a link, mark it safe, suspicious or malicious with a note. The
+  correction is used from then on for the same link (cache hits), and is shown next to the
+  original verdict. Clear it to go back.
+* **Allow and block lists** (**Lists** button, or **Allow domain / Block domain** on a link): a
+  domain covers itself and its subdomains. An entry is for all customers or one customer; a
+  customer's own entry wins over a global one, and block wins over allow. A listed domain is not
+  opened: blocked gives **malicious** (100 points), allowed gives **safe**. A link that redirects to
+  a listed domain gets the list's verdict too. Changes apply within 30 seconds.
+
+Opening a message's details is logged (who and when, `link_scan_view_log`), because message text,
+numbers and screenshots are personal data.
+
+Read only SQL, if you need it:
 
 ```sql
 -- Latest results with the message they came from
@@ -140,6 +171,9 @@ Score 70 or more is **malicious**, 30 to 69 **suspicious**, below 30 **safe**. S
 | Invalid HTTPS certificate | 20 |
 | Unusual TLD (.xyz, .top, .click...) | 15 |
 | No HTTPS, more than 3 redirects, final domain differs, auto submitting form, unreachable | 10 each |
+| Domain registered less than 30 days ago / less than 90 days ago (RDAP) | 20 / 10 |
+| Link listed on URLhaus (only with `LINKSCAN_URLHAUS_AUTH_KEY`) | 70 |
+| Domain on the block list / allow list | always malicious / always safe |
 
 A page that refuses the check (HTTP 403 or 451) or says it is not available in your country is
 marked **"may hide content outside Nigeria"** and is never judged safe. The server is in the US;
@@ -156,6 +190,8 @@ and `intent://` links are recorded only. OTP looking messages are skipped (`LINK
   deleted after the result retention (4 weeks).
 * Stop queueing links too: `LINKSCAN_EXTRACT_ENABLED=false`.
 * Remove the token to leave the scanner idle (no browser).
+* Phase 2 customers: set them back to **Off** (or Monitor) first. With scanning off, their link
+  messages still wait their hold time, and go to review if they do not fail open.
 
 ## 9. Troubleshooting
 
@@ -166,6 +202,9 @@ and `intent://` links are recorded only. OTP looking messages are skipped (`LINK
 | `Link scan queue is growing: is the linkscanner service up?` | Scanner down, too slow, or out of memory. Check its logs; raise `LINKSCAN_MAX_CONCURRENCY` only if memory allows. |
 | `could not save screenshot` | The `linkscan-data` volume is not writable; recreate it (it is created owned by the app user). |
 | Whitelisted message failed with "no usable route" | Add a real route for that network to the test customer's routing group. |
+| Phase 2 messages show `held_link_scan` | They wait for their links' verdicts, at most the customer's hold time. Malicious ones (or suspicious ones with "block suspicious") wait in **Held for review**. A review not decided in 24 hours is rejected. |
+| Many Phase 2 holds end as `timeout_released` | The scanner cannot keep up with new links. See the capacity note in section 11. |
+| Domain age missing for every link | `aegisbox` cannot reach the RDAP servers (outbound HTTPS), or `LINKSCAN_RDAP_ENABLED=false`. Scans still work without it. |
 
 ## 10. Maintenance
 
@@ -175,3 +214,42 @@ and `intent://` links are recorded only. OTP looking messages are skipped (`LINK
 * Personal data: scanned pages and screenshots can show personal data (Nigeria Data Protection
   Act 2023). Keep access to the database and the volume restricted, keep retention short, and
   mention link scanning in customer terms.
+
+## 11. Phase 2: checking real customers' messages (off by default)
+
+Everything above only touches test traffic. Phase 2 lets you check a **real** customer's messages,
+per customer, in the portal: **Service Providers > (customer) > Link Check**.
+
+> **Before you turn on Hold or Block for anyone:** delaying or refusing a customer's messages must
+> be allowed by your contract with that customer, and checked against your NCC licence terms and
+> the Nigeria Data Protection Act. Get that confirmed first. Monitor does not change delivery.
+
+| Mode | What happens to the customer's messages with links |
+|---|---|
+| **Off** (default) | Nothing. Not scanned. |
+| **Monitor** | Sent as normal; the links are scanned afterwards and shown on the Link Scans page. |
+| **Hold** | Waits up to the hold time for the verdicts. Clean: sent. Malicious (or suspicious with "block suspicious"): waits in **Held for review** until an admin releases or rejects it. |
+| **Block** | Like Hold, but a malicious (or suspicious with "block suspicious") message is rejected at once. |
+
+Settings next to the mode:
+
+* **Hold time** (5 to 600 seconds, default 60): the longest a message waits for its verdicts.
+* **Fail open** (default on): when the hold time runs out or the scanner is down, send anyway. Off:
+  Hold mode puts the message in review, Block mode rejects it.
+* **Block suspicious** (default off): treat suspicious like malicious.
+* **Charge blocked messages** (default off): normally a rejected message is refunded.
+
+A rejected message gets `final_status = rejected`, error `LINK_BLOCKED`, and the customer receives a
+`REJECTD` DLR (SMPP error `045`, HTTP "403 Forbidden - Blocked by link check"). Messages without
+links, and links that are never opened (WhatsApp, `tel:`, app stores), are sent without waiting.
+Links already scanned recently, and links on the allow or block lists, are decided at once.
+
+Held messages are put to the front of the scan queue. **Capacity:** in our load test (1,000
+messages, 200 new links, `LINKSCAN_MAX_CONCURRENCY=2`) the scanner opened about one new link per
+second. 200 different new links in one burst therefore took over three minutes, and with a 60
+second hold time and fail open, about a third of the held messages were sent before their verdict
+(several of them malicious). Repeated links are fast (one scan serves them all). For Hold or Block
+customers with bursts of new links: raise `LINKSCAN_MAX_CONCURRENCY` (and `LINKSCAN_MEMORY`, about
+1 GB per extra page), raise the hold time, or turn fail open off.
+
+Monitor first for a week, look at the results with the customer, then move to Hold or Block.
