@@ -26,8 +26,10 @@ const (
 	MsgStatusFailedPricing    = "failed_pricing"
 	MsgStatusQueuedForSend    = "queued_for_send"
 	MsgStatusSendAttempted    = "send_attempted"
-	MsgStatusSendFailed       = "send_failed"   // Catastrophic send fail or MNO reject on submit
-	MsgStatusFailedCommit     = "failed_commit" // Specific status for DB commit issues
+	MsgStatusSendFailed       = "send_failed"       // Catastrophic send fail or MNO reject on submit
+	MsgStatusFailedCommit     = "failed_commit"     // Specific status for DB commit issues
+	MsgStatusHeldLinkScan     = "held_link_scan"    // waiting for link verdicts (link scan hold or block mode)
+	MsgStatusBlockedLinkScan  = "blocked_link_scan" // rejected by the link check, not sent
 )
 
 // Message Final Status Codes (already used, but good to centralize)

@@ -2,12 +2,13 @@
 
 import { use, useState, useEffect } from 'react'
 import Link from 'next/link'
-import { ArrowLeft, Plus, Copy, Check, X, RefreshCw, Key, Wallet, DollarSign, Settings, Loader2, MessageSquare, TrendingUp, Globe, Server, Eye, EyeOff, ToggleLeft, ToggleRight, BarChart3, Edit, Trash2, FileCheck, Users, Shuffle } from 'lucide-react'
+import { ArrowLeft, Plus, Copy, Check, X, RefreshCw, Key, Wallet, DollarSign, Settings, Loader2, MessageSquare, TrendingUp, Globe, Server, Eye, EyeOff, ToggleLeft, ToggleRight, BarChart3, Edit, Trash2, FileCheck, Users, Shuffle, ShieldCheck } from 'lucide-react'
 import { FlagSwitch, TestBadge } from '@/components/dashboard/flag-switch'
 import { PageLoadingSkeleton } from '@/components/routing/loading-components'
 import { AutoDlrSettings } from '@/components/service-providers/auto-dlr-settings'
 import { PortalAccessSettings } from '@/components/service-providers/portal-access-settings'
 import { RouteSenderPoolSetting } from '@/components/service-providers/route-sender-pool-setting'
+import { LinkScanSettings } from '@/components/service-providers/link-scan-settings'
 import { formatMoney } from '@/lib/money'
 
 function getStatusBadge(status: string) {
@@ -276,6 +277,7 @@ export default function ServiceProviderDetailPage({ params }: { params: Promise<
           <TabButton active={activeTab === 'dlr'} onClick={() => setActiveTab('dlr')} icon={FileCheck} label="DLR" />
           <TabButton active={activeTab === 'portal-access'} onClick={() => setActiveTab('portal-access')} icon={Users} label="Portal Access" />
           <TabButton active={activeTab === 'sender-pool'} onClick={() => setActiveTab('sender-pool')} icon={Shuffle} label="Sender Pool" />
+          <TabButton active={activeTab === 'link-check'} onClick={() => setActiveTab('link-check')} icon={ShieldCheck} label="Link Check" />
         </nav>
       </div>
 
@@ -768,6 +770,10 @@ export default function ServiceProviderDetailPage({ params }: { params: Promise<
 
       {activeTab === 'portal-access' && (
         <PortalAccessSettings providerId={provider.id} />
+      )}
+
+      {activeTab === 'link-check' && (
+        <LinkScanSettings providerId={provider.id} />
       )}
 
       {activeTab === 'sender-pool' && (

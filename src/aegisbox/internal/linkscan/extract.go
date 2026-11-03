@@ -52,6 +52,11 @@ type Link struct {
 	GroupKey   string // host and path with per recipient tokens replaced by *
 	IsIP       bool
 	IsPunycode bool
+
+	// Filled by the scan worker before scoring, not by extraction.
+	AgeDomain     string // registrable domain whose age was looked up
+	DomainAgeDays *int   // days since registration (RDAP); nil when unknown
+	ListedBy      string // reputation list that has the URL (e.g. "URLhaus: malware_download")
 }
 
 var (

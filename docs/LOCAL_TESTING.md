@@ -50,6 +50,21 @@ VALUES ('Simulator', 'NG', 'active', true, now(), now()) RETURNING id;
 ```
 `mnosim` logs every submit (sender, recipient, text, part) and every DLR it sends.
 
+## 3b. Link scanner
+
+```bash
+cd aegisbox/linkscanner && npm ci && npm test   # guard and scan tests against local fixtures
+# Run it for the backend. Outside the Docker seccomp profile the Chromium sandbox may not start;
+# only locally, add LINKSCAN_CHROMIUM_SANDBOX=false. LINKSCAN_ALLOW_NO_BLOCK_IPS=true is for local
+# runs only; in production LINKSCAN_BLOCK_IPS must hold the server's public IP.
+LINKSCAN_TOKEN=0123456789abcdef0123 LINKSCAN_ALLOW_NO_BLOCK_IPS=true PORT=8080 node src/server.js
+```
+Then start the backend with `LINKSCAN_ENABLED=true LINKSCAN_URL=http://127.0.0.1:8080
+LINKSCAN_TOKEN=0123456789abcdef0123 LINKSCAN_SCREENSHOT_DIR=/tmp/linkscans`, send a message with a
+link from the test customer, and read `link_scan_jobs` and `link_scans`. The scanner refuses
+private addresses (only the tests allow 127.0.0.1, in code). In Docker, run it with the compose
+settings (seccomp profile, read only, `cap_drop: ALL`) and check the log says `"sandbox":true`.
+
 ## 4. SMPP test clients
 `docs/testing/smpp_send.py` (needs `pip install smpplib`) binds as a customer, sends messages
 (single, multipart, a duplicated part, or only some parts) and prints the IDs and DLRs received:

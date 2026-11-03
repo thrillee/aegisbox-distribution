@@ -129,6 +129,8 @@ type SMPPMNOConnector struct {
 	connMu         sync.Mutex          // Mutex for session creation/closing
 	handlerMu      sync.RWMutex        // Mutex for dlrHandler access/update
 	pendingSubmits sync.Map            // Map[int32]*submitJob, keyed by PDU sequence number (int32, as gosmpp returns it)
+	inflight       chan struct{}       // One slot per submit waiting for its response; see acquireSlot
+	earlyAnswered  sync.Map            // Sequences answered before gosmpp tracked them; see onUnexpectedPduResponse
 	stopSignal     chan struct{}       // Signals background tasks to stop
 	wg             sync.WaitGroup      // Waits for background tasks to finish
 }
@@ -152,11 +154,20 @@ func NewSMPPMNOConnector(cfg SMPPConnectorConfig, seg segmenter.Segmenter, q dat
 		cfg.MaxWindowSize = 10
 	} // Default window size
 
+	// gosmpp drops a PDU with "window full" when the MNO's window is used up, and reports it only
+	// through OnSubmitError after Submit has already returned nil. Under a burst that left segments
+	// recorded as sent with no MNO ID and messages pending forever. Waiting for a free slot here
+	// stops that. One window slot is left for enquire_link, which gosmpp counts in the same window.
+	slots := cfg.MaxWindowSize
+	if slots > 1 {
+		slots--
+	}
 	c := &SMPPMNOConnector{
 		config:     cfg,
 		segmenter:  seg,
 		dbQueries:  q,
 		stopSignal: make(chan struct{}),
+		inflight:   make(chan struct{}, slots),
 	}
 	c.status.Store(codes.StatusDisconnected) // Initial status
 	return c, nil
@@ -220,15 +231,16 @@ func (c *SMPPMNOConnector) ConnectAndBind(ctx context.Context) error {
 
 		// Use Windowed Tracking for async submit correlation
 		WindowedRequestTracking: &gosmpp.WindowedRequestTracking{
-			MaxWindowSize:         uint8(c.config.MaxWindowSize),
-			PduExpireTimeOut:      c.config.RequestTimeout, // Timeout for expecting a response PDU
-			ExpireCheckTimer:      5 * time.Second,         // How often to check for expired PDUs
-			EnableAutoRespond:     false,                   // We handle responses manually where needed
-			StoreAccessTimeOut:    5 * time.Second,
-			OnReceivedPduRequest:  c.handleReceivedPduRequest(),  // Handler for incoming PDUs (DeliverSM, EnquireLink...)
-			OnExpectedPduResponse: c.handleExpectedPduResponse(), // Handler for expected responses (SubmitSMResp...)
-			OnExpiredPduRequest:   c.handleExpirePduRequest(),    // Handler for requests that timed out
-			OnClosePduRequest:     c.handleOnClosePduRequest(),   // Handler for requests closed before response
+			MaxWindowSize:           uint8(c.config.MaxWindowSize),
+			PduExpireTimeOut:        c.config.RequestTimeout, // Timeout for expecting a response PDU
+			ExpireCheckTimer:        expireCheckEvery,        // How often to check for expired PDUs
+			EnableAutoRespond:       false,                   // We handle responses manually where needed
+			StoreAccessTimeOut:      5 * time.Second,
+			OnReceivedPduRequest:    c.handleReceivedPduRequest(),  // Handler for incoming PDUs (DeliverSM, EnquireLink...)
+			OnExpectedPduResponse:   c.handleExpectedPduResponse(), // Handler for expected responses (SubmitSMResp...)
+			OnExpiredPduRequest:     c.handleExpirePduRequest(),    // Handler for requests that timed out
+			OnClosePduRequest:       c.handleOnClosePduRequest(),   // Handler for requests closed before response
+			OnUnexpectedPduResponse: c.onUnexpectedPduResponse,     // Responses that beat gosmpp's own tracking
 		},
 
 		// Other callbacks
@@ -426,13 +438,16 @@ func (c *SMPPMNOConnector) SubmitMessage(ctx context.Context, msg PreparedMessag
 			slog.Any("store_seqment_key", seq),
 			slog.Any("DB Segment DB", dbSegmentID),
 			slog.Any("Original Segment", segmentSeqn))
-		c.pendingSubmits.Store(seq, job)
-		// Submit asynchronously
-		err = c.session.Transceiver().Submit(p) // Use Transceiver for TRX bind type
+		// Wait for a free slot in the MNO's window, then submit asynchronously.
+		if err = c.acquireSlot(segLogCtx); err == nil {
+			c.pendingSubmits.Store(seq, job)
+			err = c.session.Transceiver().Submit(p) // Use Transceiver for TRX bind type
+			if err != nil {
+				c.takePending(seq) // Remove the pending job and free its slot
+			}
+		}
 
 		if err != nil {
-			// Remove pending job if submit fails immediately
-			c.pendingSubmits.Delete(seq)
 
 			// Handle submission errors (e.g., window full, encoding issues)
 			slog.WarnContext(segLogCtx, "Failed to submit segment PDU", slog.Any("error", err), slog.Int("seqn", int(segmentSeqn)))
@@ -538,9 +553,87 @@ func (c *SMPPMNOConnector) onSubmitError(p pdu.PDU, err error) {
 		"gosmpp OnSubmitError callback triggered",
 		slog.Any("error", err), slog.String("pdu_cmd", p.GetHeader().CommandID.String()), slog.Uint64("pdu_seq", uint64(p.GetSequenceNumber())))
 
-	// We already handled error returned by Submit() call in SubmitMessage.
-	// This callback might be redundant or provide extra info.
-	// If ErrWindowsFull, we might implement waiting/retry logic here or in SubmitMessage.
+	// gosmpp writes PDUs on its own goroutine, so a submit that fails here already returned nil from
+	// Submit. Record the failure on the segment and free its slot.
+	if _, isSubmit := p.(*pdu.SubmitSM); !isSubmit {
+		return
+	}
+	job, ok := c.takePending(p.GetSequenceNumber())
+	if !ok {
+		return
+	}
+	errCode := string(codes.MsgStatusSendFailed)
+	if errors.Is(err, gosmpp.ErrWindowsFull) {
+		errCode = string(codes.ErrorCodeMnoWindowFull)
+	}
+	errDesc := err.Error()
+	if dbErr := c.dbQueries.UpdateSegmentSendFailed(logCtx, database.UpdateSegmentSendFailedParams{
+		ID: job.dbSegmentID, ErrorDescription: &errDesc, ErrorCode: &errCode,
+	}); dbErr != nil {
+		slog.ErrorContext(logCtx, "Failed to record submit error on segment", slog.Any("error", dbErr), slog.Int64("db_seg_id", job.dbSegmentID))
+	}
+}
+
+// expireCheckEvery is how often gosmpp looks for requests that got no response.
+const expireCheckEvery = 5 * time.Second
+
+// acquireSlot waits until fewer submits are waiting for a response than the MNO's window allows.
+// It gives up once any slot should have been freed (the request timeout plus one expiry check), so
+// a stuck MNO fails the send instead of blocking forever.
+func (c *SMPPMNOConnector) acquireSlot(ctx context.Context) error {
+	t := time.NewTimer(c.config.RequestTimeout + expireCheckEvery)
+	defer t.Stop()
+	select {
+	case c.inflight <- struct{}{}:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-t.C:
+		return gosmpp.ErrWindowsFull
+	}
+}
+
+// takePending removes a submit waiting for its response and frees its window slot. Only the caller
+// that removes the job frees the slot, so each slot is freed once. A submit answered before gosmpp
+// tracked it keeps its slot until gosmpp expires it (see onUnexpectedPduResponse).
+func (c *SMPPMNOConnector) takePending(sequence int32) (*submitJob, bool) {
+	val, loaded := c.pendingSubmits.LoadAndDelete(sequence)
+	if !loaded {
+		return nil, false
+	}
+	if _, early := c.earlyAnswered.Load(sequence); !early {
+		c.freeSlot()
+	}
+	return val.(*submitJob), true
+}
+
+func (c *SMPPMNOConnector) freeSlot() {
+	select {
+	case <-c.inflight:
+	default:
+	}
+}
+
+// onUnexpectedPduResponse handles a response gosmpp could not match. gosmpp writes a PDU and only
+// then records it in its window, so a fast MNO's submit_sm_resp can arrive in between. Before this
+// handler such a response was dropped: the segment kept no MNO message ID, its DLR could not be
+// matched, and the submit was failed as a timeout 10 seconds later. gosmpp still holds the request
+// in its window until it expires, so the slot stays taken until then.
+func (c *SMPPMNOConnector) onUnexpectedPduResponse(p pdu.PDU) {
+	logCtx := logging.ContextWithMNOConnID(context.Background(), c.ConnectionID())
+	logCtx = logging.ContextWithPDUInfo(logCtx, p.GetHeader().CommandID.String(), p.GetSequenceNumber())
+	resp, ok := p.(*pdu.SubmitSMResp)
+	if !ok {
+		slog.WarnContext(logCtx, "Received unexpected response PDU from MNO")
+		return
+	}
+	seq := p.GetSequenceNumber()
+	if _, pending := c.pendingSubmits.Load(seq); !pending {
+		slog.WarnContext(logCtx, "Received SubmitSMResp for unknown sequence number", slog.String("message_id", resp.MessageID))
+		return
+	}
+	c.earlyAnswered.Store(seq, struct{}{})
+	c.processSubmitSMResp(logCtx, seq, resp)
 }
 
 func (c *SMPPMNOConnector) onReceivingError(err error) {
@@ -711,7 +804,7 @@ func (c *SMPPMNOConnector) handleOnClosePduRequest() func(pdu.PDU) {
 			// Log others but usually no action needed
 		}
 		// Clean up from pending map
-		c.pendingSubmits.Delete(p.GetSequenceNumber())
+		c.takePending(p.GetSequenceNumber())
 	}
 }
 
@@ -722,13 +815,12 @@ func (c *SMPPMNOConnector) handleOnClosePduRequest() func(pdu.PDU) {
 // processSubmitSMResp handles the asynchronous response to a SubmitSM request.
 func (c *SMPPMNOConnector) processSubmitSMResp(ctx context.Context, sequence int32, resp *pdu.SubmitSMResp) {
 	// Retrieve the job details associated with this sequence number
-	val, loaded := c.pendingSubmits.LoadAndDelete(sequence)
+	job, loaded := c.takePending(sequence)
 	if !loaded {
 		slog.WarnContext(ctx, "Received SubmitSMResp for unknown or already processed sequence number",
 			slog.String("command_status", resp.CommandStatus.String()), slog.Int("seq_num", int(sequence)), slog.String("message_id", resp.MessageID))
 		return
 	}
-	job := val.(*submitJob)
 	logCtx := logging.ContextWithSegmentID(ctx, job.dbSegmentID) // Add segment ID
 
 	status := resp.CommandStatus
@@ -769,12 +861,16 @@ func (c *SMPPMNOConnector) processSubmitSMResp(ctx context.Context, sequence int
 // The sequence must be the same int32 used as the pendingSubmits key; a uint32 never matches, which
 // left timed out submits recorded as sent with no MNO message ID and no error.
 func (c *SMPPMNOConnector) processSubmitSMTimeout(ctx context.Context, sequence int32) {
-	val, loaded := c.pendingSubmits.LoadAndDelete(sequence)
+	if _, early := c.earlyAnswered.LoadAndDelete(sequence); early {
+		// Already answered (see onUnexpectedPduResponse); gosmpp has now let go of it.
+		c.freeSlot()
+		return
+	}
+	job, loaded := c.takePending(sequence)
 	if !loaded {
 		slog.WarnContext(ctx, "SubmitSM timed out for unknown or already processed sequence number")
 		return
 	}
-	job := val.(*submitJob)
 	logCtx := logging.ContextWithSegmentID(ctx, job.dbSegmentID)
 
 	errMsg := "SubmitSM timed out waiting for response from MNO"

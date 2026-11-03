@@ -20,15 +20,20 @@ Later (Phase 2, separate approval) the same verdicts can hold or block real mess
 
 ## Steps
 
+Turning it on in production: [LINK_SCANNING_ENABLE.md](LINK_SCANNING_ENABLE.md).
+
+
 | Step | What | State |
 |---|---|---|
 | 1 | `aegisbox mnosim` and the simulator guard | **done** (aegisbox #53) |
 | 1b | Portal switches, badges, test traffic out of totals | **done** (portal #35) |
 | 2 | Link extraction and scan queue | **done** (aegisbox #57) |
-| 3 | `linkscanner` service with SSRF protection and isolation | next |
-| 4 | Scoring, reputation, cache | |
-| 5 | Portal "Link Scans" page | |
-| 6 | End to end and load tests, deployment | |
+| 3 | `linkscanner` service with SSRF protection and isolation | **done** (aegisbox #59) |
+| 4 | Scoring, reputation, cache | **done** (aegisbox #59): own signals, bands, cache, retention, RDAP domain age, URLhaus (off until its terms are accepted), admin overrides, allow and block lists |
+| 4b | Simulator whitelist: test messages to listed numbers use real routes | **done** (aegisbox #59, portal #38) |
+| 5 | Portal "Link Scans" page | **done** (portal #38) |
+| 6 | End to end and load tests, deployment | **done** locally (see below); deploy with [LINK_SCANNING_ENABLE.md](LINK_SCANNING_ENABLE.md) |
+| Phase 2 | Per customer off, monitor, hold, block | **built, off for every customer** (aegisbox #59, portal #38). Turning on Hold or Block needs the contract and NCC check |
 
 ### Step 2: extraction and queue (gateway)
 * **Where:** in the gateway, when a submit to a **simulator MNO** is recorded as sent (the
@@ -103,7 +108,22 @@ Later (Phase 2, separate approval) the same verdicts can hold or block real mess
   without a redeploy. Check server memory (Chromium needs about 1 to 2 GB) and pin and update the
   Playwright image monthly.
 
-## Phase 2 (needs owner approval and a legal check)
-Per customer scan mode: off, monitor, hold (wait for a verdict up to a set time), block (REJECTD
-DLR with a clear code; wallet policy decides charging). Fail open or fail closed when the scanner
-is down, per customer. Check contracts and NCC rules before blocking real traffic.
+### Step 6 results (local, 2026-11-03)
+* End to end through `mnosim` and a second fake MNO: simulator scanning, allow and block lists
+  (customer entry over global), a corrected verdict reused on a cache hit, Monitor, Hold and Block
+  for a real customer, release and reject from the review queue, refund, `REJECTD` DLR with
+  `err:045`, and a scanner outage with fail open (sent after the hold time) and fail closed
+  (review).
+* Load test, 1,000 messages (800 test, 200 from a Hold customer) with 200 different links: found
+  two gateway bugs that lost messages in bursts (submits dropped when the MNO window was full;
+  fast `submit_sm_resp` lost). Both fixed in aegisbox #59. Final run: all 960 clean messages
+  delivered, the 40 malicious ones held for review.
+* Capacity: about one new link per second with `LINKSCAN_MAX_CONCURRENCY=2`. Repeated links are
+  served by one scan. See the capacity note in the enable guide before using Hold or Block.
+
+## Phase 2 (built, off by default; needs a legal check before Hold or Block)
+Per customer scan mode in the portal (Service Providers > Link Check): off, monitor, hold (wait for
+a verdict up to a set time, bad ones go to admin review), block (REJECTD DLR with error
+`LINK_BLOCKED`; refunded unless "charge blocked" is on). Fail open or fail closed per customer.
+Check contracts and NCC rules before holding or blocking real traffic. Details in section 11 of
+the enable guide.

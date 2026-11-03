@@ -75,6 +75,53 @@ type IncomingConcatPart struct {
 	MessageID         *int64             `json:"messageId"`
 }
 
+type LinkDomainAge struct {
+	Domain       string             `json:"domain"`
+	RegisteredAt pgtype.Timestamptz `json:"registeredAt"`
+	Status       string             `json:"status"`
+	CheckedAt    pgtype.Timestamptz `json:"checkedAt"`
+}
+
+type LinkDomainList struct {
+	ID                int32              `json:"id"`
+	Domain            string             `json:"domain"`
+	ListType          string             `json:"listType"`
+	ServiceProviderID *int32             `json:"serviceProviderId"`
+	Note              *string            `json:"note"`
+	CreatedBy         *string            `json:"createdBy"`
+	CreatedAt         pgtype.Timestamptz `json:"createdAt"`
+	UpdatedAt         pgtype.Timestamptz `json:"updatedAt"`
+}
+
+type LinkScan struct {
+	ID              int64              `json:"id"`
+	NormalizedUrl   string             `json:"normalizedUrl"`
+	GroupKey        string             `json:"groupKey"`
+	ScanKind        string             `json:"scanKind"`
+	FinalUrl        *string            `json:"finalUrl"`
+	FinalHost       *string            `json:"finalHost"`
+	HttpStatus      *int32             `json:"httpStatus"`
+	Verdict         string             `json:"verdict"`
+	Score           int32              `json:"score"`
+	Reasons         []byte             `json:"reasons"`
+	Title           *string            `json:"title"`
+	TextExcerpt     *string            `json:"textExcerpt"`
+	Redirects       []byte             `json:"redirects"`
+	Forms           []byte             `json:"forms"`
+	Downloads       []byte             `json:"downloads"`
+	Blocked         []byte             `json:"blocked"`
+	TlsIssuer       *string            `json:"tlsIssuer"`
+	ScreenshotPath  *string            `json:"screenshotPath"`
+	ScanError       *string            `json:"scanError"`
+	DurationMs      *int32             `json:"durationMs"`
+	ScannedAt       pgtype.Timestamptz `json:"scannedAt"`
+	ExpiresAt       pgtype.Timestamptz `json:"expiresAt"`
+	OverrideVerdict *string            `json:"overrideVerdict"`
+	OverrideNote    *string            `json:"overrideNote"`
+	OverrideBy      *string            `json:"overrideBy"`
+	OverrideAt      pgtype.Timestamptz `json:"overrideAt"`
+}
+
 type LinkScanJob struct {
 	ID                int64              `json:"id"`
 	MessageID         int64              `json:"messageId"`
@@ -94,6 +141,27 @@ type LinkScanJob struct {
 	CreatedAt         pgtype.Timestamptz `json:"createdAt"`
 	UpdatedAt         pgtype.Timestamptz `json:"updatedAt"`
 	CompletedAt       pgtype.Timestamptz `json:"completedAt"`
+	LinkScanID        *int64             `json:"linkScanId"`
+	Priority          int16              `json:"priority"`
+}
+
+type LinkScanSetting struct {
+	ServiceProviderID int32              `json:"serviceProviderId"`
+	Mode              string             `json:"mode"`
+	HoldSeconds       int32              `json:"holdSeconds"`
+	FailOpen          bool               `json:"failOpen"`
+	BlockSuspicious   bool               `json:"blockSuspicious"`
+	ChargeBlocked     bool               `json:"chargeBlocked"`
+	UpdatedBy         *string            `json:"updatedBy"`
+	UpdatedAt         pgtype.Timestamptz `json:"updatedAt"`
+}
+
+type LinkScanViewLog struct {
+	ID         int64              `json:"id"`
+	Viewer     string             `json:"viewer"`
+	MessageID  *int64             `json:"messageId"`
+	LinkScanID *int64             `json:"linkScanId"`
+	ViewedAt   pgtype.Timestamptz `json:"viewedAt"`
 }
 
 type Message struct {
@@ -132,6 +200,23 @@ type MessageLinkExtraction struct {
 	Outcome     string             `json:"outcome"`
 	LinkCount   int32              `json:"linkCount"`
 	ExtractedAt pgtype.Timestamptz `json:"extractedAt"`
+}
+
+type MessageLinkHold struct {
+	MessageID         int64              `json:"messageId"`
+	ServiceProviderID int32              `json:"serviceProviderId"`
+	Mode              string             `json:"mode"`
+	Status            string             `json:"status"`
+	Decision          *string            `json:"decision"`
+	WorstVerdict      *string            `json:"worstVerdict"`
+	HoldUntil         pgtype.Timestamptz `json:"holdUntil"`
+	FailOpen          bool               `json:"failOpen"`
+	BlockSuspicious   bool               `json:"blockSuspicious"`
+	ChargeBlocked     bool               `json:"chargeBlocked"`
+	DecidedBy         *string            `json:"decidedBy"`
+	DecidedAt         pgtype.Timestamptz `json:"decidedAt"`
+	CreatedAt         pgtype.Timestamptz `json:"createdAt"`
+	UpdatedAt         pgtype.Timestamptz `json:"updatedAt"`
 }
 
 type MessageSegment struct {
@@ -457,6 +542,15 @@ type ServiceProvider struct {
 	UseRouteSenderPool        bool               `json:"useRouteSenderPool"`
 	AutoDlrIncludeUnconfirmed bool               `json:"autoDlrIncludeUnconfirmed"`
 	IsTest                    bool               `json:"isTest"`
+}
+
+type SimulatorWhitelistNumber struct {
+	ID                int32              `json:"id"`
+	Msisdn            string             `json:"msisdn"`
+	ServiceProviderID *int32             `json:"serviceProviderId"`
+	Note              *string            `json:"note"`
+	CreatedAt         pgtype.Timestamptz `json:"createdAt"`
+	UpdatedAt         pgtype.Timestamptz `json:"updatedAt"`
 }
 
 type SmppSession struct {

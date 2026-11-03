@@ -34,11 +34,17 @@ type Querier interface {
 	RecordMessageLinkExtraction(ctx context.Context, arg database.RecordMessageLinkExtractionParams) error
 }
 
-// Enqueuer queues the links of messages sent through a simulator MNO.
+// Enqueuer queues the links of messages sent through a simulator MNO, and (Phase 2) of real
+// messages of customers whose scan mode is not off.
 type Enqueuer struct {
-	q   Querier
-	cfg Config
+	q        Querier
+	cfg      Config
+	settings *SettingsCache
 }
+
+// SetSettings enables Phase 2: real messages of customers in monitor mode are queued after
+// sending (customers in hold or block mode are queued before sending, by the gate).
+func (e *Enqueuer) SetSettings(s *SettingsCache) { e.settings = s }
 
 func NewEnqueuer(q Querier, cfg Config) *Enqueuer {
 	if cfg.SamplePerHour < 0 {
@@ -59,9 +65,25 @@ func (e *Enqueuer) MessageSent(ctx context.Context, messageID int64, spID int32,
 		return fmt.Errorf("check simulator MNO %d: %w", mnoID, err)
 	}
 	if !isSim {
-		return nil
+		// Real traffic is scanned after sending only for customers in monitor mode.
+		if s, ok := e.settings.Get(ctx, spID); !ok || s.Mode != ModeMonitor {
+			return nil
+		}
 	}
+	_, err = e.queue(ctx, messageID, spID, text, 0)
+	return err
+}
 
+// HoldLinks queues a real message's links before it is sent (hold and block modes), first in the
+// scan queue. It returns how many of them get a verdict (0: send at once).
+func (e *Enqueuer) HoldLinks(ctx context.Context, messageID int64, spID int32, text string) (int, error) {
+	if e == nil {
+		return 0, nil
+	}
+	return e.queue(ctx, messageID, spID, text, 1)
+}
+
+func (e *Enqueuer) queue(ctx context.Context, messageID int64, spID int32, text string, priority int16) (int, error) {
 	links := Extract(text)
 	outcome := OutcomeLinks
 	switch {
@@ -71,10 +93,15 @@ func (e *Enqueuer) MessageSent(ctx context.Context, messageID int64, spID int32,
 		outcome = OutcomeNoLinks
 	}
 
+	verdicts := 0
 	if outcome == OutcomeLinks {
 		for _, l := range links {
-			if err := e.insert(ctx, messageID, spID, l); err != nil {
-				return err
+			mode, err := e.insert(ctx, messageID, spID, l, priority)
+			if err != nil {
+				return 0, err
+			}
+			if mode != ModeNone {
+				verdicts++
 			}
 		}
 	}
@@ -86,14 +113,15 @@ func (e *Enqueuer) MessageSent(ctx context.Context, messageID int64, spID int32,
 		Outcome:   outcome,
 		LinkCount: int32(len(links)),
 	}); err != nil {
-		return fmt.Errorf("record link extraction for message %d: %w", messageID, err)
+		return 0, fmt.Errorf("record link extraction for message %d: %w", messageID, err)
 	}
-	slog.InfoContext(ctx, "Link extraction for simulator message",
-		slog.Int64("message_id", messageID), slog.String("outcome", outcome), slog.Int("links", len(links)))
-	return nil
+	slog.InfoContext(ctx, "Link extraction for message",
+		slog.Int64("message_id", messageID), slog.String("outcome", outcome), slog.Int("links", len(links)),
+		slog.Bool("before_send", priority > 0))
+	return verdicts, nil
 }
 
-func (e *Enqueuer) insert(ctx context.Context, messageID int64, spID int32, l Link) error {
+func (e *Enqueuer) insert(ctx context.Context, messageID int64, spID int32, l Link, priority int16) (string, error) {
 	mode, reason := l.Mode, l.Reason
 	if mode == ModeVisit {
 		visits, err := e.q.CountRecentVisitsForGroup(ctx, database.CountRecentVisitsForGroupParams{
@@ -101,7 +129,7 @@ func (e *Enqueuer) insert(ctx context.Context, messageID int64, spID int32, l Li
 			GroupKey:          l.GroupKey,
 		})
 		if err != nil {
-			return fmt.Errorf("count visits for %s: %w", l.GroupKey, err)
+			return "", fmt.Errorf("count visits for %s: %w", l.GroupKey, err)
 		}
 		if int(visits) >= e.cfg.SamplePerHour {
 			mode, reason = ModeReputation, ReasonSampled
@@ -127,8 +155,9 @@ func (e *Enqueuer) insert(ctx context.Context, messageID int64, spID int32, l Li
 		ScanMode:          mode,
 		ModeReason:        reasonPtr,
 		Status:            status,
+		Priority:          priority,
 	}); err != nil {
-		return fmt.Errorf("queue link %s for message %d: %w", l.Normalized, messageID, err)
+		return "", fmt.Errorf("queue link %s for message %d: %w", l.Normalized, messageID, err)
 	}
-	return nil
+	return mode, nil
 }

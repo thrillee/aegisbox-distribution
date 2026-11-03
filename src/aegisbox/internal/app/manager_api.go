@@ -60,6 +60,7 @@ func RunManagerAPI(ctx context.Context, config *cfg.Config) error {
 	}
 	apiV1.Use(apihandlers.APIKeyMiddleware(config.ManagerAPI.APIKey))
 	apihandlers.SetupRoutes(apiV1, dbQueries, dbpool) // Pass Engine group, querier, pool
+	apihandlers.SetupLinkScanRoutes(apiV1, dbQueries, dbpool, config.LinkScanWorker.ScreenshotDir)
 
 	// --- HTTP Server ---
 	// TODO: Get API server address from config

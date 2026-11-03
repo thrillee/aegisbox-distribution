@@ -50,9 +50,11 @@ type Querier interface {
 	CleanupOldDeliveryAttempts(ctx context.Context, retentionDays int32) error
 	// Cleanup route delivery attempts older than retention period
 	CleanupOldRouteAttempts(ctx context.Context, retentionDays int32) error
+	ClearScreenshotPath(ctx context.Context, id int64) error
 	// Sessions left 'connected' by a gateway that stopped without closing them.
 	CloseOrphanedSMPPSessions(ctx context.Context) (int64, error)
-	CompleteLinkScanJob(ctx context.Context, id int64) error
+	CompleteLinkScanJob(ctx context.Context, arg CompleteLinkScanJobParams) error
+	CountLinkScanBacklog(ctx context.Context) (CountLinkScanBacklogRow, error)
 	CountMNOConnectionsByMNO(ctx context.Context, mnoID int32) (int64, error)
 	CountMNOs(ctx context.Context) (int64, error)
 	// Counts messages based on optional filters, joining necessary tables.
@@ -60,6 +62,7 @@ type Querier interface {
 	CountMessageDetails(ctx context.Context, arg CountMessageDetailsParams) (int64, error)
 	CountMsisdnPrefixEntriesByGroup(ctx context.Context, msisdnPrefixGroupID int32) (int64, error)
 	CountMsisdnPrefixGroups(ctx context.Context) (int64, error)
+	CountOpenLinkHolds(ctx context.Context) (CountOpenLinkHoldsRow, error)
 	CountOtpAlternativeSenders(ctx context.Context, arg CountOtpAlternativeSendersParams) (int64, error)
 	CountOtpMessageTemplates(ctx context.Context, status *string) (int64, error)
 	CountOtpSenderTemplateAssignments(ctx context.Context, arg CountOtpSenderTemplateAssignmentsParams) (int64, error)
@@ -103,6 +106,11 @@ type Querier interface {
 	CreateWalletTransaction(ctx context.Context, arg CreateWalletTransactionParams) (WalletTransaction, error)
 	// Optional: Query to set MNO status to inactive instead of deleting
 	DeactivateMNO(ctx context.Context, id int32) (Mno, error)
+	// Records a decision, only from the expected status, so two deciders cannot both act.
+	DecideMessageLinkHold(ctx context.Context, arg DecideMessageLinkHoldParams) (int64, error)
+	// The scanner is down, busy or not configured: not the page's fault, so the attempt the claim
+	// counted is given back and the job waits a minute. Links are never lost while the scanner is out.
+	DeferLinkScanJob(ctx context.Context, arg DeferLinkScanJobParams) error
 	// Consider consequences - deletes might fail if MNO is referenced by connections/rules (ON DELETE RESTRICT)
 	// It might be safer to just set status to 'inactive'.
 	DeleteMNO(ctx context.Context, id int32) error
@@ -114,6 +122,10 @@ type Querier interface {
 	DeleteMsisdnPrefixGroup(ctx context.Context, id int32) error
 	// Retention: joined parts are only kept for a while.
 	DeleteOldConcatParts(ctx context.Context, cutoff pgtype.Timestamptz) (int64, error)
+	// Deletes scan results, finished jobs and extraction records older than the cutoff. Returns the
+	// number of scan results deleted.
+	// Jobs still queued by then (scanning was off) are deleted too: their messages are too old to matter.
+	DeleteOldLinkScanData(ctx context.Context, before pgtype.Timestamptz) (int32, error)
 	DeleteOtpAlternativeSender(ctx context.Context, id int32) error
 	DeleteOtpMessageTemplate(ctx context.Context, id int32) error
 	DeleteOtpSenderTemplateAssignment(ctx context.Context, id int32) error
@@ -131,13 +143,20 @@ type Querier interface {
 	EnqueueDLRForForwarding(ctx context.Context, arg EnqueueDLRForForwardingParams) error
 	// Like EnqueueDLRForForwarding, but does nothing if a job with the same dedupe_key exists.
 	EnqueueDLRForForwardingOnce(ctx context.Context, arg EnqueueDLRForForwardingOnceParams) (int64, error)
-	// A failed attempt: retried after 30 s, 60 s, 120 s... until max_attempts, then failed.
+	// A failed attempt: retried after base, 2 x base, 4 x base seconds... until max_attempts, then
+	// failed. The worker uses a 30 s base, and a short one for jobs of held messages.
 	FailLinkScanJob(ctx context.Context, arg FailLinkScanJobParams) error
+	// A recent visit of the same URL that is still valid (24 h, 7 days when malicious). verdict is
+	// the effective one (an admin override wins).
+	FindCachedLinkScan(ctx context.Context, normalizedUrl string) (FindCachedLinkScanRow, error)
 	FindDebitTransactionForMessage(ctx context.Context, messageID *int64) (FindDebitTransactionForMessageRow, error)
 	// Finds the msisdn_prefix_group_id for a given MSISDN by longest prefix match.
 	// $1: full_msisdn (e.g., '2348031234567')
 	FindMatchingPrefixGroupForMSISDN(ctx context.Context, msisdnPrefix string) (FindMatchingPrefixGroupForMSISDNRow, error)
 	FindMessageByMnoMessageID(ctx context.Context, mnoMessageID *string) (FindMessageByMnoMessageIDRow, error)
+	// The latest visit of a link in the same group (per recipient links that differ only by a token),
+	// used for links that were sampled out instead of visited.
+	FindRecentGroupVisit(ctx context.Context, groupKey string) (FindRecentGroupVisitRow, error)
 	// Finds segment details based on MNO Message ID for DLR processing
 	FindSegmentByMnoMessageID(ctx context.Context, mnoMessageID *string) (FindSegmentByMnoMessageIDRow, error)
 	// Selects all active HTTP connections
@@ -172,6 +191,8 @@ type Querier interface {
 	GetDailyReport(ctx context.Context, arg GetDailyReportParams) ([]GetDailyReportRow, error)
 	// Get global routing configuration
 	GetGlobalRoutingConfig(ctx context.Context) (RoutingConfig, error)
+	GetLinkDomainAge(ctx context.Context, domain string) (LinkDomainAge, error)
+	GetLinkScanScreenshot(ctx context.Context, id int64) (*string, error)
 	GetMNOByID(ctx context.Context, id int32) (Mno, error)
 	GetMNOConnectionByID(ctx context.Context, id int32) (MnoConnection, error)
 	GetMNOConnectionSenderPoolStrategy(ctx context.Context, id int32) (GetMNOConnectionSenderPoolStrategyRow, error)
@@ -179,6 +200,8 @@ type Querier interface {
 	GetMessageDetailsForPricing(ctx context.Context, id int64) (GetMessageDetailsForPricingRow, error)
 	GetMessageDetailsForSending(ctx context.Context, id int64) (GetMessageDetailsForSendingRow, error)
 	GetMessageFinalStatus(ctx context.Context, id int64) (string, error)
+	GetMessageLinkHold(ctx context.Context, messageID int64) (MessageLinkHold, error)
+	GetMessageTextForLinkScan(ctx context.Context, id int64) (string, error)
 	GetMessageTotalSegments(ctx context.Context, id int64) (int32, error)
 	GetMessagesByStatus(ctx context.Context, arg GetMessagesByStatusParams) ([]GetMessagesByStatusRow, error)
 	// Fetches messages that are ready for retry (next_retry_at <= NOW())
@@ -239,6 +262,9 @@ type Querier interface {
 	// Get sender ID health for a specific MNO
 	GetSenderIdHealthForMNO(ctx context.Context, arg GetSenderIdHealthForMNOParams) (SenderIDHealth, error)
 	GetServiceProviderByID(ctx context.Context, id int32) (ServiceProvider, error)
+	// For routing: whether the credential's customer is a test customer, and whether the destination
+	// is whitelisted for it (a whitelisted number gets real delivery instead of the simulator).
+	GetSimulatorRoutingPolicy(ctx context.Context, arg GetSimulatorRoutingPolicyParams) (GetSimulatorRoutingPolicyRow, error)
 	GetSpCredentialRoutingGroupId(ctx context.Context, id int32) (*int32, error)
 	GetSpCredentialScope(ctx context.Context, id int32) (string, error)
 	GetTemplateContent(ctx context.Context, arg GetTemplateContentParams) (string, error)
@@ -251,18 +277,26 @@ type Querier interface {
 	HasReversalForMessage(ctx context.Context, messageID *int64) (bool, error)
 	IncrementOtpAlternativeSenderUsage(ctx context.Context, id int32) (OtpAlternativeSender, error)
 	IncrementOtpAssignmentUsage(ctx context.Context, id int32) (IncrementOtpAssignmentUsageRow, error)
+	InsertLinkScan(ctx context.Context, arg InsertLinkScanParams) (int64, error)
 	InsertLinkScanJob(ctx context.Context, arg InsertLinkScanJobParams) error
 	InsertMessageIn(ctx context.Context, arg InsertMessageInParams) (int64, error)
+	InsertMessageLinkHold(ctx context.Context, arg InsertMessageLinkHoldParams) (int64, error)
 	// True when the MNO is a simulator and the service provider is not a test customer: the message must
 	// not be sent through it.
 	IsSimulatorBlockedForSP(ctx context.Context, arg IsSimulatorBlockedForSPParams) (bool, error)
 	IsSimulatorMNO(ctx context.Context, mnoID int32) (bool, error)
+	// Customers whose real traffic is scanned (mode other than off).
+	ListActiveLinkScanSettings(ctx context.Context) ([]ListActiveLinkScanSettingsRow, error)
 	ListAlternativeSendersWithAssignedTemplates(ctx context.Context, arg ListAlternativeSendersWithAssignedTemplatesParams) ([]ListAlternativeSendersWithAssignedTemplatesRow, error)
 	// Selects active senders that are not depleted, optionally for a specific MNO or global ones (MNO ID IS NULL).
 	// Orders by least recently used to attempt rotation.
 	ListGlobalOtpAlternativeSenders(ctx context.Context, arg ListGlobalOtpAlternativeSendersParams) ([]OtpAlternativeSender, error)
 	// Per routing group configs (the global default row has a NULL group and is read separately)
 	ListGroupRoutingConfigs(ctx context.Context) ([]ListGroupRoutingConfigsRow, error)
+	// The links of a held message that get a verdict, with the effective verdict of finished ones.
+	ListHoldJobVerdicts(ctx context.Context, messageID int64) ([]ListHoldJobVerdictsRow, error)
+	// Link scanning: admin lists, domain ages, screenshots and Phase 2 holds.
+	ListLinkDomainLists(ctx context.Context) ([]ListLinkDomainListsRow, error)
 	ListLinkScanJobsForMessage(ctx context.Context, messageID int64) ([]LinkScanJob, error)
 	ListMNOConnectionsByMNO(ctx context.Context, arg ListMNOConnectionsByMNOParams) ([]MnoConnection, error)
 	ListMNOs(ctx context.Context, arg ListMNOsParams) ([]Mno, error)
@@ -271,6 +305,9 @@ type Querier interface {
 	ListMessageDetails(ctx context.Context, arg ListMessageDetailsParams) ([]ListMessageDetailsRow, error)
 	ListMsisdnPrefixEntriesByGroup(ctx context.Context, arg ListMsisdnPrefixEntriesByGroupParams) ([]MsisdnPrefixEntry, error)
 	ListMsisdnPrefixGroups(ctx context.Context, arg ListMsisdnPrefixGroupsParams) ([]MsisdnPrefixGroup, error)
+	ListOldScreenshots(ctx context.Context, before pgtype.Timestamptz) ([]ListOldScreenshotsRow, error)
+	// Holds to decide: waiting ones (verdicts may be in, or the time is up) and reviews past 24 hours.
+	ListOpenLinkHolds(ctx context.Context, batchSize int32) ([]MessageLinkHold, error)
 	ListOtpAlternativeSenders(ctx context.Context, arg ListOtpAlternativeSendersParams) ([]ListOtpAlternativeSendersRow, error)
 	ListOtpMessageTemplates(ctx context.Context, arg ListOtpMessageTemplatesParams) ([]OtpMessageTemplate, error)
 	ListOtpSenderTemplateAssignments(ctx context.Context, arg ListOtpSenderTemplateAssignmentsParams) ([]ListOtpSenderTemplateAssignmentsRow, error)
@@ -337,6 +374,8 @@ type Querier interface {
 	// Returns the ids and sender strings that were reset, for logging.
 	ResetDepletedOtpAlternativeSenders(ctx context.Context) ([]ResetDepletedOtpAlternativeSendersRow, error)
 	SetConcatPartsMessage(ctx context.Context, arg SetConcatPartsMessageParams) error
+	// Moves a message between processing states, only from the expected one.
+	SetMessageProcessingStatus(ctx context.Context, arg SetMessageProcessingStatusParams) (int64, error)
 	SetMessageSentSourceAddr(ctx context.Context, arg SetMessageSentSourceAddrParams) error
 	// Optional: Periodically run to unlock jobs held by dead workers.
 	UnlockStaleDLRs(ctx context.Context) error
@@ -395,6 +434,7 @@ type Querier interface {
 	// Stores a part; a resent part (same group and number, not yet joined) replaces the stored copy and
 	// keeps its message ID.
 	UpsertConcatPart(ctx context.Context, arg UpsertConcatPartParams) (string, error)
+	UpsertLinkDomainAge(ctx context.Context, arg UpsertLinkDomainAgeParams) error
 	// Create or update route health record
 	UpsertRouteHealth(ctx context.Context, arg UpsertRouteHealthParams) (RouteHealth, error)
 	// Create or update routing configuration

@@ -85,6 +85,13 @@ These were decided deliberately; do not change them without asking.
   pool of the connection used.
 * **Simulator guard:** an MNO with `is_simulator` only takes messages from customers with
   `is_test`; the sender refuses otherwise (fails closed) without charging route health.
+* **Simulator routing policy** (`internal/sms/simulator_routing.go`), applied before the traffic
+  split when a routing group has a simulator route: customers that are not test customers skip
+  simulator routes; a test customer's message to a number on the **Simulator Whitelist**
+  (`simulator_whitelist_numbers`, for all test customers or one) uses only real routes, so the
+  phone gets it and the real DLR comes back; other test messages use only simulator routes. No
+  usable route left means the message fails with a clear error. Numbers are stored as digits,
+  `0803...` becomes `234803...`.
 
 ### SMPP server (customer side)
 * Up to 10 sessions per login; DLRs go to receiver or transceiver sessions in turn.
@@ -99,6 +106,9 @@ Highlights of recent work, newest first. See each repo's merged PRs for detail.
 
 | Area | Status |
 |---|---|
+| Link scanning steps 3 to 6 and Phase 2 (off by default): `linkscanner` service, scan worker, scoring, RDAP, URLhaus option, lists, overrides, Link Scans page, hold and block gate; simulator whitelist | PRs open (aegisbox #59, portal #38, distribution #36) |
+| SMPP: bursts above the MNO window were dropped silently, and fast `submit_sm_resp` replies lost; both fixed | PR open (aegisbox #59) |
+| Link extraction and scan queue | done (aegisbox #57) |
 | Portal switches "Simulated MNO" and "Test customer"; test traffic out of totals | done (portal #35) |
 | Long SMS: segments from text, SMPP part joining, one DLR per message | done (aegisbox #55) |
 | Forwarded DLR error code `err:000` instead of `008` | done (aegisbox #54) |
@@ -111,13 +121,18 @@ Highlights of recent work, newest first. See each repo's merged PRs for detail.
 | Lagos time zone; analytics fixes; customer Connection page | done |
 | SMPP security (sessions, bcrypt, bind responses, DLR port key) | done |
 
-Migrations up to **00016** exist; they run automatically on start.
+Migrations up to **00018** exist; they run automatically on start.
 
 ## 5. Open work
 
-### 5.1 Link scanning (in progress; steps 1, 1b and 2 done)
-The full plan, including the gaps already resolved, is in [LINK_SCANNING_PLAN.md](LINK_SCANNING_PLAN.md).
-Next is **step 3**: the `linkscanner` service. Step 2 (aegisbox #57) queues links in `link_scan_jobs`; the claim, complete and fail queries for the scanner worker are already in `db/query/link_scan.sql`.
+### 5.1 Link scanning (steps 1 to 6 done; Phase 2 built and off)
+The full plan is in [LINK_SCANNING_PLAN.md](LINK_SCANNING_PLAN.md).
+How to turn it on: [LINK_SCANNING_ENABLE.md](LINK_SCANNING_ENABLE.md). The scanner lives in `aegisbox/linkscanner` (Node, Playwright, Chromium; SSRF guard in `src/guard.js`), the worker, scoring, lists, RDAP and URLhaus in `aegisbox/internal/linkscan`, the Phase 2 gate in `internal/linkscan/gate.go` (called from the send step in `internal/sms/processor.go`). Portal: `app/admin/link-scans`, and the Link Check tab on a service provider.
+
+Phase 2 rules: every customer is **Off** unless a `link_scan_settings` row says otherwise. Hold or
+Block must not be turned on for a customer until the owner confirms the contract and NCC check.
+Rejected messages are refunded by default. Open: whether to use URLhaus (accept abuse.ch terms
+first), and a scanning location in Nigeria if "may hide content outside Nigeria" is common.
 
 ### 5.2 Waiting on the owner
 * Two billing questions for one customer (a small test refund, and a one off charge for traffic
@@ -148,6 +163,10 @@ Backend (`aegisbox`, all `envconfig`, see `internal/config/config.go`): `DATABAS
 Simulator (`aegisbox mnosim`): `MNOSIM_ADDR`, `MNOSIM_SYSTEM_ID`, `MNOSIM_PASSWORD`,
 `MNOSIM_DLR_DELAY_MIN/MAX`, `MNOSIM_DLR_MIX` (for example `DELIVRD:90,UNDELIV:5,EXPIRED:2,NONE:3`),
 `MNOSIM_REJECT_PERCENT`, `MNOSIM_REJECT_STATUS`, `MNOSIM_NO_RESPONSE_PERCENT`.
+
+Link scanning: `LINKSCAN_EXTRACT_ENABLED`, `LINKSCAN_SKIP_OTP`, `LINKSCAN_SAMPLE_PER_HOUR`,
+`LINKSCAN_ENABLED`, `LINKSCAN_TOKEN`, `LINKSCAN_BLOCK_IPS`, `LINKSCAN_BLOCK_HOSTS`,
+`LINKSCAN_MAX_CONCURRENCY`, retention and limits (see `.env.example`).
 
 Portal: `DATABASE_URL`, `CLERK_SECRET_KEY`, `CLERK_ADMIN_ORG_ID`,
 `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY`, `NEXT_PUBLIC_CLERK_ADMIN_ORG_ID`, `NEXT_PUBLIC_APP_URL`

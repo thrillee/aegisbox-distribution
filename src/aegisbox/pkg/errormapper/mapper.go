@@ -14,6 +14,7 @@ var internalToSMPP = map[string]string{
 	"MNO_REJECT":      "00D", // Submit Failed (generic MNO rejection)
 	"VALIDATION_FAIL": "045", // Invalid Message ID (abusing slightly for generic validation fail)
 	"DELIVRD":         "000", // Delivered (Not an error, but useful for mapping)
+	"LINK_BLOCKED":    "045", // Submit failed: blocked by the link check (link scanning)
 	// ... add mappings for common MNO error codes if known ...
 	// e.g., "MNO_01": "00C" // Invalid Message Length from MNO
 }
@@ -26,6 +27,7 @@ var internalToHTTP = map[string]string{
 	"MNO_REJECT":      "502 Bad Gateway - MNO Rejected",
 	"VALIDATION_FAIL": "400 Bad Request - Validation Failed",
 	"DELIVRD":         "200 OK - Delivered",
+	"LINK_BLOCKED":    "403 Forbidden - Blocked by link check",
 	// ...
 }
 

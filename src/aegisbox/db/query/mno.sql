@@ -44,3 +44,17 @@ SELECT COALESCE((
     FROM mnos m, service_providers sp
     WHERE m.id = sqlc.arg(mno_id) AND sp.id = sqlc.arg(service_provider_id)
 ), FALSE)::BOOLEAN AS blocked;
+
+-- name: GetSimulatorRoutingPolicy :one
+-- For routing: whether the credential's customer is a test customer, and whether the destination
+-- is whitelisted for it (a whitelisted number gets real delivery instead of the simulator).
+SELECT
+    sp.is_test,
+    EXISTS (
+        SELECT 1 FROM simulator_whitelist_numbers w
+        WHERE w.msisdn = sqlc.arg(msisdn)::TEXT
+          AND (w.service_provider_id IS NULL OR w.service_provider_id = sp.id)
+    )::BOOLEAN AS is_whitelisted
+FROM sp_credentials c
+JOIN service_providers sp ON sp.id = c.service_provider_id
+WHERE c.id = sqlc.arg(sp_credential_id);

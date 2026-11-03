@@ -108,6 +108,38 @@ func (q *Queries) GetMNOByID(ctx context.Context, id int32) (Mno, error) {
 	return i, err
 }
 
+const getSimulatorRoutingPolicy = `-- name: GetSimulatorRoutingPolicy :one
+SELECT
+    sp.is_test,
+    EXISTS (
+        SELECT 1 FROM simulator_whitelist_numbers w
+        WHERE w.msisdn = $1::TEXT
+          AND (w.service_provider_id IS NULL OR w.service_provider_id = sp.id)
+    )::BOOLEAN AS is_whitelisted
+FROM sp_credentials c
+JOIN service_providers sp ON sp.id = c.service_provider_id
+WHERE c.id = $2
+`
+
+type GetSimulatorRoutingPolicyParams struct {
+	Msisdn         string `json:"msisdn"`
+	SpCredentialID int32  `json:"spCredentialId"`
+}
+
+type GetSimulatorRoutingPolicyRow struct {
+	IsTest        bool `json:"isTest"`
+	IsWhitelisted bool `json:"isWhitelisted"`
+}
+
+// For routing: whether the credential's customer is a test customer, and whether the destination
+// is whitelisted for it (a whitelisted number gets real delivery instead of the simulator).
+func (q *Queries) GetSimulatorRoutingPolicy(ctx context.Context, arg GetSimulatorRoutingPolicyParams) (GetSimulatorRoutingPolicyRow, error) {
+	row := q.db.QueryRow(ctx, getSimulatorRoutingPolicy, arg.Msisdn, arg.SpCredentialID)
+	var i GetSimulatorRoutingPolicyRow
+	err := row.Scan(&i.IsTest, &i.IsWhitelisted)
+	return i, err
+}
+
 const isSimulatorBlockedForSP = `-- name: IsSimulatorBlockedForSP :one
 SELECT COALESCE((
     SELECT m.is_simulator AND NOT sp.is_test
