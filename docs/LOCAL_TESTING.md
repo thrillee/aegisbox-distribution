@@ -55,8 +55,9 @@ VALUES ('Simulator', 'NG', 'active', true, now(), now()) RETURNING id;
 ```bash
 cd aegisbox/linkscanner && npm ci && npm test   # guard and scan tests against local fixtures
 # Run it for the backend. Outside the Docker seccomp profile the Chromium sandbox may not start;
-# only locally, add LINKSCAN_CHROMIUM_SANDBOX=false.
-LINKSCAN_TOKEN=0123456789abcdef0123 PORT=8080 node src/server.js
+# only locally, add LINKSCAN_CHROMIUM_SANDBOX=false. LINKSCAN_ALLOW_NO_BLOCK_IPS=true is for local
+# runs only; in production LINKSCAN_BLOCK_IPS must hold the server's public IP.
+LINKSCAN_TOKEN=0123456789abcdef0123 LINKSCAN_ALLOW_NO_BLOCK_IPS=true PORT=8080 node src/server.js
 ```
 Then start the backend with `LINKSCAN_ENABLED=true LINKSCAN_URL=http://127.0.0.1:8080
 LINKSCAN_TOKEN=0123456789abcdef0123 LINKSCAN_SCREENSHOT_DIR=/tmp/linkscans`, send a message with a

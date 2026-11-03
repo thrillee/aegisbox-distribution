@@ -34,7 +34,7 @@ a simulated route, they skip it and use the real routes.
 |---|---|---|
 | `LINKSCAN_TOKEN` | a long random value, e.g. from `openssl rand -hex 32` | shared secret between aegisbox and the scanner (at least 16 characters) |
 | `LINKSCAN_ENABLED` | `true` | starts the scan worker in aegisbox |
-| `LINKSCAN_BLOCK_IPS` | the server's public IP, e.g. `203.0.113.10` (comma separate several) | so a scanned page can never call the server itself. On the server: `curl -4 ifconfig.me` |
+| `LINKSCAN_BLOCK_IPS` | the server's public IP, e.g. `203.0.113.10` (comma separate several) | **required**: so a scanned page can never call the server itself. The scanner stays idle until it is set. On the server: `curl -4 ifconfig.me` |
 | `LINKSCAN_BLOCK_HOSTS` | optional extra host names to block | the **database host is blocked automatically** (aegisbox reads it from `DATABASE_URL`) |
 
 Optional: `LINKSCAN_MAX_CONCURRENCY` (default 2, pages open at once; keep the same value for both
@@ -51,8 +51,8 @@ Then **redeploy**.
 
 In Dokploy, open the logs:
 
-* `linkscanner`: `linkscanner listening ... "sandbox":true`. If it says
-  `linkscanner idle: set LINKSCAN_TOKEN`, the token is missing.
+* `linkscanner`: `linkscanner listening ... "sandbox":true`. If it says `linkscanner idle:`, the
+  rest of the line names the missing setting (`LINKSCAN_TOKEN` or `LINKSCAN_BLOCK_IPS`).
 * `aegisbox`: `Link scan worker started`. If it says
   `Link scanning is enabled but not configured`, the token is missing or too short.
 
@@ -162,7 +162,7 @@ and `intent://` links are recorded only. OTP looking messages are skipped (`LINK
 | Symptom | Cause and fix |
 |---|---|
 | `linkscanner` exits with `Chromium failed to start` / `No usable sandbox` | The host blocks the seccomp profile or user namespaces. Check that Dokploy applies `security_opt` (`docker inspect` shows `seccomp=...`). On Ubuntu 23.10+ hosts, AppArmor may block unprivileged user namespaces: `sysctl kernel.apparmor_restrict_unprivileged_userns=0`. Do not turn the sandbox off in production. |
-| aegisbox logs `link scanner answered 401` | `LINKSCAN_TOKEN` differs between the two services. |
+| aegisbox logs `Link scan postponed: scanner not available` | The scanner is down, starting, idle (`503`, see its log) or the token differs (`401`). Links wait and are scanned once it is back; none are lost. |
 | `Link scan queue is growing: is the linkscanner service up?` | Scanner down, too slow, or out of memory. Check its logs; raise `LINKSCAN_MAX_CONCURRENCY` only if memory allows. |
 | `could not save screenshot` | The `linkscan-data` volume is not writable; recreate it (it is created owned by the app user). |
 | Whitelisted message failed with "no usable route" | Add a real route for that network to the test customer's routing group. |
