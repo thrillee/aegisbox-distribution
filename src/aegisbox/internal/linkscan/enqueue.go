@@ -24,6 +24,9 @@ type Config struct {
 	// SamplePerHour is how many links of one group (same customer, same host and path apart from a
 	// per recipient token) are visited per hour; the rest get reputation checks only.
 	SamplePerHour int `envconfig:"LINKSCAN_SAMPLE_PER_HOUR" default:"3"`
+	// AlwaysVisit opens every visitable link: no sampling here, and the worker does not reuse an
+	// earlier result for the same URL. Admin allow and block lists still decide first.
+	AlwaysVisit bool `envconfig:"LINKSCAN_ALWAYS_VISIT" default:"false"`
 }
 
 // Querier is the part of database.Querier the enqueuer uses.
@@ -123,7 +126,7 @@ func (e *Enqueuer) queue(ctx context.Context, messageID int64, spID int32, text 
 
 func (e *Enqueuer) insert(ctx context.Context, messageID int64, spID int32, l Link, priority int16) (string, error) {
 	mode, reason := l.Mode, l.Reason
-	if mode == ModeVisit {
+	if mode == ModeVisit && !e.cfg.AlwaysVisit {
 		visits, err := e.q.CountRecentVisitsForGroup(ctx, database.CountRecentVisitsForGroupParams{
 			ServiceProviderID: spID,
 			GroupKey:          l.GroupKey,

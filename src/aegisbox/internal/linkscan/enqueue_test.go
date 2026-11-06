@@ -110,3 +110,20 @@ func TestEnqueuer_SamplesPersonalLinks(t *testing.T) {
 		t.Fatalf("want 3 visits and 2 sampled out, got %d and %d", visits, sampled)
 	}
 }
+
+func TestEnqueuer_AlwaysVisitSkipsSampling(t *testing.T) {
+	q := &fakeQ{simulator: true}
+	e := NewEnqueuer(q, Config{Enabled: true, SamplePerHour: 3, AlwaysVisit: true})
+	tokens := []string{"a8F3kQ29xZ", "b8F3kQ29xZ", "c8F3kQ29xZ", "d8F3kQ29xZ", "e8F3kQ29xZ"}
+	for i, tok := range tokens {
+		_ = e.MessageSent(context.Background(), int64(i+1), 2, 3, "Hi https://promo.example.com/r/"+tok)
+	}
+	for _, j := range q.jobs {
+		if j.ScanMode != ModeVisit {
+			t.Fatalf("job for %s has mode %s, want every link visited", j.Url, j.ScanMode)
+		}
+	}
+	if len(q.jobs) != len(tokens) {
+		t.Fatalf("want %d jobs, got %d", len(tokens), len(q.jobs))
+	}
+}
