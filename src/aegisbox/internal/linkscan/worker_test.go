@@ -251,3 +251,17 @@ func TestWorkerSampledLinkWaitsForGroupVisit(t *testing.T) {
 		t.Fatalf("last attempt should use static checks: %+v", q.scans)
 	}
 }
+
+func TestWorkerAlwaysVisitIgnoresCachedResult(t *testing.T) {
+	q := newFakeWQ()
+	s := &fakeScanner{res: &ScanResult{FinalURL: sp("https://shop.example.com/"), Status: ip(200)}}
+	w := newTestWorker(t, q, s)
+	w.cfg.AlwaysVisit = true
+	j := job(1, "https://shop.example.com/", ModeVisit, nil)
+	q.cachedURL[j.NormalizedUrl] = 55
+	q.jobs = []database.LinkScanJob{j}
+	w.RunOnce(context.Background())
+	if len(s.calls) != 1 || q.completed[1] == 55 || len(q.scans) != 1 {
+		t.Fatalf("calls %v completed %v scans %d", s.calls, q.completed, len(q.scans))
+	}
+}

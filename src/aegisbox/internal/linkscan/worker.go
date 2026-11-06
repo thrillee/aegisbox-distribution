@@ -35,6 +35,8 @@ type ScanConfig struct {
 	PollInterval   time.Duration `envconfig:"LINKSCAN_POLL_INTERVAL" default:"5s"`
 	RequestTimeout time.Duration `envconfig:"LINKSCAN_REQUEST_TIMEOUT" default:"90s"`
 	MaxAttempts    int           `envconfig:"LINKSCAN_MAX_ATTEMPTS" default:"3"`
+	// AlwaysVisit opens a link even when the same URL was visited recently (see Config.AlwaysVisit).
+	AlwaysVisit bool `envconfig:"LINKSCAN_ALWAYS_VISIT" default:"false"`
 	// ScreenshotDir is where screenshots are written (a private volume).
 	ScreenshotDir       string        `envconfig:"LINKSCAN_SCREENSHOT_DIR" default:"/data/linkscans"`
 	ScreenshotRetention time.Duration `envconfig:"LINKSCAN_SCREENSHOT_RETENTION" default:"168h"`
@@ -302,8 +304,10 @@ func (w *Worker) process(ctx context.Context, j database.LinkScanJob) {
 		return
 	}
 
-	// Same URL visited recently: reuse that result.
-	if cached, err := w.q.FindCachedLinkScan(logCtx, j.NormalizedUrl); err == nil {
+	// Same URL visited recently: reuse that result, unless every link must be opened.
+	if w.cfg.AlwaysVisit && j.ScanMode == ModeVisit {
+		// Fall through to a fresh visit.
+	} else if cached, err := w.q.FindCachedLinkScan(logCtx, j.NormalizedUrl); err == nil {
 		if w.finalHostListed(logCtx, j, l, cached.ID, cached.FinalHost) {
 			return
 		}
