@@ -7,6 +7,7 @@ import { PageHeader } from '@/components/dashboard/page-header'
 import { DataCard } from '@/components/dashboard/data-card'
 import { Button } from '@/components/ui/button'
 import { PageLoadingSkeleton } from '@/components/routing/loading-components'
+import { ReloadButton } from '@/components/dashboard/reload-button'
 
 interface ServiceProvider {
   id: number
@@ -189,6 +190,7 @@ export default function DailyReportPage() {
         description="Detailed SMS usage statistics by service provider"
         actions={
           <div className="flex items-center gap-2">
+            <ReloadButton onReload={fetchReport} />
             <div className="relative">
               <Button
                 onClick={() => setShowFieldSelector(!showFieldSelector)}

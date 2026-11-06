@@ -6,6 +6,7 @@ import { PageHeader } from '@/components/dashboard/page-header'
 import { DataCard } from '@/components/dashboard/data-card'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
+import { ReloadButton } from '@/components/dashboard/reload-button'
 
 interface AlternativeSender {
   id: number
@@ -224,10 +225,13 @@ export function AlternativeSendersPage({ initialSenders: _initialSenders, servic
         title="OTP Alternative Senders"
         description="Manage fallback sender IDs for OTP delivery"
         actions={
-          <Button onClick={openCreateModal} className="bg-white text-black hover:bg-zinc-200">
-            <Plus className="h-4 w-4 mr-2" />
-            Add Sender
-          </Button>
+          <>
+            <ReloadButton onReload={fetchSenders} />
+            <Button onClick={openCreateModal} className="bg-white text-black hover:bg-zinc-200">
+              <Plus className="h-4 w-4 mr-2" />
+              Add Sender
+            </Button>
+          </>
         }
       />
 

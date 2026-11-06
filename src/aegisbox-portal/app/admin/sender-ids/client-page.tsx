@@ -6,6 +6,7 @@ import { PageHeader } from '@/components/dashboard/page-header'
 import { DataCard } from '@/components/dashboard/data-card'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
+import { ReloadButton } from '@/components/dashboard/reload-button'
 
 interface SenderId {
   id: number
@@ -251,10 +252,13 @@ export function SenderIdsPage({ initialSenders: _initialSenders, serviceProvider
         title="Sender IDs"
         description="Manage sender IDs for SMS delivery"
         actions={
-          <Button onClick={openCreateModal} className="bg-white text-black hover:bg-zinc-200">
-            <Plus className="h-4 w-4 mr-2" />
-            Add Sender ID
-          </Button>
+          <>
+            <ReloadButton onReload={fetchSenders} />
+            <Button onClick={openCreateModal} className="bg-white text-black hover:bg-zinc-200">
+              <Plus className="h-4 w-4 mr-2" />
+              Add Sender ID
+            </Button>
+          </>
         }
       />
 

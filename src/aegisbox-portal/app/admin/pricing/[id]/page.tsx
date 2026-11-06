@@ -6,6 +6,7 @@ import { ArrowLeft, Plus, Search, DollarSign, Loader2, Edit, Trash2 } from 'luci
 import { PageHeader } from '@/components/dashboard/page-header'
 import { DataCard } from '@/components/dashboard/data-card'
 import { Button } from '@/components/ui/button'
+import { ReloadButton } from '@/components/dashboard/reload-button'
 
 interface Mno {
   id: number
@@ -200,6 +201,7 @@ export default function ServiceProviderPricingPage({
           </h1>
           <p className="text-zinc-400">Manage pricing rules for HTTP API and wallet-funded messages</p>
         </div>
+        <ReloadButton onReload={fetchData} className="ml-auto" />
       </div>
 
       <div className="relative flex-1 max-w-xs">

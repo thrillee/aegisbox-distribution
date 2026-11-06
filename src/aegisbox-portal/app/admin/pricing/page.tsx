@@ -7,6 +7,7 @@ import { PageHeader } from '@/components/dashboard/page-header'
 import { DataCard } from '@/components/dashboard/data-card'
 import { Button } from '@/components/ui/button'
 import { formatMoney } from '@/lib/money'
+import { ReloadButton } from '@/components/dashboard/reload-button'
 
 async function getPricingRules() {
   try {
@@ -68,12 +69,15 @@ export default async function PricingPage() {
         title="Pricing"
         description="Manage SMS pricing rules for service providers"
         actions={
-          <Link href="/admin/pricing/new">
-            <Button className="bg-white text-black hover:bg-zinc-200">
-              <Plus className="h-4 w-4" />
-              Add Pricing Rule
-            </Button>
-          </Link>
+          <>
+            <ReloadButton />
+            <Link href="/admin/pricing/new">
+              <Button className="bg-white text-black hover:bg-zinc-200">
+                <Plus className="h-4 w-4" />
+                Add Pricing Rule
+              </Button>
+            </Link>
+          </>
         }
       />
 

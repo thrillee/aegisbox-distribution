@@ -4,6 +4,7 @@ import { db } from '@/lib/db'
 import { isReportDate, reportDate, reportDateTime, reportDayRange, reportDayStart } from '@/lib/time'
 import { VERDICTS, VERDICT_STYLES } from '@/lib/link-scans'
 import { HoldButtons } from './actions'
+import { ReloadButton } from '@/components/dashboard/reload-button'
 
 // Link scanning results (step 5): one row per message with links, with the worst verdict of its
 // links. Simulator traffic of test customers, and real traffic of customers with a scan mode.
@@ -187,9 +188,12 @@ export default async function LinkScansPage({
             Opening a message's details is logged.
           </p>
         </div>
-        <Link href="/admin/link-scans/lists" className="text-sm font-medium text-zinc-300 hover:text-white border border-white/10 rounded-lg px-3 py-2">
-          Allow and block lists
-        </Link>
+        <div className="flex items-center gap-2">
+          <ReloadButton />
+          <Link href="/admin/link-scans/lists" className="text-sm font-medium text-zinc-300 hover:text-white border border-white/10 rounded-lg px-3 py-2">
+            Allow and block lists
+          </Link>
+        </div>
       </div>
 
       {warnings.length > 0 && (

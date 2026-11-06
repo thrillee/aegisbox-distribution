@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react'
 import Link from 'next/link'
 import { Search, Users, Hash, Phone, Edit2, Trash2, Eye, Plus, Loader2 } from 'lucide-react'
 import { PageLoadingSkeleton } from '@/components/routing/loading-components'
+import { ReloadButton } from '@/components/dashboard/reload-button'
 
 export default function PrefixGroupsPage() {
   const [groups, setGroups] = useState<any[]>([])
@@ -78,10 +79,13 @@ export default function PrefixGroupsPage() {
           <h1 className="text-3xl font-bold text-white">Prefix Groups</h1>
           <p className="text-zinc-400 mt-1">Manage phone number prefix groups for routing</p>
         </div>
-        <Link href="/admin/routing/prefix-groups/new" className="flex items-center gap-2 px-4 py-2 bg-white text-black rounded-lg hover:bg-zinc-200 transition-colors">
-          <Plus className="h-4 w-4" />
-          Create Group
-        </Link>
+        <div className="flex items-center gap-2">
+          <ReloadButton onReload={fetchGroups} />
+          <Link href="/admin/routing/prefix-groups/new" className="flex items-center gap-2 px-4 py-2 bg-white text-black rounded-lg hover:bg-zinc-200 transition-colors">
+            <Plus className="h-4 w-4" />
+            Create Group
+          </Link>
+        </div>
       </div>
 
       <div className="relative flex-1 max-w-md">

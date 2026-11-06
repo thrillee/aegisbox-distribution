@@ -7,6 +7,7 @@ import { PageHeader } from '@/components/dashboard/page-header'
 import { DataCard } from '@/components/dashboard/data-card'
 import { Button } from '@/components/ui/button'
 import { FlagSwitch, SimulatorBadge } from '@/components/dashboard/flag-switch'
+import { ReloadButton } from '@/components/dashboard/reload-button'
 
 async function getMNO(id: string) {
   try {
@@ -89,12 +90,15 @@ export default async function MNODetailPage({ params }: { params: Promise<{ id: 
         title={mno.name}
         description={`+${mno.countryCode} ${mno.networkCode || ''}`}
         actions={
-          <Link href={`/admin/mnos/${id}/connections/new`}>
-            <Button className="bg-white text-black hover:bg-zinc-200">
-              <Plus className="h-4 w-4" />
-              Add Connection
-            </Button>
-          </Link>
+          <>
+            <ReloadButton />
+            <Link href={`/admin/mnos/${id}/connections/new`}>
+              <Button className="bg-white text-black hover:bg-zinc-200">
+                <Plus className="h-4 w-4" />
+                Add Connection
+              </Button>
+            </Link>
+          </>
         }
       />
 

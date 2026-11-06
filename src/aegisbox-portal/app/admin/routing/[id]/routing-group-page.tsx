@@ -1,12 +1,13 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { ArrowLeft, Plus, MapPin, ArrowRight, Settings, Edit, Trash2, Loader2 } from 'lucide-react'
 import { Dialog, Transition } from '@headlessui/react'
 import { Fragment } from 'react'
 import { TrafficSplit } from '@/components/routing/traffic-split'
+import { ReloadButton } from '@/components/dashboard/reload-button'
 
 interface Assignment {
   id: number
@@ -56,6 +57,11 @@ export function RoutingGroupPage({ initialGroup }: RoutingGroupPageProps) {
     description: group.description || '',
     status: group.status || 'active',
   })
+
+  // Reload re-renders the server page; take the fresh group it passes down.
+  useEffect(() => {
+    setGroup(initialGroup)
+  }, [initialGroup])
 
   const handleSave = async () => {
     setLoading(true)
@@ -141,6 +147,7 @@ export function RoutingGroupPage({ initialGroup }: RoutingGroupPageProps) {
             </>
           ) : (
             <>
+              <ReloadButton />
               <button
                 onClick={() => setIsEditing(true)}
                 className="flex items-center gap-2 px-4 py-2 border border-white/10 rounded-xl text-zinc-400 hover:text-white hover:bg-white/5 transition-colors"

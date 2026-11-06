@@ -9,6 +9,7 @@ import { DataCard } from '@/components/dashboard/data-card'
 import { Button } from '@/components/ui/button'
 import { ManualDlrForm } from '@/components/messages/manual-dlr-form'
 import { formatMoney } from '@/lib/money'
+import { ReloadButton } from '@/components/dashboard/reload-button'
 
 interface Message {
   id: number
@@ -169,6 +170,7 @@ export default function MessagesPage() {
               <BarChart2 className="h-4 w-4" />
               Analytics
             </Link>
+            <ReloadButton onReload={fetchMessages} loading={loading} />
             <Button
               variant="outline"
               onClick={() => setShowFilters(!showFilters)}

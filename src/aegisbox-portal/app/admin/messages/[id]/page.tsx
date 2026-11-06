@@ -10,6 +10,7 @@ import { Button } from '@/components/ui/button'
 import { PageLoadingSkeleton } from '@/components/routing/loading-components'
 import { ManualDlrForm, isAwaitingFinalDlr, isAwaitingUnconfirmed } from '@/components/messages/manual-dlr-form'
 import { formatMoney } from '@/lib/money'
+import { ReloadButton } from '@/components/dashboard/reload-button'
 
 interface Message {
   id: number
@@ -150,6 +151,7 @@ export default function MessageDetailPage() {
         description={`Message ID: ${message.id}`}
         actions={
           <div className="flex items-center gap-2">
+            <ReloadButton onReload={fetchMessage} />
             {hasPendingDlr && !showDlrForm && (
               <Button
                 onClick={() => {

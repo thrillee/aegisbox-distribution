@@ -14,6 +14,7 @@ import {
 import { DataCard } from '@/components/dashboard/data-card'
 import { PageLoadingSkeleton } from '@/components/routing/loading-components'
 import { formatMoney } from '@/lib/money'
+import { ReloadButton } from '@/components/dashboard/reload-button'
 
 interface AnalyticsData {
   overview: {
@@ -163,6 +164,7 @@ export default function ServiceProviderAnalyticsPage({ params }: { params: Promi
           <p className="text-zinc-400 mt-1">Performance metrics and usage statistics</p>
         </div>
         <div className="flex items-center gap-2">
+          <ReloadButton onReload={fetchAnalytics} />
           {[7, 14, 30, 90].map(d => (
             <button
               key={d}

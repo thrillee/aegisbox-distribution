@@ -7,6 +7,7 @@ import { DataCard } from '@/components/dashboard/data-card'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 import { PageLoadingSkeleton } from '@/components/routing/loading-components'
+import { ReloadButton } from '@/components/dashboard/reload-button'
 
 interface Assignment {
   id: number
@@ -244,10 +245,13 @@ export default function SenderTemplateAssignmentsPage() {
         title="Sender-Template Assignments"
         description="Link OTP senders to message templates"
         actions={
-          <Button onClick={openCreateModal} className="bg-white text-black hover:bg-zinc-200">
-            <Plus className="h-4 w-4 mr-2" />
-            New Assignment
-          </Button>
+          <>
+            <ReloadButton onReload={fetchAssignments} />
+            <Button onClick={openCreateModal} className="bg-white text-black hover:bg-zinc-200">
+              <Plus className="h-4 w-4 mr-2" />
+              New Assignment
+            </Button>
+          </>
         }
       />
 

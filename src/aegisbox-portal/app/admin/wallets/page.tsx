@@ -7,6 +7,7 @@ import { PageHeader } from '@/components/dashboard/page-header'
 import { DataCard } from '@/components/dashboard/data-card'
 import { Button } from '@/components/ui/button'
 import { formatMoney } from '@/lib/money'
+import { ReloadButton } from '@/components/dashboard/reload-button'
 
 function getTransactionBadge(type: string) {
   const styles: Record<string, { bg: string; text: string; icon: any }> = {
@@ -100,6 +101,7 @@ export default async function WalletsPage() {
       <PageHeader
         title="Wallets"
         description="Manage service provider wallets and transactions"
+        actions={<ReloadButton />}
       />
 
       <div className="grid gap-4 md:grid-cols-4">

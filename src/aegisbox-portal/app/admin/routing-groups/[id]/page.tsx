@@ -4,6 +4,7 @@ import { use, useState, useEffect } from 'react'
 import Link from 'next/link'
 import { ArrowLeft, Loader2, Route, Users, Globe, Settings, ChevronRight, Plus } from 'lucide-react'
 import { PageLoadingSkeleton } from '@/components/routing/loading-components'
+import { ReloadButton } from '@/components/dashboard/reload-button'
 
 function getStatusBadge(status: string) {
   const styles: Record<string, string> = {
@@ -101,6 +102,7 @@ export default function RoutingGroupDetailPage({ params }: PageProps) {
           </div>
           <p className="text-zinc-400 mt-1">{routingGroup.reference}</p>
         </div>
+        <ReloadButton onReload={fetchRoutingGroupData} />
         <button className="flex items-center gap-2 px-4 py-2 bg-white text-black rounded-lg hover:bg-zinc-200 transition-colors">
           <Settings className="h-4 w-4" />
           Edit

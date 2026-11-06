@@ -18,6 +18,7 @@ import (
 	"strconv"
 	"syscall"
 
+	"github.com/jackc/pgx/v5/pgxpool"
 	"golang.org/x/sync/errgroup"
 
 	"github.com/thrillee/aegisbox/internal/app"
@@ -37,7 +38,7 @@ func main() {
 	// The simulated MNO needs no database or gateway configuration.
 	if cmd == "mnosim" {
 		app.SetupLogging(os.Getenv("LOG_LEVEL"))
-		if err := runMNOSim(ctx, ""); err != nil {
+		if err := runMNOSim(ctx); err != nil {
 			slog.Error("Simulated MNO stopped with an error", slog.Any("error", err))
 			os.Exit(1)
 		}
@@ -77,7 +78,7 @@ func run(ctx context.Context, cmd string, cfg *config.Config) error {
 			// The simulator is a test aid: if it cannot start, log it and keep the API and
 			// gateway running rather than taking real traffic down with it.
 			g.Go(func() error {
-				if err := runMNOSim(gctx, embeddedMNOSimAddr); err != nil {
+				if err := runEmbeddedMNOSim(gctx, cfg.DatabaseURL); err != nil {
 					slog.Error("Simulated MNO stopped with an error; API and gateway keep running", slog.Any("error", err))
 				}
 				return nil
@@ -100,12 +101,12 @@ func mnosimEnabled() bool {
 	return err == nil && v
 }
 
-// runMNOSim runs the simulated MNO until ctx is cancelled. defaultAddr, when not empty,
-// replaces the listen address if MNOSIM_ADDR is not set.
-func runMNOSim(ctx context.Context, defaultAddr string) error {
+// loadMNOSimConfig reads the MNOSIM_* settings. defaultAddr, when not empty, replaces the listen
+// address if MNOSIM_ADDR is not set.
+func loadMNOSimConfig(ctx context.Context, defaultAddr string) (mnosim.Config, error) {
 	cfg, err := mnosim.LoadConfig()
 	if err != nil {
-		return err
+		return cfg, err
 	}
 	if defaultAddr != "" && os.Getenv("MNOSIM_ADDR") == "" {
 		cfg.Addr = defaultAddr
@@ -113,9 +114,52 @@ func runMNOSim(ctx context.Context, defaultAddr string) error {
 	if os.Getenv("MNOSIM_PASSWORD") == "" {
 		slog.WarnContext(ctx, "MNOSIM_PASSWORD is not set; the simulated MNO uses its default password")
 	}
+	return cfg, nil
+}
+
+// runMNOSim runs the simulated MNO on its own (the "mnosim" command) until ctx is cancelled.
+func runMNOSim(ctx context.Context) error {
+	cfg, err := loadMNOSimConfig(ctx, "")
+	if err != nil {
+		return err
+	}
 	srv, err := mnosim.New(cfg)
 	if err != nil {
 		return err
 	}
 	return srv.Run(ctx)
+}
+
+// runEmbeddedMNOSim records the simulator in the database (MNO, SMPP connection, and the routes
+// and prices MNOSIM_ROUTING_GROUPS asks for), then runs it until ctx is cancelled. A failed
+// registration is logged and the simulator still starts, so it can be registered by hand.
+func runEmbeddedMNOSim(ctx context.Context, databaseURL string) error {
+	cfg, err := loadMNOSimConfig(ctx, embeddedMNOSimAddr)
+	if err != nil {
+		return err
+	}
+	srv, err := mnosim.New(cfg)
+	if err != nil {
+		return err
+	}
+	if err := registerMNOSim(ctx, databaseURL, cfg); err != nil {
+		slog.ErrorContext(ctx, "Could not register the simulated MNO in the database", slog.Any("error", err))
+	}
+	return srv.Run(ctx)
+}
+
+func registerMNOSim(ctx context.Context, databaseURL string, cfg mnosim.Config) error {
+	pool, err := pgxpool.New(ctx, databaseURL)
+	if err != nil {
+		return err
+	}
+	defer pool.Close()
+	price := os.Getenv("MNOSIM_PRICE")
+	if price == "" {
+		price = "0.01"
+	}
+	return mnosim.Register(ctx, pool, cfg, mnosim.Registration{
+		RoutingGroupRefs: mnosim.ParseRoutingGroupRefs(os.Getenv("MNOSIM_ROUTING_GROUPS")),
+		Price:            price,
+	})
 }
