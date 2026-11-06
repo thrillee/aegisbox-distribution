@@ -325,13 +325,15 @@ func (q *Queries) InsertLinkScan(ctx context.Context, arg InsertLinkScanParams) 
 const insertLinkScanJob = `-- name: InsertLinkScanJob :exec
 INSERT INTO link_scan_jobs (
     message_id, service_provider_id, url, normalized_url, host, group_key,
-    link_kind, scan_mode, mode_reason, status, completed_at, priority
+    link_kind, scan_mode, mode_reason, status, completed_at, priority, next_attempt_at
 ) VALUES (
     $1, $2, $3, $4,
     $5, $6, $7, $8,
     $9, $10::TEXT,
     CASE WHEN $10::TEXT = 'skipped' THEN NOW() ELSE NULL END,
-    $11::SMALLINT
+    $11::SMALLINT,
+    -- A random wait before the link is opened (LINKSCAN_VISIT_DELAY_MIN/MAX); 0 means now.
+    NOW() + $12::INT * INTERVAL '1 millisecond'
 )
 ON CONFLICT (message_id, normalized_url) DO NOTHING
 `
@@ -348,6 +350,7 @@ type InsertLinkScanJobParams struct {
 	ModeReason        *string `json:"modeReason"`
 	Status            string  `json:"status"`
 	Priority          int16   `json:"priority"`
+	DelayMs           int32   `json:"delayMs"`
 }
 
 func (q *Queries) InsertLinkScanJob(ctx context.Context, arg InsertLinkScanJobParams) error {
@@ -363,6 +366,7 @@ func (q *Queries) InsertLinkScanJob(ctx context.Context, arg InsertLinkScanJobPa
 		arg.ModeReason,
 		arg.Status,
 		arg.Priority,
+		arg.DelayMs,
 	)
 	return err
 }

@@ -21,13 +21,15 @@ WHERE service_provider_id = sqlc.arg(service_provider_id)
 -- name: InsertLinkScanJob :exec
 INSERT INTO link_scan_jobs (
     message_id, service_provider_id, url, normalized_url, host, group_key,
-    link_kind, scan_mode, mode_reason, status, completed_at, priority
+    link_kind, scan_mode, mode_reason, status, completed_at, priority, next_attempt_at
 ) VALUES (
     sqlc.arg(message_id), sqlc.arg(service_provider_id), sqlc.arg(url), sqlc.arg(normalized_url),
     sqlc.arg(host), sqlc.arg(group_key), sqlc.arg(link_kind), sqlc.arg(scan_mode),
     sqlc.narg(mode_reason), sqlc.arg(status)::TEXT,
     CASE WHEN sqlc.arg(status)::TEXT = 'skipped' THEN NOW() ELSE NULL END,
-    sqlc.arg(priority)::SMALLINT
+    sqlc.arg(priority)::SMALLINT,
+    -- A random wait before the link is opened (LINKSCAN_VISIT_DELAY_MIN/MAX); 0 means now.
+    NOW() + sqlc.arg(delay_ms)::INT * INTERVAL '1 millisecond'
 )
 ON CONFLICT (message_id, normalized_url) DO NOTHING;
 

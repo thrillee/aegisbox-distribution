@@ -2,7 +2,9 @@ package linkscan
 
 import (
 	"context"
+	"fmt"
 	"testing"
+	"time"
 
 	"github.com/thrillee/aegisbox/internal/database"
 )
@@ -125,5 +127,42 @@ func TestEnqueuer_AlwaysVisitSkipsSampling(t *testing.T) {
 	}
 	if len(q.jobs) != len(tokens) {
 		t.Fatalf("want %d jobs, got %d", len(tokens), len(q.jobs))
+	}
+}
+
+func TestEnqueuer_VisitDelay(t *testing.T) {
+	q := &fakeQ{simulator: true}
+	e := NewEnqueuer(q, Config{Enabled: true, SamplePerHour: 100, VisitDelayMin: 2 * time.Second, VisitDelayMax: 5 * time.Second})
+	for i := 0; i < 50; i++ {
+		_ = e.MessageSent(context.Background(), int64(i+1), 2, 3, fmt.Sprintf("Hi https://site%d.example.com/x", i))
+	}
+	if len(q.jobs) != 50 {
+		t.Fatalf("want 50 jobs, got %d", len(q.jobs))
+	}
+	seen := map[int32]bool{}
+	for _, j := range q.jobs {
+		if j.DelayMs < 2000 || j.DelayMs > 5000 {
+			t.Fatalf("delay %dms outside 2s to 5s", j.DelayMs)
+		}
+		seen[j.DelayMs] = true
+	}
+	if len(seen) < 2 {
+		t.Fatal("delays should vary")
+	}
+}
+
+func TestEnqueuer_VisitDelaySkipsHeldAndNonVisit(t *testing.T) {
+	e := NewEnqueuer(&fakeQ{}, Config{VisitDelayMin: time.Second, VisitDelayMax: 3 * time.Second})
+	if d := e.visitDelay(ModeVisit, 1); d != 0 {
+		t.Fatalf("held message links must not wait, got %v", d)
+	}
+	if d := e.visitDelay(ModeReputation, 0); d != 0 {
+		t.Fatalf("links that are not opened must not wait, got %v", d)
+	}
+	if d := NewEnqueuer(&fakeQ{}, Config{}).visitDelay(ModeVisit, 0); d != 0 {
+		t.Fatalf("no delay configured, got %v", d)
+	}
+	if d := NewEnqueuer(&fakeQ{}, Config{VisitDelayMin: 4 * time.Second, VisitDelayMax: 2 * time.Second}).visitDelay(ModeVisit, 0); d != 4*time.Second {
+		t.Fatalf("max below min should use min, got %v", d)
 	}
 }
