@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"math/rand/v2"
+	"time"
 
 	"github.com/thrillee/aegisbox/internal/database"
 )
@@ -27,6 +29,26 @@ type Config struct {
 	// AlwaysVisit opens every visitable link: no sampling here, and the worker does not reuse an
 	// earlier result for the same URL. Admin allow and block lists still decide first.
 	AlwaysVisit bool `envconfig:"LINKSCAN_ALWAYS_VISIT" default:"false"`
+	// VisitDelayMin and VisitDelayMax make a link wait a random time in that range before it is
+	// opened, so visits don't follow every send at once. Links of held messages (Phase 2 hold or
+	// block, waiting for a verdict before sending) are never delayed. Both 0 means no delay.
+	VisitDelayMin time.Duration `envconfig:"LINKSCAN_VISIT_DELAY_MIN" default:"0s"`
+	VisitDelayMax time.Duration `envconfig:"LINKSCAN_VISIT_DELAY_MAX" default:"0s"`
+}
+
+// maxVisitDelay caps the random delay; a longer wait would only fill the queue.
+const maxVisitDelay = 24 * time.Hour
+
+// visitDelay picks the wait before a link of this mode and priority is opened.
+func (e *Enqueuer) visitDelay(mode string, priority int16) time.Duration {
+	if mode != ModeVisit || priority > 0 || e.cfg.VisitDelayMax <= 0 {
+		return 0
+	}
+	lo, hi := e.cfg.VisitDelayMin, e.cfg.VisitDelayMax
+	if hi <= lo {
+		return lo
+	}
+	return lo + time.Duration(rand.Int64N(int64(hi-lo)+1))
 }
 
 // Querier is the part of database.Querier the enqueuer uses.
@@ -53,6 +75,8 @@ func NewEnqueuer(q Querier, cfg Config) *Enqueuer {
 	if cfg.SamplePerHour < 0 {
 		cfg.SamplePerHour = 0
 	}
+	cfg.VisitDelayMin = min(max(cfg.VisitDelayMin, 0), maxVisitDelay)
+	cfg.VisitDelayMax = min(max(cfg.VisitDelayMax, 0), maxVisitDelay)
 	return &Enqueuer{q: q, cfg: cfg}
 }
 
@@ -159,6 +183,7 @@ func (e *Enqueuer) insert(ctx context.Context, messageID int64, spID int32, l Li
 		ModeReason:        reasonPtr,
 		Status:            status,
 		Priority:          priority,
+		DelayMs:           int32(e.visitDelay(mode, priority) / time.Millisecond),
 	}); err != nil {
 		return "", fmt.Errorf("queue link %s for message %d: %w", l.Normalized, messageID, err)
 	}
