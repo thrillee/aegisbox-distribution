@@ -29,6 +29,7 @@ import { Button } from "@/components/ui/button";
 import { PageLoadingSkeleton } from "@/components/routing/loading-components";
 import { formatMoney } from "@/lib/money";
 import { reportDate, reportDayStart } from "@/lib/time";
+import { ReloadButton } from "@/components/dashboard/reload-button";
 
 interface Analytics {
   overview: {
@@ -141,6 +142,7 @@ export default function AnalyticsPage() {
         description="Track message delivery performance and trends"
         actions={
           <div className="flex items-center gap-2">
+            <ReloadButton onReload={fetchAnalytics} />
             <input
               type="date"
               value={filters.date_from}

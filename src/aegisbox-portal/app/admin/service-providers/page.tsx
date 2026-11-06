@@ -9,6 +9,7 @@ import { DataCard } from '@/components/dashboard/data-card'
 import { Button } from '@/components/ui/button'
 import { formatMoney } from '@/lib/money'
 import { TestBadge } from '@/components/dashboard/flag-switch'
+import { ReloadButton } from '@/components/dashboard/reload-button'
 
 async function getServiceProviders(search: string | undefined, status: string | undefined) {
   try {
@@ -117,13 +118,16 @@ export default async function ServiceProvidersPage({
         title="Service Providers"
         description="Manage your service provider accounts"
         actions={
-          <Link
-            href="/admin/service-providers/new"
-            className="flex items-center gap-2 px-4 py-2 bg-white text-black rounded-lg hover:bg-zinc-200 transition-colors"
-          >
-            <Plus className="h-4 w-4" />
-            Add Service Provider
-          </Link>
+          <>
+            <ReloadButton />
+            <Link
+              href="/admin/service-providers/new"
+              className="flex items-center gap-2 px-4 py-2 bg-white text-black rounded-lg hover:bg-zinc-200 transition-colors"
+            >
+              <Plus className="h-4 w-4" />
+              Add Service Provider
+            </Link>
+          </>
         }
       />
 

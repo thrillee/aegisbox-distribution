@@ -5,6 +5,7 @@ import { PageHeader } from '@/components/dashboard/page-header'
 import { DataCard } from '@/components/dashboard/data-card'
 import { reportDateTime } from '@/lib/time'
 import { WhitelistForm, RemoveButton } from './whitelist-client'
+import { ReloadButton } from '@/components/dashboard/reload-button'
 
 export const dynamic = 'force-dynamic'
 
@@ -32,6 +33,7 @@ export default async function SimulatorWhitelistPage() {
       <PageHeader
         title="Simulator Whitelist"
         description="Numbers that get real delivery. A test customer's message to one of these numbers goes through a real network instead of the simulated MNO, so the phone receives it and the real DLR comes back."
+        actions={<ReloadButton />}
       />
 
       <DataCard title="Add a number" subtitle="The test customer's routing group must also contain a real route for the number's network; the customer is charged its normal price.">

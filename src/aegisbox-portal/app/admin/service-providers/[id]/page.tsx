@@ -10,6 +10,7 @@ import { PortalAccessSettings } from '@/components/service-providers/portal-acce
 import { RouteSenderPoolSetting } from '@/components/service-providers/route-sender-pool-setting'
 import { LinkScanSettings } from '@/components/service-providers/link-scan-settings'
 import { formatMoney } from '@/lib/money'
+import { ReloadButton } from '@/components/dashboard/reload-button'
 
 function getStatusBadge(status: string) {
   const styles: Record<string, string> = {
@@ -104,6 +105,8 @@ export default function ServiceProviderDetailPage({ params }: { params: Promise<
   const [editingRoutingGroup, setEditingRoutingGroup] = useState<{ id: number; type: 'smpp' | 'http' } | null>(null)
   const [selectedRoutingGroup, setSelectedRoutingGroup] = useState<string>('')
   const [savingRoutingGroup, setSavingRoutingGroup] = useState(false)
+  // Bumped by Reload so the open tab remounts and fetches its own data again.
+  const [reloadKey, setReloadKey] = useState(0)
   const resolvedParams = use(params)
 
   useEffect(() => {
@@ -252,6 +255,12 @@ export default function ServiceProviderDetailPage({ params }: { params: Promise<
           <p className="text-zinc-400">{provider.email}</p>
         </div>
         {getStatusBadge(provider.status)}
+        <ReloadButton
+          onReload={async () => {
+            setReloadKey((k) => k + 1)
+            await fetchProviderData()
+          }}
+        />
       </div>
 
       <div className="flex items-center gap-4 text-sm">
@@ -282,7 +291,7 @@ export default function ServiceProviderDetailPage({ params }: { params: Promise<
       </div>
 
       {activeTab === 'analytics' && (
-        <AnalyticsTab providerId={provider.id} />
+        <AnalyticsTab key={reloadKey} providerId={provider.id} />
       )}
 
       {activeTab === 'overview' && (
@@ -750,6 +759,7 @@ export default function ServiceProviderDetailPage({ params }: { params: Promise<
 
       {activeTab === 'wallet' && (
         <WalletTransactionsTab
+          key={reloadKey}
           providerId={provider.id}
           currency={provider.currency}
           walletBalance={provider.walletBalance}
@@ -757,27 +767,27 @@ export default function ServiceProviderDetailPage({ params }: { params: Promise<
       )}
 
       {activeTab === 'http-pricing' && (
-        <HttpPricingTab providerId={provider.id} />
+        <HttpPricingTab key={reloadKey} providerId={provider.id} />
       )}
 
       {activeTab === 'wallet-pricing' && (
-        <WalletPricingTab providerId={provider.id} />
+        <WalletPricingTab key={reloadKey} providerId={provider.id} />
       )}
 
       {activeTab === 'dlr' && (
-        <AutoDlrSettings providerId={provider.id} />
+        <AutoDlrSettings key={reloadKey} providerId={provider.id} />
       )}
 
       {activeTab === 'portal-access' && (
-        <PortalAccessSettings providerId={provider.id} />
+        <PortalAccessSettings key={reloadKey} providerId={provider.id} />
       )}
 
       {activeTab === 'link-check' && (
-        <LinkScanSettings providerId={provider.id} />
+        <LinkScanSettings key={reloadKey} providerId={provider.id} />
       )}
 
       {activeTab === 'sender-pool' && (
-        <RouteSenderPoolSetting providerId={provider.id} />
+        <RouteSenderPoolSetting key={reloadKey} providerId={provider.id} />
       )}
     </div>
   )

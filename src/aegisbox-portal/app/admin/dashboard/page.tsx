@@ -1,5 +1,5 @@
 import { Suspense } from 'react'
-import { RefreshCw } from 'lucide-react'
+import { ReloadButton } from '@/components/dashboard/reload-button'
 import { db } from '@/lib/db'
 import { reportDate, reportDayStart } from '@/lib/time'
 import { serviceProviders, messages, mnoConnections, wallets, walletTransactions } from '@/lib/schema'
@@ -251,10 +251,7 @@ export default async function AdminDashboardPage() {
         title="Dashboard"
         description="Welcome back! Here's what's happening with your platform."
         actions={
-          <button className="flex items-center gap-2 px-4 py-2 bg-zinc-800 border border-white/10 rounded-lg text-zinc-300 hover:bg-zinc-700 hover:text-white transition-colors">
-            <RefreshCw className="h-4 w-4" />
-            Refresh
-          </button>
+          <ReloadButton />
         }
       />
 

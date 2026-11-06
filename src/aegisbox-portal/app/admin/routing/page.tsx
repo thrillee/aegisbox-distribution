@@ -8,6 +8,7 @@ import { RoutingRulesList } from './routing-rules-list'
 import { PageHeader } from '@/components/dashboard/page-header'
 import { DataCard } from '@/components/dashboard/data-card'
 import { Button } from '@/components/ui/button'
+import { ReloadButton } from '@/components/dashboard/reload-button'
 
 async function getRoutingGroupsData() {
   try {
@@ -138,6 +139,7 @@ export default async function RoutingPage({ searchParams }: PageProps) {
         description="Configure message routing rules between prefixes and MNOs"
         actions={
           <div className="flex items-center gap-2">
+            <ReloadButton />
             <Link
               href="/admin/routing/prefix-groups"
               className="flex items-center gap-2 px-4 py-2 border border-white/10 rounded-lg text-zinc-400 hover:text-white hover:bg-white/5 transition-colors"

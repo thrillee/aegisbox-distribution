@@ -8,6 +8,7 @@ import { DataCard } from '@/components/dashboard/data-card'
 import { Button } from '@/components/ui/button'
 import { DLR_STATUSES } from '@/components/messages/manual-dlr-form'
 import { reportDate } from '@/lib/time'
+import { ReloadButton } from '@/components/dashboard/reload-button'
 
 interface Summary {
   accepted: number
@@ -98,6 +99,7 @@ export default function PendingDlrPage() {
       <PageHeader
         title="Pending DLRs"
         description="Send a DLR to a customer for messages that never got one from the upstream"
+        actions={<ReloadButton onReload={load} />}
       />
 
       <DataCard title="Messages">

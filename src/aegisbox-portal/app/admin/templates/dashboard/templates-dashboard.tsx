@@ -2,6 +2,7 @@
 
 import Link from 'next/link'
 import { FileText, Shield, MessageSquare, ArrowRight, Plus, Settings } from 'lucide-react'
+import { ReloadButton } from '@/components/dashboard/reload-button'
 
 interface TemplatesStats {
   total: number
@@ -71,6 +72,7 @@ export function TemplatesDashboard({ templatesStats, otpStats, recentActivity }:
             Overview of all message templates and OTP configurations
           </p>
         </div>
+        <ReloadButton />
       </div>
 
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">

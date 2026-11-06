@@ -8,6 +8,7 @@ import { DataCard } from '@/components/dashboard/data-card'
 import { HealthScoreBadge } from '@/components/routing/health-score-badge'
 import { RouteStatusBadge } from '@/components/routing/route-status-badge'
 import { SenderStatusBadge } from '@/components/routing/sender-status-badge'
+import { ReloadButton } from '@/components/dashboard/reload-button'
 
 async function getHealthStats() {
   try {
@@ -140,6 +141,7 @@ export default async function HealthMonitoringPage() {
         description="Monitor route and sender ID health metrics across your routing infrastructure"
         actions={
           <div className="flex items-center gap-2">
+            <ReloadButton />
             <Link
               href="/admin/routing/health/routes"
               className="flex items-center gap-2 px-4 py-2 border border-white/10 rounded-lg text-zinc-400 hover:text-white hover:bg-white/5 transition-colors"
