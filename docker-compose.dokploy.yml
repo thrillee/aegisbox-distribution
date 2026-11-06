@@ -52,6 +52,9 @@ services:
   # and sends delivery receipts, without sending anything. Internal only: no published port. Add it
   # in the portal as an MNO marked as simulator, with an SMPP connection to host mnosim, port 2776;
   # the gateway only lets customers marked as test use it.
+  # Simpler alternative: set MNOSIM_ENABLED=true (and MNOSIM_PASSWORD) in the Environment tab and
+  # the aegisbox container runs the simulator itself on 127.0.0.1:2776; register the connection
+  # as host 127.0.0.1, port 2776. Use one or the other, not both.
   mnosim:
     build:
       context: ./src/aegisbox
