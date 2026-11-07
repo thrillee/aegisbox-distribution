@@ -20,9 +20,14 @@ aegisbox backend calls it, scores the result and stores it; this service has no 
 * GET only: form submissions and script POSTs are blocked. No WebSockets, WebRTC, service workers,
   QUIC, popups, dialogs, camera, microphone, location or notifications. Fresh context per URL,
   20 s per URL, 25 MB per scan, browser restarted every 50 scans.
-* Honest: mobile Chrome user agent plus `AegisboxLinkCheck/1.0`, one fixed IP, no click simulation.
-  Shortener links are expanded with a HEAD request (bot user agent) so the short link itself is
-  not loaded in the browser.
+* Realistic per-scan browser profile (`src/devices.js`): a random mobile device (Playwright's
+  Android phones plus models common in West Africa) with a random browser user agent (mobile
+  Chrome, Samsung Internet, Edge, Opera, Brave, DuckDuckGo, Vivaldi, Kiwi), Chrome version capped
+  by the Android version, viewport, DPR, locale and time zone. No scanner identity in the user
+  agent. The link is opened with a real click: it is placed on a blank page and clicked with the
+  mouse, then the navigation is followed. Shortener links are expanded with a HEAD request in a
+  browser like user agent so the short link itself is not loaded in the browser.
+  One fixed IP (the server's own) still applies.
 * Container: non root (`pwuser`), read only root filesystem with a `/tmp` tmpfs, all capabilities
   dropped, `no-new-privileges`, memory and CPU limits, Chromium sandbox **on** via
   `seccomp-chromium.json` (Docker's default profile plus `clone`, `unshare`, `setns`, `chroot`).

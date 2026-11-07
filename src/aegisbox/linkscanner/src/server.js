@@ -73,6 +73,8 @@ class BrowserPool {
           headless: true,
           chromiumSandbox: this.cfg.sandbox,
           args: [
+            // Do not expose navigator.webdriver.
+            '--disable-blink-features=AutomationControlled',
             '--disable-quic', // QUIC (UDP) would not go through the proxy
             '--force-webrtc-ip-handling-policy=disable_non_proxied_udp',
             '--disable-background-networking',

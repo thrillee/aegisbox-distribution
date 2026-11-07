@@ -1,25 +1,81 @@
 // Opens one link in a fresh, locked-down browser context and reports what the page does.
 'use strict';
 
-const http = require('node:http');
-const https = require('node:https');
-const { Guard, GuardError, startProxy } = require('./guard');
-
-const MOBILE_UA =
-  'Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) ' +
-  'Chrome/126.0.0.0 Mobile Safari/537.36 AegisboxLinkCheck/1.0';
-const BOT_UA = 'AegisboxLinkCheck/1.0 (+link safety check; no clicks counted)';
+const { Guard, startProxy } = require('./guard');
+const { randomProfile } = require('./devices');
 
 const MAX_NAVIGATIONS = 10;
 const TEXT_LIMIT = 20 * 1024;
 
-// Link shorteners: the destination is read from the shortener's redirect with a plain HEAD request
-// (bot user agent, redirects not followed) and the browser opens the destination directly, so the
-// scan does not load the shortener's page in a browser.
+// Link shorteners: the browser follows the shortener's redirect exactly like a person
+// tapping the link; the scanner flags it so the scorer ignores the domain change.
 const SHORTENERS = new Set([
   'bit.ly', 'bitly.com', 'tinyurl.com', 't.co', 'goo.gl', 'ow.ly', 'is.gd', 'buff.ly', 'cutt.ly',
   'rb.gy', 'shorturl.at', 't.ly', 'rebrand.ly', 'tiny.cc', 's.id', 'bit.do', 'lnkd.in', 'v.gd',
 ]);
+
+// Fingerprint patches that run before any page script. The stock headless build reveals
+// navigator.webdriver and lacks navigator.userAgentData and window.chrome, which real
+// Chrome on Android always has; these are rebuilt to match the profile's user agent.
+function stealthScript() {
+  return () => {
+    const ua = navigator.userAgent;
+    const full = (/Chrome\/([0-9.]+)/.exec(ua) || [])[1] || '';
+    const major = full.split('.')[0] || '';
+    const mobile = /\bMobile\b/.test(ua) || /Android/.test(ua);
+    const and = (/Android ([0-9.]+)/.exec(ua) || [])[1] || '';
+    const model = (() => {
+      if (!/Android/.test(ua)) return '';
+      const i = ua.indexOf(' Android ');
+      const rest = ua.slice(i + 9);
+      const semi = rest.indexOf('; ');
+      const seg = semi < 0 ? '' : rest.slice(semi + 2);
+      const end = seg.indexOf(') ');
+      return end < 0 ? '' : seg.slice(0, end).trim();
+    })();
+
+    try {
+      Object.defineProperty(Object.getPrototypeOf(navigator), 'webdriver', { get: () => false, configurable: true });
+    } catch {}
+    try {
+      delete navigator.webdriver;
+      Object.defineProperty(navigator, 'webdriver', { get: () => false, configurable: true });
+    } catch {}
+
+    // Client hints (real Chrome for Android always exposes these).
+    if (!navigator.userAgentData && major) {
+      const brand =
+        /SamsungBrowser/.test(ua) ? { brand: 'Samsung Internet', version: major } :
+        /EdgA\//.test(ua) ? { brand: 'Microsoft Edge', version: major } :
+        { brand: 'Google Chrome', version: major };
+      const brands = [{ brand: 'Chromium', version: major }, brand, { brand: 'Not A(Brand', version: '99' }];
+      const data = { brands, mobile, platform: 'Android', toJSON: () => data };
+      const high = {};
+      Object.defineProperty(navigator, 'userAgentData', { get: () => data, configurable: true });
+      data.getHighEntropyValues = (hints) =>
+        Promise.resolve(Object.fromEntries(hints.map((h) => [h, high[h]])));
+      high.fullVersionList = brands.map((b) => ({ ...b, version: full || b.version }));
+      high.uaFullVersion = full;
+      high.model = model;
+      high.platformVersion = and ? (Number(and.split('.')[0]) || and) + '.0.0' : '';
+      high.architecture = 'arm';
+      high.bitness = '64';
+      high.mobile = mobile;
+      high.platform = 'Android';
+    }
+
+    // window.chrome (present in real Chrome, missing in headless).
+    if (!window.chrome) {
+      const empty = () => {};
+      window.chrome = {
+        app: { isInstalled: false, getIsInstalled: empty, installState: () => 'not_installed', runningState: () => 'cannot_run' },
+        runtime: {},
+        csi: () => ({}),
+        loadTimes: () => ({}),
+      };
+    }
+  };
+}
 
 // Runs inside the page: forms and input fields (types, names, labels; never values).
 function collectForms() {
@@ -50,46 +106,51 @@ function collectForms() {
   return forms;
 }
 
-// HEAD request through the guard, without following redirects. Returns the Location, if any.
-function headLocation(url, guard, timeoutMs = 8000) {
-  return new Promise((resolve, reject) => {
-    const u = new URL(url);
-    const lib = u.protocol === 'https:' ? https : http;
-    const port = Number(u.port || (u.protocol === 'https:' ? 443 : 80));
-    const req = lib.request(
-      {
-        method: 'HEAD',
-        hostname: u.hostname,
-        port,
-        path: u.pathname + u.search,
-        headers: { 'User-Agent': BOT_UA },
-        timeout: timeoutMs,
-        lookup: (_h, opts, cb) => {
-          guard
-            .resolve(u.hostname, port)
-            .then((ip) => (opts && opts.all ? cb(null, [{ address: ip, family: ip.includes(':') ? 6 : 4 }]) : cb(null, ip, ip.includes(':') ? 6 : 4)))
-            .catch(cb);
-        },
-      },
-      (res) => {
-        res.resume();
-        const loc = res.headers.location;
-        resolve({ status: res.statusCode, location: loc ? new URL(loc, url).toString() : null });
-      },
-    );
-    req.on('timeout', () => req.destroy(new Error('timeout')));
-    req.on('error', reject);
-    req.end();
-  });
+/**
+ * Full e2e click: the link is placed on a blank page and really activated like a person
+ * does (touch events on phones, mouse otherwise), so the navigation happens through the
+ * browser's normal link activation path with no referrer. Resolves with the response.
+ */
+async function openByClick(page, target, cfg) {
+  await page.evaluate((href) => {
+    const a = document.createElement('a');
+    a.id = 'scan-target';
+    a.href = href;
+    a.textContent = 'Open link';
+    (document.body || document.documentElement).appendChild(a);
+  }, target);
+
+  // A short pause before the click, like a person glancing at the page.
+  await new Promise((r) => setTimeout(r, 150 + Math.floor(Math.random() * 500)));
+
+  let navErr = null;
+  const nav = page
+    .waitForNavigation({ waitUntil: 'load', timeout: cfg.timeoutMs })
+    .catch((e) => {
+      navErr = e;
+      return null;
+    });
+  // The activation starts the navigation; the tap or click call itself may be aborted by
+  // the page change, which is fine. The navigation result arrives through `nav`.
+  await page
+    .tap('#scan-target', { timeout: Math.max(1000, Math.min(5000, cfg.timeoutMs)) })
+    .catch(() => {});
+  const response = await nav;
+  if (navErr) throw navErr;
+  if (!response) throw new Error('the click navigated without a response');
+  return response;
 }
 
 /**
+ * Opens the page the way a person does: new context with a random mobile device and
+ * browser profile, a blank page, and a click on the link itself.
  * @param {import('playwright').Browser} browser
  * @param {object} cfg scanner settings
  * @param {{url: string, blockHosts?: string[]}} job
  */
 async function scanUrl(browser, cfg, job) {
   const started = Date.now();
+  const profile = randomProfile();
   const guard = new Guard({
     blockIPs: cfg.blockIPs,
     blockHosts: [...cfg.blockHosts, ...(job.blockHosts || [])],
@@ -99,6 +160,8 @@ async function scanUrl(browser, cfg, job) {
 
   const result = {
     url: job.url,
+    device: profile.model,
+    browser: profile.browser,
     finalUrl: null,
     status: null,
     title: null,
@@ -131,41 +194,31 @@ async function scanUrl(browser, cfg, job) {
     return result;
   }
 
-  // Shortener: read the destination without loading the shortener in the browser.
-  if (SHORTENERS.has(u.hostname.replace(/^www\./, ''))) {
-    try {
-      const { status, location } = await headLocation(target, guard);
-      if (location && status >= 300 && status < 400) {
-        result.redirects.push({ url: target, status, type: 'shortener' });
-        target = location;
-        result.shortenerExpanded = true;
-      }
-    } catch (e) {
-      if (e instanceof GuardError && e.kind === 'blocked') {
-        result.blocked.push({ host: e.host, ip: e.ip, reason: e.reason });
-      }
-      // Otherwise fall back to opening the short link in the browser.
-    }
-  }
+  // Shorteners are left as they are: the browser follows the redirect exactly like a
+  // person tapping the link would, and shortenerExpanded is set below from the hops.
 
   const proxy = await startProxy(guard, { maxBytes: cfg.maxBytes });
   let context;
   try {
     context = await browser.newContext({
       proxy: { server: `http://127.0.0.1:${proxy.port}` },
-      userAgent: MOBILE_UA,
-      viewport: { width: 390, height: 844 },
-      deviceScaleFactor: 2,
-      isMobile: true,
-      hasTouch: true,
-      locale: 'en-NG',
-      timezoneId: 'Africa/Lagos',
+      userAgent: profile.userAgent,
+      viewport: profile.viewport,
+      deviceScaleFactor: profile.deviceScaleFactor,
+      screen: profile.screen,
+      isMobile: profile.isMobile,
+      hasTouch: profile.hasTouch,
+      locale: profile.locale,
+      timezoneId: profile.timezoneId,
       permissions: [], // no camera, microphone, location, notifications
       serviceWorkers: 'block',
       acceptDownloads: false, // downloads are cancelled and never saved
       javaScriptEnabled: true,
     });
-    // No WebRTC: it can open UDP connections that do not go through the proxy.
+    // No WebRTC: it can open UDP connections that do not go through the proxy. The same
+    // script patches headless browser fingerprints (navigator.webdriver, client hints,
+    // window.chrome) to match a real Chrome on the profile's device.
+    await context.addInitScript(stealthScript());
     await context.addInitScript(() => {
       for (const k of ['RTCPeerConnection', 'webkitRTCPeerConnection', 'RTCDataChannel']) {
         try { Object.defineProperty(window, k, { value: undefined, configurable: false }); } catch {}
@@ -178,6 +231,15 @@ async function scanUrl(browser, cfg, job) {
 
     let navigations = 0;
     let loopHit = false;
+    // Client hint request headers: the browser would not send sec-ch-ua* through a proxy,
+    // but a real Chrome always does. Re-add them, consistent with the profile.
+    const hintHeaders = {
+      'sec-ch-ua': profile.clientHints.brands
+        .map((b) => `"${b.brand}";v="${b.version}"`)
+        .join(', '),
+      'sec-ch-ua-mobile': profile.clientHints.mobile ? '?1' : '?0',
+      'sec-ch-ua-platform': '"Android"',
+    };
     // GET only: no form submissions or other writes, even from scripts.
     await context.route('**/*', (route) => {
       const req = route.request();
@@ -188,11 +250,24 @@ async function scanUrl(browser, cfg, job) {
         if (req.isNavigationRequest()) return route.fulfill({ status: 204, body: '' });
         return route.abort('blockedbyclient');
       }
-      return route.continue();
+      return route.continue({ headers: { ...req.headers(), ...hintHeaders } });
     });
 
     const page = await context.newPage();
     page.setDefaultTimeout(cfg.timeoutMs);
+
+    // Client hints (sec-ch-ua* headers and navigator.userAgentData) would otherwise
+    // report the actual headless browser version, not the profile's Chrome release.
+    // Set this before the first navigation; the newContext option alone is not enough.
+    const cdp = await context.newCDPSession(page);
+    await cdp
+      .send('Network.setUserAgentOverride', {
+        userAgent: profile.userAgent,
+        acceptLanguage: profile.locale,
+        platform: 'Android',
+        userAgentMetadata: profile.clientHints,
+      })
+      .catch(() => {});
 
     page.on('request', (req) => {
       if (!req.isNavigationRequest() || req.frame() !== page.mainFrame() || req.method() !== 'GET') return;
@@ -224,7 +299,7 @@ async function scanUrl(browser, cfg, job) {
 
     let response = null;
     try {
-      response = await page.goto(target, { waitUntil: 'load', timeout: cfg.timeoutMs });
+      response = await openByClick(page, target, cfg);
     } catch (e) {
       const msg = String(e.message || e);
       result.error = msg.split('\n')[0].slice(0, 300);
@@ -249,6 +324,15 @@ async function scanUrl(browser, cfg, job) {
     if (loopHit) {
       result.error = result.error || `more than ${MAX_NAVIGATIONS} redirects`;
       result.errorKind = result.errorKind || 'redirect_loop';
+    }
+
+    // A redirect through a shortener: the final domain differing from the link's is expected.
+    for (const hop of result.redirects) {
+      try {
+        if (SHORTENERS.has(new URL(hop.url).hostname.replace(/^www\./, ''))) result.shortenerExpanded = true;
+      } catch {
+        // only URLs are pushed into redirects, so this cannot happen
+      }
     }
 
     const shown = page.url();
@@ -294,4 +378,4 @@ async function scanUrl(browser, cfg, job) {
   return result;
 }
 
-module.exports = { scanUrl, MOBILE_UA, SHORTENERS };
+module.exports = { scanUrl, openByClick, stealthScript, SHORTENERS };

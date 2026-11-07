@@ -15,8 +15,9 @@ What happens to a message from a **test customer**:
    scanned (they did not go to the simulator).
 3. The gateway pulls the links out of the full text and queues them (`link_scan_jobs`).
 4. The scan worker sends each link to the `linkscanner` service, which opens it in Chromium (one
-   fixed IP, identifies itself as `AegisboxLinkCheck/1.0`, never submits forms or clicks), and gets
-   back the redirects, final page, forms, downloads and a screenshot.
+   fixed IP, a random mobile device and browser profile per scan, no scanner identity in the user
+   agent, never submits forms) and gets back the redirects, final page, forms, downloads and a
+   screenshot.
 5. The worker scores the result and stores it in `link_scans`, with every reason.
 
 Customers that are **not** test customers never use the simulator: if their routing group also has
