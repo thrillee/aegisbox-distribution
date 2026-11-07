@@ -371,6 +371,32 @@ func (q *Queries) InsertLinkScanJob(ctx context.Context, arg InsertLinkScanJobPa
 	return err
 }
 
+const getSimulatorMessageForLinkScan = `-- name: GetSimulatorMessageForLinkScan :one
+SELECT m.service_provider_id, m.short_message
+FROM messages m
+WHERE m.id = $1
+  AND EXISTS (
+      SELECT 1 FROM message_segments ms
+      JOIN mno_connections c ON c.id = ms.mno_connection_id
+      JOIN mnos n ON n.id = c.mno_id
+      WHERE ms.message_id = m.id AND n.is_simulator
+  )
+`
+
+type GetSimulatorMessageForLinkScanRow struct {
+	ServiceProviderID int32  `json:"serviceProviderId"`
+	ShortMessage      string `json:"shortMessage"`
+}
+
+// A message whose segments went out through a simulator MNO, for queuing its links once it is
+// delivered. No row: it was not simulator traffic.
+func (q *Queries) GetSimulatorMessageForLinkScan(ctx context.Context, messageID int64) (GetSimulatorMessageForLinkScanRow, error) {
+	row := q.db.QueryRow(ctx, getSimulatorMessageForLinkScan, messageID)
+	var i GetSimulatorMessageForLinkScanRow
+	err := row.Scan(&i.ServiceProviderID, &i.ShortMessage)
+	return i, err
+}
+
 const isSimulatorMNO = `-- name: IsSimulatorMNO :one
 SELECT COALESCE((SELECT is_simulator FROM mnos WHERE id = $1), FALSE)::BOOLEAN AS is_simulator
 `

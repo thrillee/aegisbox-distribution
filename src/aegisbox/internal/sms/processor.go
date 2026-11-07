@@ -188,6 +188,9 @@ type SendGate interface {
 // SetSendGate installs the link scan gate (Phase 2).
 func (p *Processor) SetSendGate(g SendGate) { p.sendGate = g }
 
+// SetDeliveredHook tells hook about each message whose final receipt is DELIVRD.
+func (p *Processor) SetDeliveredHook(h DeliveredHook) { p.dlrService.SetDeliveredHook(h) }
+
 // LinkHoldRejecter returns the rejecter the link scan gate uses for blocked messages.
 func (p *Processor) LinkHoldRejecter() *LinkHoldRejecter {
 	return &LinkHoldRejecter{q: p.dbQueries, dlr: p.dlrService, wallet: p.walletService}

@@ -36,6 +36,7 @@ const (
 	ReasonNonWeb     = "non_web"
 	ReasonActionLink = "action_link"
 	ReasonSampled    = "sampled"
+	ReasonNotClicked = "not_clicked" // outside LINKSCAN_CLICK_PERCENT
 )
 
 // MaxLinksPerMessage caps how many links one message can queue.
