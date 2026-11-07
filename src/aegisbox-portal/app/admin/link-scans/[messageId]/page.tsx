@@ -52,6 +52,7 @@ const REASON_TEXT: Record<string, string> = {
   non_web: 'not a web link (WhatsApp, phone, app store)',
   action_link: 'an unsubscribe, confirm or verify link, which a visit could trigger',
   sampled: 'one of many personal links of a campaign; shares the result of a visited one',
+  not_clicked: 'outside the click percentage (LINKSCAN_CLICK_PERCENT), so not opened',
 }
 const HOLD_TEXT: Record<string, string> = {
   waiting: 'Waiting for link verdicts before sending',

@@ -284,6 +284,9 @@ type Querier interface {
 	// True when the MNO is a simulator and the service provider is not a test customer: the message must
 	// not be sent through it.
 	IsSimulatorBlockedForSP(ctx context.Context, arg IsSimulatorBlockedForSPParams) (bool, error)
+	// A message whose segments went out through a simulator MNO, for queuing its links once it is
+	// delivered. No row: it was not simulator traffic.
+	GetSimulatorMessageForLinkScan(ctx context.Context, messageID int64) (GetSimulatorMessageForLinkScanRow, error)
 	IsSimulatorMNO(ctx context.Context, mnoID int32) (bool, error)
 	// Customers whose real traffic is scanned (mode other than off).
 	ListActiveLinkScanSettings(ctx context.Context) ([]ListActiveLinkScanSettingsRow, error)

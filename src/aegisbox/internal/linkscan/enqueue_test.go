@@ -6,17 +6,25 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/thrillee/aegisbox/internal/database"
 )
 
 type fakeQ struct {
 	simulator bool
+	simMsg    *database.GetSimulatorMessageForLinkScanRow
 	visits    map[string]int32
 	jobs      []database.InsertLinkScanJobParams
 	records   []database.RecordMessageLinkExtractionParams
 }
 
 func (f *fakeQ) IsSimulatorMNO(context.Context, int32) (bool, error) { return f.simulator, nil }
+func (f *fakeQ) GetSimulatorMessageForLinkScan(context.Context, int64) (database.GetSimulatorMessageForLinkScanRow, error) {
+	if f.simMsg == nil {
+		return database.GetSimulatorMessageForLinkScanRow{}, pgx.ErrNoRows
+	}
+	return *f.simMsg, nil
+}
 func (f *fakeQ) CountRecentVisitsForGroup(_ context.Context, a database.CountRecentVisitsForGroupParams) (int32, error) {
 	return f.visits[a.GroupKey], nil
 }
@@ -35,7 +43,7 @@ func (f *fakeQ) RecordMessageLinkExtraction(_ context.Context, a database.Record
 	return nil
 }
 
-var defaultCfg = Config{Enabled: true, SkipOTP: true, SamplePerHour: 3}
+var defaultCfg = Config{Enabled: true, SkipOTP: true, SamplePerHour: 3, ClickPercent: 100}
 
 func TestEnqueuer_IgnoresRealMNOs(t *testing.T) {
 	q := &fakeQ{simulator: false}
@@ -71,7 +79,7 @@ func TestEnqueuer_Outcomes(t *testing.T) {
 	}
 
 	q = &fakeQ{simulator: true}
-	_ = NewEnqueuer(q, Config{Enabled: true, SamplePerHour: 3}).MessageSent(ctx, 1, 2, 3, "Your OTP is 123456 https://a.com")
+	_ = NewEnqueuer(q, Config{Enabled: true, SamplePerHour: 3, ClickPercent: 100}).MessageSent(ctx, 1, 2, 3, "Your OTP is 123456 https://a.com")
 	if len(q.jobs) != 1 {
 		t.Fatalf("with SkipOTP off the link must be queued, got %+v", q.jobs)
 	}
@@ -115,7 +123,7 @@ func TestEnqueuer_SamplesPersonalLinks(t *testing.T) {
 
 func TestEnqueuer_AlwaysVisitSkipsSampling(t *testing.T) {
 	q := &fakeQ{simulator: true}
-	e := NewEnqueuer(q, Config{Enabled: true, SamplePerHour: 3, AlwaysVisit: true})
+	e := NewEnqueuer(q, Config{Enabled: true, SamplePerHour: 3, AlwaysVisit: true, ClickPercent: 100})
 	tokens := []string{"a8F3kQ29xZ", "b8F3kQ29xZ", "c8F3kQ29xZ", "d8F3kQ29xZ", "e8F3kQ29xZ"}
 	for i, tok := range tokens {
 		_ = e.MessageSent(context.Background(), int64(i+1), 2, 3, "Hi https://promo.example.com/r/"+tok)
@@ -132,7 +140,7 @@ func TestEnqueuer_AlwaysVisitSkipsSampling(t *testing.T) {
 
 func TestEnqueuer_VisitDelay(t *testing.T) {
 	q := &fakeQ{simulator: true}
-	e := NewEnqueuer(q, Config{Enabled: true, SamplePerHour: 100, VisitDelayMin: 2 * time.Second, VisitDelayMax: 5 * time.Second})
+	e := NewEnqueuer(q, Config{Enabled: true, SamplePerHour: 100, ClickPercent: 100, VisitDelayMin: 2 * time.Second, VisitDelayMax: 5 * time.Second})
 	for i := 0; i < 50; i++ {
 		_ = e.MessageSent(context.Background(), int64(i+1), 2, 3, fmt.Sprintf("Hi https://site%d.example.com/x", i))
 	}
@@ -164,5 +172,90 @@ func TestEnqueuer_VisitDelaySkipsHeldAndNonVisit(t *testing.T) {
 	}
 	if d := NewEnqueuer(&fakeQ{}, Config{VisitDelayMin: 4 * time.Second, VisitDelayMax: 2 * time.Second}).visitDelay(ModeVisit, 0); d != 4*time.Second {
 		t.Fatalf("max below min should use min, got %v", d)
+	}
+}
+
+func TestEnqueuer_SimulatorWaitsForDelivery(t *testing.T) {
+	ctx := context.Background()
+	cfg := defaultCfg
+	cfg.SimulatorAfterDelivery = true
+	q := &fakeQ{simulator: true}
+	e := NewEnqueuer(q, cfg)
+	if err := e.MessageSent(ctx, 1, 2, 3, "https://a.com/x"); err != nil {
+		t.Fatal(err)
+	}
+	if len(q.jobs) != 0 || len(q.records) != 0 {
+		t.Fatalf("simulator links must wait for delivery: %+v %+v", q.jobs, q.records)
+	}
+
+	q.simMsg = &database.GetSimulatorMessageForLinkScanRow{ServiceProviderID: 2, ShortMessage: "https://a.com/x"}
+	if err := e.MessageDelivered(ctx, 1); err != nil {
+		t.Fatal(err)
+	}
+	if len(q.jobs) != 1 || q.jobs[0].ServiceProviderID != 2 || q.jobs[0].MessageID != 1 {
+		t.Fatalf("delivered simulator message should queue its link: %+v", q.jobs)
+	}
+}
+
+func TestEnqueuer_DeliveredIgnoresNonSimulator(t *testing.T) {
+	cfg := defaultCfg
+	cfg.SimulatorAfterDelivery = true
+	q := &fakeQ{} // no simulator row
+	if err := NewEnqueuer(q, cfg).MessageDelivered(context.Background(), 1); err != nil {
+		t.Fatal(err)
+	}
+	if len(q.jobs) != 0 || len(q.records) != 0 {
+		t.Fatalf("non-simulator delivery must do nothing: %+v", q.jobs)
+	}
+}
+
+func TestEnqueuer_DeliveredOffQueuesAtSend(t *testing.T) {
+	q := &fakeQ{simulator: true, simMsg: &database.GetSimulatorMessageForLinkScanRow{ServiceProviderID: 2, ShortMessage: "https://a.com/x"}}
+	e := NewEnqueuer(q, defaultCfg) // SimulatorAfterDelivery off
+	_ = e.MessageDelivered(context.Background(), 1)
+	if len(q.jobs) != 0 {
+		t.Fatal("with the setting off, delivery must not queue links")
+	}
+	_ = e.MessageSent(context.Background(), 1, 2, 3, "https://a.com/x")
+	if len(q.jobs) != 1 {
+		t.Fatalf("with the setting off, links are queued at send: %+v", q.jobs)
+	}
+}
+
+func TestEnqueuer_ClickPercent(t *testing.T) {
+	ctx := context.Background()
+	run := func(pct int) int {
+		cfg := defaultCfg
+		cfg.SimulatorAfterDelivery = true
+		cfg.AlwaysVisit = true
+		cfg.ClickPercent = pct
+		q := &fakeQ{simMsg: &database.GetSimulatorMessageForLinkScanRow{ServiceProviderID: 2, ShortMessage: "https://a.com/x"}}
+		e := NewEnqueuer(q, cfg)
+		for i := 0; i < 1000; i++ {
+			if err := e.MessageDelivered(ctx, int64(i)); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if len(q.records) != 1000 {
+			t.Fatalf("every delivered message must be recorded, got %d", len(q.records))
+		}
+		visits := 0
+		for _, j := range q.jobs {
+			if j.ScanMode == ModeVisit {
+				visits++
+			} else if j.ModeReason == nil || *j.ModeReason != ReasonNotClicked {
+				t.Fatalf("unclicked link should be a reputation check marked not_clicked: %+v", j)
+			}
+		}
+		return visits
+	}
+	if n := run(0); n != 0 {
+		t.Fatalf("0%% must open nothing, got %d", n)
+	}
+	if n := run(100); n != 1000 {
+		t.Fatalf("100%% must open every message, got %d", n)
+	}
+	if n := run(30); n < 220 || n > 380 {
+		t.Fatalf("30%% of 1000 should be near 300, got %d", n)
 	}
 }

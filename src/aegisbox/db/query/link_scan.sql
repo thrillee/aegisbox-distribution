@@ -140,3 +140,16 @@ SELECT COUNT(*)::INT AS queued,
        COALESCE(EXTRACT(EPOCH FROM NOW() - MIN(created_at)), 0)::INT AS oldest_seconds
 FROM link_scan_jobs
 WHERE status IN ('queued', 'processing');
+
+-- name: GetSimulatorMessageForLinkScan :one
+-- A message whose segments went out through a simulator MNO, for queuing its links once it is
+-- delivered. No row: it was not simulator traffic.
+SELECT m.service_provider_id, m.short_message
+FROM messages m
+WHERE m.id = sqlc.arg(message_id)
+  AND EXISTS (
+      SELECT 1 FROM message_segments ms
+      JOIN mno_connections c ON c.id = ms.mno_connection_id
+      JOIN mnos n ON n.id = c.mno_id
+      WHERE ms.message_id = m.id AND n.is_simulator
+  );

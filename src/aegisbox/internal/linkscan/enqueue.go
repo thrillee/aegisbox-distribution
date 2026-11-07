@@ -2,11 +2,13 @@ package linkscan
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"math/rand/v2"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/thrillee/aegisbox/internal/database"
 )
 
@@ -34,6 +36,25 @@ type Config struct {
 	// block, waiting for a verdict before sending) are never delayed. Both 0 means no delay.
 	VisitDelayMin time.Duration `envconfig:"LINKSCAN_VISIT_DELAY_MIN" default:"0s"`
 	VisitDelayMax time.Duration `envconfig:"LINKSCAN_VISIT_DELAY_MAX" default:"0s"`
+	// SimulatorAfterDelivery queues the links of simulator traffic only when the message gets a
+	// DELIVRD receipt, like a phone that received it, instead of as soon as it is sent. A message
+	// that gets no receipt or a failed one is never visited. Real traffic (Phase 2) is unchanged.
+	SimulatorAfterDelivery bool `envconfig:"LINKSCAN_SIMULATOR_AFTER_DELIVERY" default:"true"`
+	// ClickPercent is the share of simulator messages (0 to 100) whose links are opened, like a
+	// click rate, picked at random per message after the delivery check. The others still get
+	// reputation checks, without a visit. Real traffic (Phase 2) is not affected.
+	ClickPercent int `envconfig:"LINKSCAN_CLICK_PERCENT" default:"100"`
+}
+
+// clicked decides whether a simulator message is one of the ClickPercent that get opened.
+func (e *Enqueuer) clicked() bool {
+	switch {
+	case e.cfg.ClickPercent >= 100:
+		return true
+	case e.cfg.ClickPercent <= 0:
+		return false
+	}
+	return rand.IntN(100) < e.cfg.ClickPercent
 }
 
 // maxVisitDelay caps the random delay; a longer wait would only fill the queue.
@@ -54,6 +75,7 @@ func (e *Enqueuer) visitDelay(mode string, priority int16) time.Duration {
 // Querier is the part of database.Querier the enqueuer uses.
 type Querier interface {
 	IsSimulatorMNO(ctx context.Context, mnoID int32) (bool, error)
+	GetSimulatorMessageForLinkScan(ctx context.Context, messageID int64) (database.GetSimulatorMessageForLinkScanRow, error)
 	CountRecentVisitsForGroup(ctx context.Context, arg database.CountRecentVisitsForGroupParams) (int32, error)
 	InsertLinkScanJob(ctx context.Context, arg database.InsertLinkScanJobParams) error
 	RecordMessageLinkExtraction(ctx context.Context, arg database.RecordMessageLinkExtractionParams) error
@@ -91,13 +113,33 @@ func (e *Enqueuer) MessageSent(ctx context.Context, messageID int64, spID int32,
 	if err != nil {
 		return fmt.Errorf("check simulator MNO %d: %w", mnoID, err)
 	}
+	if isSim && e.cfg.SimulatorAfterDelivery {
+		return nil // queued by MessageDelivered when the receipt says DELIVRD
+	}
 	if !isSim {
 		// Real traffic is scanned after sending only for customers in monitor mode.
 		if s, ok := e.settings.Get(ctx, spID); !ok || s.Mode != ModeMonitor {
 			return nil
 		}
 	}
-	_, err = e.queue(ctx, messageID, spID, text, 0)
+	_, err = e.queue(ctx, messageID, spID, text, 0, !isSim || e.clicked())
+	return err
+}
+
+// MessageDelivered queues the links of a simulator message once its final receipt is DELIVRD
+// (with SimulatorAfterDelivery). It is called once per message; other messages are ignored.
+func (e *Enqueuer) MessageDelivered(ctx context.Context, messageID int64) error {
+	if e == nil || !e.cfg.Enabled || !e.cfg.SimulatorAfterDelivery {
+		return nil
+	}
+	m, err := e.q.GetSimulatorMessageForLinkScan(ctx, messageID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil // not simulator traffic
+	}
+	if err != nil {
+		return fmt.Errorf("load delivered message %d: %w", messageID, err)
+	}
+	_, err = e.queue(ctx, messageID, m.ServiceProviderID, m.ShortMessage, 0, e.clicked())
 	return err
 }
 
@@ -107,10 +149,12 @@ func (e *Enqueuer) HoldLinks(ctx context.Context, messageID int64, spID int32, t
 	if e == nil {
 		return 0, nil
 	}
-	return e.queue(ctx, messageID, spID, text, 1)
+	return e.queue(ctx, messageID, spID, text, 1, true)
 }
 
-func (e *Enqueuer) queue(ctx context.Context, messageID int64, spID int32, text string, priority int16) (int, error) {
+// queue records the message's links. click false turns would-be visits into reputation checks
+// (a message outside the click percentage still gets the free checks, its page is not opened).
+func (e *Enqueuer) queue(ctx context.Context, messageID int64, spID int32, text string, priority int16, click bool) (int, error) {
 	links := Extract(text)
 	outcome := OutcomeLinks
 	switch {
@@ -123,7 +167,7 @@ func (e *Enqueuer) queue(ctx context.Context, messageID int64, spID int32, text 
 	verdicts := 0
 	if outcome == OutcomeLinks {
 		for _, l := range links {
-			mode, err := e.insert(ctx, messageID, spID, l, priority)
+			mode, err := e.insert(ctx, messageID, spID, l, priority, click)
 			if err != nil {
 				return 0, err
 			}
@@ -148,8 +192,11 @@ func (e *Enqueuer) queue(ctx context.Context, messageID int64, spID int32, text 
 	return verdicts, nil
 }
 
-func (e *Enqueuer) insert(ctx context.Context, messageID int64, spID int32, l Link, priority int16) (string, error) {
+func (e *Enqueuer) insert(ctx context.Context, messageID int64, spID int32, l Link, priority int16, click bool) (string, error) {
 	mode, reason := l.Mode, l.Reason
+	if mode == ModeVisit && !click {
+		mode, reason = ModeReputation, ReasonNotClicked
+	}
 	if mode == ModeVisit && !e.cfg.AlwaysVisit {
 		visits, err := e.q.CountRecentVisitsForGroup(ctx, database.CountRecentVisitsForGroupParams{
 			ServiceProviderID: spID,

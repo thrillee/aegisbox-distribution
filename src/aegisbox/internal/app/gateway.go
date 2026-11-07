@@ -112,6 +112,8 @@ func RunGateway(ctx context.Context, cfg *config.Config) error {
 	linkEnqueuer := linkscan.NewEnqueuer(dbQueries, cfg.LinkScan)
 	linkEnqueuer.SetSettings(linkSettings)
 	defaultSender.SetLinkEnqueuer(linkEnqueuer)
+	// Simulator links are opened only after a DELIVRD receipt (LINKSCAN_SIMULATOR_AFTER_DELIVERY).
+	smsProcessor.SetDeliveredHook(linkEnqueuer)
 	smsProcessor.SetSender(defaultSender)
 	linkGate := linkscan.NewGate(dbQueries, linkSettings, linkEnqueuer, smsProcessor.LinkHoldRejecter())
 	smsProcessor.SetSendGate(linkGate)

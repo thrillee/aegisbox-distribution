@@ -23,7 +23,17 @@ type DLRService struct {
 	senderHealthTracker *SenderHealthTracker
 	routeHealthTracker  *RouteHealthTracker
 	batchHealthWorker   *BatchHealthWorker
+	onDelivered         DeliveredHook // optional: called once when a message is delivered
 }
+
+// DeliveredHook is told once when a message's final receipt is DELIVRD. The link scanner uses it
+// to open the links of simulator messages only when they were delivered.
+type DeliveredHook interface {
+	MessageDelivered(ctx context.Context, messageID int64) error
+}
+
+// SetDeliveredHook installs the hook called for delivered messages.
+func (s *DLRService) SetDeliveredHook(h DeliveredHook) { s.onDelivered = h }
 
 type DLRServiceDependencies struct {
 	DBQueries           database.Querier
@@ -244,6 +254,12 @@ func (s *DLRService) forwardFinalDLRIfComplete(ctx context.Context, messageID in
 		slog.ErrorContext(ctx, "Failed to enqueue DLR forwarding job to DB", slog.Any("error", err))
 	} else if n > 0 {
 		slog.InfoContext(ctx, "Queued final DLR for forwarding", slog.String("dlr_status", status))
+		// n > 0 only the first time, so a repeated receipt does not queue the links again.
+		if status == "DELIVRD" && s.onDelivered != nil {
+			if err := s.onDelivered.MessageDelivered(ctx, messageID); err != nil {
+				slog.ErrorContext(ctx, "Failed to queue delivered message links for scanning", slog.Any("error", err))
+			}
+		}
 	}
 }
 
