@@ -2,6 +2,7 @@
 'use strict';
 
 const { Guard, startProxy } = require('./guard');
+const { pick: pickProxy } = require('./proxies');
 const { randomProfile } = require('./devices');
 
 const MAX_NAVIGATIONS = 10;
@@ -176,8 +177,20 @@ async function scanUrl(browser, cfg, job) {
     errorKind: null, // dns, timeout, tls, blocked, http, redirect_loop, size_limit, other
     shortenerExpanded: false,
     blockedWrites: 0, // form submissions and other non GET requests the page tried
+    exitProxy: null, // exit proxy host:port, null when no upstream is configured in the pool
     durationMs: 0,
   };
+
+  // One exit per scan: the pool holds provider entries whose {session} placeholder makes the
+  // proxy hold a single IP for the whole page load, like one phone on one connection.
+  const exit = await pickProxy(cfg.proxyPool);
+  if (cfg.proxyPool && cfg.proxyPool.length && !exit) {
+    // Nothing reachable: a silent fallback would let the scan run from the server's address.
+    result.error = 'no exit proxy in the pool is reachable';
+    result.errorKind = 'other'; // it is a scanner setting problem, not a property of the page
+    return result;
+  }
+  result.exitProxy = exit ? `${exit.host}:${exit.port}` : null;
 
   let target = job.url;
   let u;
@@ -197,7 +210,7 @@ async function scanUrl(browser, cfg, job) {
   // Shorteners are left as they are: the browser follows the redirect exactly like a
   // person tapping the link would, and shortenerExpanded is set below from the hops.
 
-  const proxy = await startProxy(guard, { maxBytes: cfg.maxBytes });
+  const proxy = await startProxy(guard, { maxBytes: cfg.maxBytes, upstream: exit });
   let context;
   try {
     context = await browser.newContext({

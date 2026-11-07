@@ -40,6 +40,7 @@ a simulated route, they skip it and use the real routes.
 | `LINKSCAN_ENABLED` | `true` | starts the scan worker in aegisbox |
 | `LINKSCAN_BLOCK_IPS` | the server's public IP, e.g. `203.0.113.10` (comma separate several) | **required**: so a scanned page can never call the server itself. The scanner stays idle until it is set. On the server: `curl -4 ifconfig.me` |
 | `LINKSCAN_BLOCK_HOSTS` | optional extra host names to block | the **database host is blocked automatically** (aegisbox reads it from `DATABASE_URL`) |
+| `LINKSCAN_PROXY_POOL` | empty (scans leave from the server's own IP) | Exit proxies, comma separated, e.g. `http://user:pass_country-ng_session-{session}@geo.iproyal.com:12321`. Every scan picks a reachable entry and, when the entry contains `{session}`, gets a unique session id so the provider holds one IP for the whole page load — like one phone on one connection. If no entry is reachable the scan fails (it never silently falls back to the server's own IP). Country targeting (`_country-ng`) should match the Nigerian device profiles. |
 
 Optional: `LINKSCAN_MAX_CONCURRENCY` (default 2, pages open at once; keep the same value for both
 services), `LINKSCAN_MEMORY` (2g), `LINKSCAN_CPUS` (1.5), `LINKSCAN_SKIP_OTP` (true),

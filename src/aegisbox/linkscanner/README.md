@@ -20,14 +20,18 @@ aegisbox backend calls it, scores the result and stores it; this service has no 
 * GET only: form submissions and script POSTs are blocked. No WebSockets, WebRTC, service workers,
   QUIC, popups, dialogs, camera, microphone, location or notifications. Fresh context per URL,
   20 s per URL, 25 MB per scan, browser restarted every 50 scans.
-* Realistic per-scan browser profile (`src/devices.js`): a random mobile device (Playwright's
-  Android phones plus models common in West Africa) with a random browser user agent (mobile
-  Chrome, Samsung Internet, Edge, Opera, Brave, DuckDuckGo, Vivaldi, Kiwi), Chrome version capped
-  by the Android version, viewport, DPR, locale and time zone. No scanner identity in the user
-  agent. The link is opened with a real click: it is placed on a blank page and clicked with the
-  mouse, then the navigation is followed. Shortener links are expanded with a HEAD request in a
-  browser like user agent so the short link itself is not loaded in the browser.
-  One fixed IP (the server's own) still applies.
+* Realistic per-scan browser profile (`src/devices.js`): a random Nigerian mobile device (Tecno,
+  Infinix, itel, Samsung, Redmi, Nokia) with a random browser user agent (mobile Chrome, Samsung
+  Internet, Edge, Brave, Kiwi — versions paired like the real releases), viewport, DPR, locale
+  (`en-NG`/`yo-NG`/`ha-NG`) and `Africa/Lagos` time zone. No scanner identity in the user agent,
+  `navigator.webdriver` hidden, client hints consistent with the profile. The link is opened with
+  a real tap: it is placed on a blank page and tapped, then the navigation is followed (no HEAD
+  preflight; shorteners are simply followed like a phone does).
+* Exit IP (`src/proxies.js`): `LINKSCAN_PROXY_POOL` can hold provider entries such as
+  `http://user:pass_country-ng_session-{session}@geo.iproyal.com:12321`. Each scan picks a
+  reachable entry; `{session}` is replaced with a unique id per scan so the provider holds one
+  IP for the whole page load. Without a pool, scans leave from the server's own address; with an
+  unreachable pool the scan fails instead of silently falling back.
 * Container: non root (`pwuser`), read only root filesystem with a `/tmp` tmpfs, all capabilities
   dropped, `no-new-privileges`, memory and CPU limits, Chromium sandbox **on** via
   `seccomp-chromium.json` (Docker's default profile plus `clone`, `unshare`, `setns`, `chroot`).
@@ -42,6 +46,7 @@ aegisbox backend calls it, scores the result and stores it; this service has no 
 | `LINKSCAN_MAX_CONCURRENCY` | 2 | pages open at once |
 | `LINKSCAN_BLOCK_IPS` | (none: idle) | **required**: the server's public IP; comma separated IPs or CIDRs |
 | `LINKSCAN_BLOCK_HOSTS` | | comma separated host names to block |
+| `LINKSCAN_PROXY_POOL` | | comma separated exit proxy URLs; `{session}` is replaced per scan (see above) |
 | `LINKSCAN_TIMEOUT_MS` | 20000 | per URL |
 | `LINKSCAN_CHROMIUM_SANDBOX` | true | only for local tests as root |
 

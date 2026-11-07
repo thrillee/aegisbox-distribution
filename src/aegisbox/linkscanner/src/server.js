@@ -8,6 +8,7 @@ const crypto = require('node:crypto');
 const { chromium } = require('playwright');
 const { scanUrl } = require('./scan');
 const { Guard } = require('./guard');
+const { parsePool } = require('./proxies');
 
 function list(v) {
   return (v || '').split(',').map((s) => s.trim()).filter(Boolean);
@@ -30,6 +31,7 @@ function loadConfig(env = process.env) {
     maxScreenshotBytes: int(env.LINKSCAN_MAX_SCREENSHOT_BYTES, 1024 * 1024),
     blockIPs: list(env.LINKSCAN_BLOCK_IPS),
     blockHosts: list(env.LINKSCAN_BLOCK_HOSTS),
+    proxyPool: parsePool(list(env.LINKSCAN_PROXY_POOL)),
     sandbox: env.LINKSCAN_CHROMIUM_SANDBOX !== 'false',
   };
   if (cfg.token && cfg.token.length < 16) throw new Error('LINKSCAN_TOKEN must be at least 16 characters');

@@ -7,6 +7,7 @@
 const dns = require('node:dns').promises;
 const http = require('node:http');
 const net = require('node:net');
+const { authorization } = require('./proxies');
 
 // Ranges no scanned page may reach.
 const BLOCKED_V4 = [
@@ -173,9 +174,16 @@ class GuardError extends Error {
 /**
  * Starts a forward proxy on 127.0.0.1 for one scan. Handles CONNECT (HTTPS, WebSocket over TLS)
  * and plain HTTP requests; everything else is refused. Only GET and HEAD go out over plain HTTP.
- * @returns {Promise<{port: number, events: object, close: () => Promise<void>}>}
+ *
+ * When an upstream (an external proxy from the pool, see proxies.js) is given, connections are
+ * chained through it so the page is seen as coming from that exit IP instead of this server. The
+ * guard still resolves and vetts every host itself first: a host that resolves only to blocked or
+ * private addresses never reaches the upstream, and tunnels open with the exact verified address.
+ * @param {object[]} opts
+ * @param {number} [opts.maxBytes]
+ * @param {{host: string, port: number, username?: string, password?: string}|null} [opts.upstream]
  */
-async function startProxy(guard, { maxBytes = 25 * 1024 * 1024 } = {}) {
+async function startProxy(guard, { maxBytes = 25 * 1024 * 1024, upstream = null } = {}) {
   const events = { blocked: [], dnsErrors: [], bytes: 0, limitHit: false };
   const sockets = new Set();
 
@@ -218,12 +226,31 @@ async function startProxy(guard, { maxBytes = 25 * 1024 * 1024 } = {}) {
       req.socket.destroy();
       return;
     }
+    // Chained through an upstream proxy when one is set; the request keeps looking like it comes
+    // from the browser (our own hint headers were not sent to the upstream this way).
     const headers = { ...req.headers };
     delete headers['proxy-connection'];
     delete headers['proxy-authorization'];
     headers.host = target.host;
+    const originPort = port !== 80 ? `:${port}` : '';
+    // A browser sends a proxy an absolute URI, not the path alone.
+    const requestTarget = upstream
+      ? `http://${target.hostname}${originPort}${target.pathname}${target.search}`
+      : target.pathname + target.search;
+    if (upstream) {
+      const auth = authorization(upstream);
+      if (auth) headers['proxy-authorization'] = auth;
+    }
     const up = http.request(
-      { host: ip, port, method: req.method, path: target.pathname + target.search, headers, setHost: false, timeout: 20000 },
+      {
+        host: upstream ? upstream.host : ip,
+        port: upstream ? upstream.port : port,
+        method: req.method,
+        path: requestTarget,
+        headers,
+        setHost: false,
+        timeout: 20000,
+      },
       (upRes) => {
         res.writeHead(upRes.statusCode || 502, upRes.headers);
         upRes.on('data', (c) => count(c.length, () => { upRes.destroy(); res.destroy(); }));
@@ -254,19 +281,57 @@ async function startProxy(guard, { maxBytes = 25 * 1024 * 1024 } = {}) {
       client.end(`HTTP/1.1 ${e.kind === 'dns' ? '502 Bad Gateway' : '403 Forbidden'}\r\n\r\n`);
       return;
     }
-    const upstream = net.connect({ host: ip, port, timeout: 20000 });
-    sockets.add(upstream);
-    upstream.on('close', () => sockets.delete(upstream));
-    upstream.on('timeout', () => upstream.destroy());
-    upstream.on('error', () => client.destroy());
-    upstream.on('connect', () => {
-      client.write('HTTP/1.1 200 Connection Established\r\n\r\n');
-      if (head && head.length) upstream.write(head);
-      upstream.on('data', (c) => count(c.length, () => { upstream.destroy(); client.destroy(); }));
-      upstream.pipe(client);
-      client.pipe(upstream);
+    // A direct connection targets the verified address. When an upstream is set the tunnel is
+    // opened through it instead, with the verified address as the CONNECT target, the same way
+    // the browser's own request line is preserved. The guard never sees the tunnel payload
+    // (TLS), but only ever hands it an address it checked itself.
+    const out = net.connect({ host: upstream ? upstream.host : ip, port: upstream ? upstream.port : port, timeout: 20000 });
+    sockets.add(out);
+    out.on('close', () => sockets.delete(out));
+    out.on('timeout', () => out.destroy());
+    out.on('error', () => client.destroy());
+    out.on('connect', () => {
+      if (!upstream) {
+        client.write('HTTP/1.1 200 Connection Established\r\n\r\n');
+        if (head && head.length) out.write(head);
+        out.on('data', (c) => count(c.length, () => { out.destroy(); client.destroy(); }));
+        out.pipe(client);
+        client.pipe(out);
+        return;
+      }
+      const auth = authorization(upstream);
+      out.write(
+        `CONNECT ${ip}:${port} HTTP/1.1\r\n` +
+        `Host: ${ip}:${port}\r\n` +
+        (auth ? `Proxy-Authorization: ${auth}\r\n` : '') +
+        '\r\n',
+      );
+      let reply = '';
+      const handshake = (chunk) => {
+        reply += chunk.toString('latin1');
+        const end = reply.indexOf('\r\n\r\n');
+        if (end < 0) {
+          if (reply.length > 4096) { out.destroy(); client.destroy(); }
+          return;
+        }
+        out.removeListener('data', handshake);
+        if (!/^HTTP\/1\.[01] 200/.test(reply)) {
+          client.end('HTTP/1.1 502 Bad Gateway\r\n\r\n');
+          out.destroy();
+          return;
+        }
+        client.write('HTTP/1.1 200 Connection Established\r\n\r\n');
+        if (head && head.length) out.write(head);
+        // Bytes past the end of the handshake reply belong to the tunnel.
+        const rest = Buffer.from(reply.slice(end + 4), 'latin1');
+        if (rest.length) client.write(rest);
+        out.on('data', (c) => count(c.length, () => { out.destroy(); client.destroy(); }));
+        out.pipe(client);
+        client.pipe(out);
+      };
+      out.on('data', handshake);
     });
-    client.on('close', () => upstream.destroy());
+    client.on('close', () => out.destroy());
   });
   server.on('clientError', (_e, socket) => socket.destroy());
 

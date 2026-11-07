@@ -96,6 +96,9 @@ services:
       LINKSCAN_BLOCK_IPS: ${LINKSCAN_BLOCK_IPS:-}
       # Host names to block, for example the database host (aegisbox also sends the database host)
       LINKSCAN_BLOCK_HOSTS: ${LINKSCAN_BLOCK_HOSTS:-}
+      # Exit proxies, comma separated, so scans do not all come from the server's IP.
+      # {session} in the entry is replaced per scan with a unique id (sticky exit).
+      LINKSCAN_PROXY_POOL: ${LINKSCAN_PROXY_POOL:-}
       LINKSCAN_TIMEOUT_MS: ${LINKSCAN_TIMEOUT_MS:-20000}
     read_only: true
     tmpfs:
