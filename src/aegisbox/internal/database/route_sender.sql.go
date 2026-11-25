@@ -94,6 +94,38 @@ func (q *Queries) GetRouteSender(ctx context.Context, id int32) (RouteSender, er
 	return i, err
 }
 
+const getSenderNetworkOverride = `-- name: GetSenderNetworkOverride :one
+SELECT o.id, o.replacement_sender
+FROM sender_network_overrides o
+JOIN msisdn_prefix_entries pe ON pe.msisdn_prefix_group_id = o.msisdn_prefix_group_id
+WHERE o.service_provider_id = $1
+  AND o.status = 'active'
+  AND $2::TEXT LIKE pe.msisdn_prefix || '%'
+  AND (o.original_sender IS NULL OR UPPER(o.original_sender) = UPPER($3::TEXT))
+ORDER BY (o.original_sender IS NULL) ASC, LENGTH(pe.msisdn_prefix) DESC
+LIMIT 1
+`
+
+type GetSenderNetworkOverrideParams struct {
+	ServiceProviderID int32  `json:"serviceProviderId"`
+	Msisdn            string `json:"msisdn"`
+	OriginalSender    string `json:"originalSender"`
+}
+
+type GetSenderNetworkOverrideRow struct {
+	ID                int32  `json:"id"`
+	ReplacementSender string `json:"replacementSender"`
+}
+
+// The replacement sender for a provider's message to this number, if a rule matches. A rule for
+// the message's own sender wins over an any-sender rule, then the longest matching prefix.
+func (q *Queries) GetSenderNetworkOverride(ctx context.Context, arg GetSenderNetworkOverrideParams) (GetSenderNetworkOverrideRow, error) {
+	row := q.db.QueryRow(ctx, getSenderNetworkOverride, arg.ServiceProviderID, arg.Msisdn, arg.OriginalSender)
+	var i GetSenderNetworkOverrideRow
+	err := row.Scan(&i.ID, &i.ReplacementSender)
+	return i, err
+}
+
 const listRouteSenders = `-- name: ListRouteSenders :many
 SELECT id, mno_connection_id, sender_id_string, status, position, usage_count, last_used_at, created_at, updated_at FROM route_senders
 WHERE mno_connection_id = $1

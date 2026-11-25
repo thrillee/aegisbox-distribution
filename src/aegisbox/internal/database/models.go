@@ -527,6 +527,18 @@ type SenderIDHealth struct {
 	UpdatedAt     pgtype.Timestamptz `json:"updatedAt"`
 }
 
+type SenderNetworkOverride struct {
+	ID                  int32              `json:"id"`
+	ServiceProviderID   int32              `json:"serviceProviderId"`
+	MsisdnPrefixGroupID int32              `json:"msisdnPrefixGroupId"`
+	OriginalSender      *string            `json:"originalSender"`
+	ReplacementSender   string             `json:"replacementSender"`
+	Status              string             `json:"status"`
+	Comment             *string            `json:"comment"`
+	CreatedAt           pgtype.Timestamptz `json:"createdAt"`
+	UpdatedAt           pgtype.Timestamptz `json:"updatedAt"`
+}
+
 type ServiceProvider struct {
 	ID                        int32              `json:"id"`
 	Name                      string             `json:"name"`

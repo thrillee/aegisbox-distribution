@@ -19,6 +19,19 @@ type routeSenderMockQuerier struct {
 	pickedConnID  int32
 	sentSource    *string
 	validateCalls int
+
+	override      *database.GetSenderNetworkOverrideRow
+	overrideArg   database.GetSenderNetworkOverrideParams
+	overrideCalls int
+}
+
+func (m *routeSenderMockQuerier) GetSenderNetworkOverride(ctx context.Context, arg database.GetSenderNetworkOverrideParams) (database.GetSenderNetworkOverrideRow, error) {
+	m.overrideCalls++
+	m.overrideArg = arg
+	if m.override == nil {
+		return database.GetSenderNetworkOverrideRow{}, pgx.ErrNoRows
+	}
+	return *m.override, nil
 }
 
 func (m *routeSenderMockQuerier) UsesRouteSenderPool(ctx context.Context, id int32) (bool, error) {
@@ -138,4 +151,42 @@ func TestOrderAttempts(t *testing.T) {
 
 func (m *routeSenderMockQuerier) IsSimulatorBlockedForSP(context.Context, database.IsSimulatorBlockedForSPParams) (bool, error) {
 	return false, nil
+}
+
+func TestResolveSenderID_NetworkRuleReplacesSender(t *testing.T) {
+	q := &routeSenderMockQuerier{
+		usesPool: true, // a matching rule wins over the route pool
+		override: &database.GetSenderNetworkOverrideRow{ID: 3, ReplacementSender: "REVSMART"},
+		picked:   &database.PickRouteSenderRow{ID: 1, SenderIDString: "SONDER"},
+	}
+	s := &DefaultSender{dbQueries: q}
+	got, err := s.resolveSenderID(context.Background(), database.GetMessageDetailsForSendingRow{
+		ID: 5, ServiceProviderID: 7, OriginalSourceAddr: "SONDER", OriginalDestinationAddr: "+234 803 123 4567",
+	}, 9)
+	if err != nil || got != "REVSMART" {
+		t.Fatalf("expected REVSMART, got %q err=%v", got, err)
+	}
+	if q.overrideArg.Msisdn != "2348031234567" || q.overrideArg.ServiceProviderID != 7 || q.overrideArg.OriginalSender != "SONDER" {
+		t.Fatalf("unexpected rule lookup %+v", q.overrideArg)
+	}
+	if q.pickedConnID != 0 {
+		t.Fatalf("route pool should not be used when a network rule matches")
+	}
+	if q.sentSource == nil || *q.sentSource != "REVSMART" {
+		t.Fatalf("expected sent sender REVSMART to be recorded, got %v", q.sentSource)
+	}
+}
+
+func TestResolveSenderID_NetworkRuleSameSenderNotRecorded(t *testing.T) {
+	q := &routeSenderMockQuerier{override: &database.GetSenderNetworkOverrideRow{ID: 4, ReplacementSender: "SONDER"}}
+	s := &DefaultSender{dbQueries: q}
+	got, err := s.resolveSenderID(context.Background(), database.GetMessageDetailsForSendingRow{
+		ID: 6, OriginalSourceAddr: "SONDER", OriginalDestinationAddr: "2348051234567",
+	}, 9)
+	if err != nil || got != "SONDER" {
+		t.Fatalf("expected SONDER, got %q err=%v", got, err)
+	}
+	if q.sentSource != nil {
+		t.Fatalf("unchanged sender should not be recorded")
+	}
 }

@@ -69,3 +69,16 @@ SELECT use_route_sender_pool FROM service_providers WHERE id = $1 LIMIT 1;
 
 -- name: SetMessageSentSourceAddr :exec
 UPDATE messages SET sent_source_addr = $2 WHERE id = $1;
+
+-- name: GetSenderNetworkOverride :one
+-- The replacement sender for a provider's message to this number, if a rule matches. A rule for
+-- the message's own sender wins over an any-sender rule, then the longest matching prefix.
+SELECT o.id, o.replacement_sender
+FROM sender_network_overrides o
+JOIN msisdn_prefix_entries pe ON pe.msisdn_prefix_group_id = o.msisdn_prefix_group_id
+WHERE o.service_provider_id = sqlc.arg(service_provider_id)
+  AND o.status = 'active'
+  AND sqlc.arg(msisdn)::TEXT LIKE pe.msisdn_prefix || '%'
+  AND (o.original_sender IS NULL OR UPPER(o.original_sender) = UPPER(sqlc.arg(original_sender)::TEXT))
+ORDER BY (o.original_sender IS NULL) ASC, LENGTH(pe.msisdn_prefix) DESC
+LIMIT 1;
