@@ -4,6 +4,8 @@ import (
 	"context"
 	"testing"
 
+	"github.com/jackc/pgx/v5"
+
 	"github.com/thrillee/aegisbox/internal/database"
 	"github.com/thrillee/aegisbox/internal/mno"
 )
@@ -14,6 +16,10 @@ type segmentMockQuerier struct {
 
 	nextSegID  int64
 	sentRowIDs []int64
+}
+
+func (m *segmentMockQuerier) GetSenderNetworkOverride(ctx context.Context, arg database.GetSenderNetworkOverrideParams) (database.GetSenderNetworkOverrideRow, error) {
+	return database.GetSenderNetworkOverrideRow{}, pgx.ErrNoRows
 }
 
 func (m *segmentMockQuerier) UsesRouteSenderPool(ctx context.Context, id int32) (bool, error) {

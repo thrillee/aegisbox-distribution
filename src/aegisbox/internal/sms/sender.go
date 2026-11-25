@@ -252,9 +252,30 @@ func (s *DefaultSender) Send(ctx context.Context, msg database.GetMessageDetails
 	return &submitResult, nil // Return logical outcome
 }
 
-// resolveSenderID returns the sender to submit with on the given connection: the provider's own
-// sender, or for providers on the route sender pool, the next sender from that connection's pool.
+// resolveSenderID returns the sender to submit with on the given connection. A per network sender
+// rule for the destination wins (for example MTN numbers go out as REVSMART); otherwise it is the
+// provider's own sender, or for providers on the route sender pool, the next sender from that
+// connection's pool.
 func (s *DefaultSender) resolveSenderID(ctx context.Context, msg database.GetMessageDetailsForSendingRow, connID int32) (string, error) {
+	override, err := s.dbQueries.GetSenderNetworkOverride(ctx, database.GetSenderNetworkOverrideParams{
+		ServiceProviderID: msg.ServiceProviderID,
+		Msisdn:            NormalizeMSISDN(msg.OriginalDestinationAddr),
+		OriginalSender:    msg.OriginalSourceAddr,
+	})
+	switch {
+	case err == nil:
+		if override.ReplacementSender != msg.OriginalSourceAddr {
+			s.recordSentSender(ctx, msg.ID, override.ReplacementSender)
+		}
+		slog.InfoContext(ctx, "Using network sender rule",
+			slog.String("original_sender", msg.OriginalSourceAddr),
+			slog.String("network_sender", override.ReplacementSender),
+			slog.Int("rule_id", int(override.ID)))
+		return override.ReplacementSender, nil
+	case !errors.Is(err, pgx.ErrNoRows):
+		return "", fmt.Errorf("failed to check network sender rules for SP %d: %w", msg.ServiceProviderID, err)
+	}
+
 	usesPool, err := s.dbQueries.UsesRouteSenderPool(ctx, msg.ServiceProviderID)
 	if err != nil {
 		return "", fmt.Errorf("failed to check route sender pool for SP %d: %w", msg.ServiceProviderID, err)
@@ -271,18 +292,23 @@ func (s *DefaultSender) resolveSenderID(ctx context.Context, msg database.GetMes
 		return "", fmt.Errorf("failed to pick route sender for connection %d: %w", connID, err)
 	}
 
-	if err := s.dbQueries.SetMessageSentSourceAddr(ctx, database.SetMessageSentSourceAddrParams{
-		ID:             msg.ID,
-		SentSourceAddr: &picked.SenderIDString,
-	}); err != nil {
-		// The send can go ahead; only the record of which sender was used is missing.
-		slog.ErrorContext(ctx, "Failed to record route sender on message", slog.Any("error", err))
-	}
+	s.recordSentSender(ctx, msg.ID, picked.SenderIDString)
 	slog.InfoContext(ctx, "Using route pool sender",
 		slog.String("original_sender", msg.OriginalSourceAddr),
 		slog.String("route_sender", picked.SenderIDString),
 		slog.Int("route_sender_id", int(picked.ID)))
 	return picked.SenderIDString, nil
+}
+
+// recordSentSender stores the sender actually submitted when it differs from the provider's own.
+func (s *DefaultSender) recordSentSender(ctx context.Context, msgID int64, sender string) {
+	if err := s.dbQueries.SetMessageSentSourceAddr(ctx, database.SetMessageSentSourceAddrParams{
+		ID:             msgID,
+		SentSourceAddr: &sender,
+	}); err != nil {
+		// The send can go ahead; only the record of which sender was used is missing.
+		slog.ErrorContext(ctx, "Failed to record sent sender on message", slog.Any("error", err))
+	}
 }
 
 // Helper to check for unique violation errors (adapt based on actual pgx error type)

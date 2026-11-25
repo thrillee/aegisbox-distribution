@@ -261,6 +261,9 @@ type Querier interface {
 	GetSegmentStatusesForMessage(ctx context.Context, messageID int64) ([]GetSegmentStatusesForMessageRow, error)
 	// Get sender ID health for a specific MNO
 	GetSenderIdHealthForMNO(ctx context.Context, arg GetSenderIdHealthForMNOParams) (SenderIDHealth, error)
+	// The replacement sender for a provider's message to this number, if a rule matches. A rule for
+	// the message's own sender wins over an any-sender rule, then the longest matching prefix.
+	GetSenderNetworkOverride(ctx context.Context, arg GetSenderNetworkOverrideParams) (GetSenderNetworkOverrideRow, error)
 	GetServiceProviderByID(ctx context.Context, id int32) (ServiceProvider, error)
 	// For routing: whether the credential's customer is a test customer, and whether the destination
 	// is whitelisted for it (a whitelisted number gets real delivery instead of the simulator).
